@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Get Version
@@ -58,7 +58,7 @@ jobs:
             echo "IS_RELEASE=false" >> $GITHUB_ENV
           fi
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Set up go
         uses: actions/setup-go@v4
       - name: Set up CD tools
