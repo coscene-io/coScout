@@ -1,0 +1,30 @@
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: setup-go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.22.x
+          check-latest: true
+          cache: true
+      - name: Set up netrc
+        uses: extractions/netrc@v2
+        with:
+          machine: buf.build
+          username: ${{ secrets.BUF_USERNAME }}
+          password: ${{ secrets.BUF_TOKEN }}
+      - name: Set up github netrc
+        uses: extractions/netrc@v2
+        with:
+          machine: github.com
+          username: ${{ secrets.GH_PACKAGES_ORG_USERNAME }}
+          password: ${{ secrets.GH_PACKAGES_ORG_TOKEN }}
+      - name: ci
+        run: make ci
