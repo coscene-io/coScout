@@ -1,11 +1,10 @@
 name: Publish Public Cos Agent
 
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
   release:
-    types: [ published ]
+    types:
+      - released
+      - prereleased
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -40,7 +39,7 @@ jobs:
             os: darwin
     runs-on: ubuntu-latest
     environment: azure-dev-east-us
-    needs: [check]
+    needs: [ check ]
     permissions:
       contents: write
     steps:
@@ -91,24 +90,20 @@ jobs:
         run: gzip cos
       - name: Upload cos agent to oss
         uses: tvrcgo/oss-action@master
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
         with:
-          key-id: ${{ secrets.ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
+          key-id: ${{ secrets.ACK_ACCESS_KEY_ID }}
+          key-secret: ${{ secrets.ACK_ACCESS_KEY_SECRET }}
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
-            cos.gz:/cos-agent/versions/$VERSION/${{ matrix.os }}-${{ matrix.arch }}.gz
-            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/versions/$VERSION/${{ matrix.os }}-${{ matrix.arch }}.json
+            cos.gz:/cos-agent/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.json
       - name: Upload coscli release metadata files to oss
         if: env.IS_RELEASE == 'true'
         uses: tvrcgo/oss-action@master
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
         with:
-          key-id: ${{ secrets.ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
+          key-id: ${{ secrets.ACK_ACCESS_KEY_ID }}
+          key-secret: ${{ secrets.ACK_ACCESS_KEY_SECRET }}
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
@@ -117,11 +112,9 @@ jobs:
       - name: Upload coscli beta metadata files to oss
         if: env.IS_RELEASE == 'false'
         uses: tvrcgo/oss-action@master
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
         with:
-          key-id: ${{ secrets.ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
+          key-id: ${{ secrets.ACK_ACCESS_KEY_ID }}
+          key-secret: ${{ secrets.ACK_ACCESS_KEY_SECRET }}
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
