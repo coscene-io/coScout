@@ -1,0 +1,13 @@
+grpc:
+  port: 9001
+  address: 0.0.0.0:9001
+  reflection: true
+sentry:
+  enabled: false
+server:
+  matrix:
+    address: http://localhost:8080
+  dps:
+    address: http://localhost:6565
+  storage:
+    address: http://localhost:6566

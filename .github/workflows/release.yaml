@@ -1,0 +1,129 @@
+name: Publish Public Cos Agent
+
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  release:
+    types: [ published ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Get Version
+        id: get_version
+        run: |
+          echo $(git describe --always --tags --abbrev=8 --dirty)
+          echo "version=$(git describe --always --tags --abbrev=8 --dirty)" >> "$GITHUB_OUTPUT"
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
+  upload-cli-artifact-to-oss:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            os: linux
+          - arch: amd64
+            os: darwin
+          - arch: arm64
+            os: linux
+          - arch: arm64
+            os: darwin
+    runs-on: ubuntu-latest
+    environment: azure-dev-east-us
+    needs: [check]
+    permissions:
+      contents: write
+    steps:
+      - name: Check if version is semantic
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-((0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$'
+      - name: Check if version is release or beta
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
+            echo "IS_RELEASE=true" >> $GITHUB_ENV
+          else
+            echo "IS_RELEASE=false" >> $GITHUB_ENV
+          fi
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up go
+        uses: actions/setup-go@v4
+      - name: Set up CD tools
+        uses: coscene-io/setup-cd-tools@v2.0.1
+        env:
+          ACTIONS_ALLOW_UNSECURE_COMMANDS: "true"
+      - name: Set up buf netrc
+        uses: extractions/netrc@v1
+        with:
+          machine: buf.build
+          username: ${{ secrets.BUF_USERNAME }}
+          password: ${{ secrets.BUF_TOKEN }}
+      - name: Set up github netrc
+        uses: extractions/netrc@v1
+        with:
+          machine: github.com
+          username: ${{ secrets.GH_PACKAGES_ORG_USERNAME }}
+          password: ${{ secrets.GH_PACKAGES_ORG_TOKEN }}
+      - name: Install gzip
+        run: sudo apt-get update && sudo apt-get install -y gzip
+      - name: Build cos agent
+        run: |
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o cos cmd/cos-agent/main.go
+          chmod +x cos
+      - name: Build metadata files
+        run: |
+          SHA256SUM=$(sha256sum cos | awk '{print $1}' | xxd -r -p | base64) 
+          echo "{\"Version\": \"$VERSION\", \"Sha256\": \"$SHA256SUM\"}" > ${{ matrix.os }}-${{ matrix.arch }}.json
+      - name: gzip cos agent
+        run: gzip cos
+      - name: Upload cos agent to oss
+        uses: tvrcgo/oss-action@master
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        with:
+          key-id: ${{ secrets.ACCESS_KEY_ID }}
+          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
+          region: oss-cn-hangzhou
+          bucket: coscene-download
+          assets: |
+            cos.gz:/cos-agent/versions/$VERSION/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/versions/$VERSION/${{ matrix.os }}-${{ matrix.arch }}.json
+      - name: Upload coscli release metadata files to oss
+        if: env.IS_RELEASE == 'true'
+        uses: tvrcgo/oss-action@master
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        with:
+          key-id: ${{ secrets.ACCESS_KEY_ID }}
+          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
+          region: oss-cn-hangzhou
+          bucket: coscene-download
+          assets: |
+            cos.gz:/cos-agent/latest/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/latest/${{ matrix.os }}-${{ matrix.arch }}.json
+      - name: Upload coscli beta metadata files to oss
+        if: env.IS_RELEASE == 'false'
+        uses: tvrcgo/oss-action@master
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        with:
+          key-id: ${{ secrets.ACCESS_KEY_ID }}
+          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
+          region: oss-cn-hangzhou
+          bucket: coscene-download
+          assets: |
+            cos.gz:/cos-agent/beta/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/beta/${{ matrix.os }}-${{ matrix.arch }}.json
