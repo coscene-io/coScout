@@ -43,10 +43,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Check if version is semantic
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
-        run: echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-((0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$'
       - name: Check if version is release or beta
         env:
           VERSION: ${{ needs.check.outputs.version }}
