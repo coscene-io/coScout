@@ -79,6 +79,8 @@ jobs:
           CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o cos cmd/cos-agent/main.go
           chmod +x cos
       - name: Build metadata files
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           SHA256SUM=$(sha256sum cos | awk '{print $1}' | xxd -r -p | base64) 
           echo "{\"Version\": \"$VERSION\", \"Sha256\": \"$SHA256SUM\"}" > ${{ matrix.os }}-${{ matrix.arch }}.json
