@@ -60,7 +60,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Set up go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
       - name: Set up CD tools
         uses: coscene-io/setup-cd-tools@v2.0.1
         env:
