@@ -1,6 +1,7 @@
 package commands
 
 import (
+	cosagent "github.com/coscene-io/cos-agent"
 	"github.com/coscene-io/x/log"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,7 @@ func NewCommand() *cobra.Command {
 		PersistentPreRun: func(_ *cobra.Command, _ []string) {
 			log.SetLevelFormatter(logLevel, logJSON)
 		},
+		Version: cosagent.GetVersion(),
 	}
 
 	cmd.PersistentFlags().StringVarP(&cfgPath, "config-path", "c", "$HOME/.config/cos/config.yaml", "config path")
@@ -27,5 +29,6 @@ func NewCommand() *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&logJSON, "log-json", false, "set the json logging format")
 
 	cmd.AddCommand(NewVersionCommand())
+	cmd.AddCommand(NewDaemonCommand(&cfgPath))
 	return cmd
 }
