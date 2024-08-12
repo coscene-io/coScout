@@ -262,8 +262,8 @@ class DefaultMod(Mod):
             return
 
         self.start_task_handler(self._api_client, self.conf.upload_files)
-        if not self.conf.base_dirs or len(self.conf.base_dirs) == 0:
-            _log.info("Default Mod base dirs is empty, skip!")
+        if (not self.conf.base_dirs or len(self.conf.base_dirs) == 0) and not self.conf.base_dir:
+            _log.info("Default Mod base dirs/dir is empty, skip!")
             return
 
         # todo Find a better place to initialize FileStateHandler
