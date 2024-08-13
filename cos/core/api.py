@@ -14,13 +14,10 @@
 # limitations under the License.
 
 import logging
-import os
-import subprocess
 import sys
 import time
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
-from subprocess import run
 from typing import Dict, List
 
 import boto3
