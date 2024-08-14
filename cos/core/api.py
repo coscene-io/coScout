@@ -14,13 +14,10 @@
 # limitations under the License.
 
 import logging
-import os
-import subprocess
 import sys
 import time
 from abc import ABCMeta, abstractmethod
 from pathlib import Path
-from subprocess import run
 from typing import Dict, List
 
 import boto3
@@ -406,15 +403,8 @@ class ApiClient(metaclass=ABCMeta):
         # 3. check device status
         device_status = self.check_device_status(self.state.device["name"], self.state.exchange_code)
         if not device_status.get("exist", False):
-            _log.info(f"Device {serial_number} already deleted")
-            if os.name == "posix":
-                res = run(
-                    ["systemctl", "stop", "cos.service"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
-                _log.info("stop cos.service: " + res.stdout)
+            _log.info(f"Device {serial_number} already deleted, please re-register the device")
+            time.sleep(60 * 60)
             return False
         if device_status.get("authorizeState") == "REJECTED":
             _log.info(f"Device {serial_number} is rejected")
