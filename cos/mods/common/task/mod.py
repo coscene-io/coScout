@@ -35,6 +35,7 @@ class TaskModConfig(BaseModel):
     sn_file: str | None = ""
     sn_field: str | None = ""
     upload_files: list[str] = []
+    base_dirs: list[str] = []
 
 
 class TaskMod(Mod):
@@ -55,12 +56,9 @@ class TaskMod(Mod):
             _log.info("==> Task Mod disabled. skip check folder!")
             return
 
-        if not self.conf.upload_files or len(self.conf.upload_files) == 0:
-            _log.info("Task Mod upload files is not set, skip check folder!")
-            return
-
+        folders = self.conf.base_dirs + self.conf.upload_files
         _log.info("==> Task mod enabled, check upload tasks.")
-        TaskHandler(self._api_client, self.conf.upload_files).run()
+        TaskHandler(self._api_client, folders).run()
 
     def get_device(self):
         if not self.conf.sn_file:

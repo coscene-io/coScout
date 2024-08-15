@@ -97,3 +97,16 @@ def hardlink(target_path: Path, link_path: Path):
 
 def is_image(filename: str):
     return filename.endswith((".jpg", ".jpeg", ".png"))
+
+
+# check if the file path is existed and can be accessed
+def can_read_path(file_path: str) -> bool:
+    if not file_path:
+        return False
+    p = Path(file_path)
+    can_access = os.access(str(p.absolute()), os.R_OK)
+    if not can_access:
+        return False
+    if not p.exists():
+        return False
+    return True
