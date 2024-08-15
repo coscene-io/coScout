@@ -107,9 +107,7 @@ def load_mod(api_client: ApiClient | None, conf: AppConfig):
 
 @click.command
 @click.pass_obj
-@click.option("-v", "--verbose", is_flag=True, default=False)
-def daemon(ctx: Context, verbose):
-    logging.getLogger().setLevel(level=logging.DEBUG if verbose else logging.INFO)
+def daemon(ctx: Context):
     clean_old_binary()
     _log.info(f"Starting collector daemon with {get_version()}")
     run_forever(source=ctx.source, conf=ctx.conf, cos_url_handler=ctx.cos_url_handler)
