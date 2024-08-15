@@ -445,12 +445,12 @@ api:
   org_slug: $ORG_SLUG
 
 updater:
-  enabled: true
+  enabled: false
   artifact_base_url: $DEFAULT_BASE_URL
   binary_path: $COS_SHELL_BASE/bin/cos
 
 event_code:
-  enabled: true
+  enabled: false
   code_json_url: $DEFAULT_CODE_URL
 
 mod:
