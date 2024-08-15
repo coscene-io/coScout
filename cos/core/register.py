@@ -87,19 +87,19 @@ class Register:
         tags = api_state.device.get("tags", {})
         virmesh_tag = tags.get("virmesh_pubkey", None)
         if virmesh_tag:
-            _log.info("virmesh pubkey already exists, skipping")
+            _log.info("coConnect pubkey already exists, skipping")
             return
 
         pubkey = self._get_virmesh_key()
         if not pubkey:
-            _log.warning("virmesh pubkey not found, skipping")
+            _log.warning("coConnect pubkey not found, skipping")
             return
 
         new_tags = tags.copy()
         new_tags["virmesh_pubkey"] = pubkey
 
         self.api_client.update_device_tags(device["name"], new_tags)
-        _log.info("virmesh pubkey added for device %s", device["name"])
+        _log.info("coConnect pubkey added for device %s", device["name"])
 
         new_device = self.api_client.get_device(device["name"])
         api_state.device = new_device
@@ -109,13 +109,13 @@ class Register:
     def _get_virmesh_key(self) -> str:
         pubkey_file = Path("/etc/virmesh.pub")
         if not pubkey_file.exists():
-            _log.warning("virmesh pubkey file not found, skipping")
+            _log.warning("coConnect pubkey file not found, skipping")
             return ""
 
         with pubkey_file.open("r", encoding="utf8") as fp:
             pubkey = fp.read()
             pubkey = pubkey.removeprefix("virmesh").strip()
             if not pubkey:
-                _log.warning("virmesh pubkey is empty, skipping")
+                _log.warning("coConnect pubkey is empty, skipping")
                 return ""
             return pubkey

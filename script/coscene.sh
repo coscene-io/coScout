@@ -434,6 +434,11 @@ COS_SHELL_BASE="$CUR_USER_HOME/.local"
 COS_CONFIG_DIR="$CUR_USER_HOME/.config/cos"
 COS_STATE_DIR="$CUR_USER_HOME/.local/state/cos"
 sudo -u "$CUR_USER" mkdir -p "$COS_CONFIG_DIR" "$COS_STATE_DIR" "$COS_SHELL_BASE/bin"
+sudo -u "$CUR_USER" tee "${COS_STATE_DIR}/install.state.json" >/dev/null <<EOL
+{
+  "init_install": true
+}
+EOL
 
 # create config file
 echo "Creating config file..."

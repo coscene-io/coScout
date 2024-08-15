@@ -381,7 +381,7 @@ class ApiClient(metaclass=ABCMeta):
 
         # 1. check if the api key is expiring (Re-auth a day before the token expires)
         dues_at = self.state.api_key_expires_at - 24 * 60 * 60
-        if self.state.api_key and dues_at > int(time.time()):
+        if self.state.api_key and dues_at > int(time.time()) and not self.install_state.init_install:
             # The device is authorized and the api key is not expiring
             return True
 
