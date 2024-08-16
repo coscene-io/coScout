@@ -1028,4 +1028,25 @@ class RestApiClient(ApiClient):
         except RequestException as e:
             six.raise_from(CosException("Add the task tag failed"), e)
 
+    def sync_task(self, task_name: str) -> None:
+        url = "{api_base}/dataplatform/v1alpha2/{task_name}:sync".format(
+            api_base=self.api_base,
+            task_name=task_name,
+        )
+
+        try:
+            response = requests.post(
+                url=url,
+                headers=self.request_headers,
+                auth=self.basic_auth,
+                timeout=10,
+            )
+            if response.status_code == 401:
+                raise Unauthorized("Unauthorized")
+            response.raise_for_status()
+
+            _log.info("==> Sync the task succeed {task_name}".format(task_name=task_name))
+        except RequestException as e:
+            six.raise_from(CosException("Sync the task failed"), e)
+
     # endregion

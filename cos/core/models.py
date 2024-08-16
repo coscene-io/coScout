@@ -137,6 +137,7 @@ class Task(BaseModel):
     description: str = ""
     record_name: str = ""
     assignee: str | None = None
+    sync_task: bool = False
 
 
 class Moment(BaseModel):
@@ -173,7 +174,7 @@ class RecordCache(BaseState):
     record: dict = {}
     moments: List[Moment] = []
 
-    # task
+    # upload task
     task: dict = {}
 
     # the original files (might be copied from file_infos)

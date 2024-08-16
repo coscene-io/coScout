@@ -623,3 +623,14 @@ class GrpcClient(ApiClient):
             if UNAUTHENTICATED == rpc_error.code():
                 raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to put task tags")
+
+    def sync_task(self, task_name: str) -> None:
+        try:
+            req = task_pb2.SyncTaskRequest(name=task_name)
+            stub = task_pb2_grpc.TaskServiceStub(self._channel)
+            stub.SyncTask(req, timeout=10)
+        except grpc.RpcError as rpc_error:
+            _log.error("sync task failure: %s", rpc_error)
+            if UNAUTHENTICATED == rpc_error.code():
+                raise Unauthorized("Unauthorized")
+            raise RuntimeError("Failed to sync task")
