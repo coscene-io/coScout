@@ -19,6 +19,7 @@ from pathlib import Path
 
 from cos.core.api import ApiClient
 from cos.core.models import FileInfo, RecordCache
+from cos.utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
 
@@ -50,13 +51,17 @@ class TaskHandler:
             _log.warning("Task name not found, skipping")
             return
 
+        task_folders = task.get("uploadTaskDetail", {}).get("scanFolders", [])
+        scan_folders = list(set(task_folders + self._upload_files))
         self._api.update_task_state(task_name, "PROCESSING")
         files = []
-        for file in self._upload_files:
+        for file in scan_folders:
             file_path = Path(file)
-            if not file_path.exists():
-                _log.warning(f"File {file_path} not found, skipping")
+            can_read = can_read_path(str(file_path.absolute()))
+            if not can_read:
+                _log.warning(f"File {file_path} is not existed or readable, skipping")
                 continue
+
             if file_path.is_dir():
                 files += self._resolve_dir(file_path, start_time, end_time)
             elif file_path.is_file():
@@ -74,7 +79,6 @@ class TaskHandler:
         project_name = task_name.split("/tasks/")[0]
         rc = RecordCache(
             project_name=project_name,
-            event_code=task_name.split("/")[-1],
             timestamp=int(time.time() * 1000),
             labels=[],
             task={
