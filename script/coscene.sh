@@ -72,27 +72,27 @@ MOD="default"
 SN_FILE=""
 SN_FIELD=""
 
-VIRMESH_ENDPOINT=""
+COLINK_ENDPOINT=""
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
-VIRMESH_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
+COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz
 
 help() {
   cat <<EOF
 usage: $0 [OPTIONS]
 
-    --help               Show this message
-    --server_url         Api server url, e.g. https://openapi.coscene.cn
-    --project_slug       The slug of the project to upload to
-    --org_slug           The slug of the organization device belongs to, project_slug or org_slug should be provided
-    --beta               Use beta version for cos
-    --use_local          Use local binary file zip path e.g. /xx/path/xx.zip
-    --disable_service    Disable systemd or upstart service installation
-    --mod                Select the mod to install - gs, agi, task, default (default is 'default')
-    --virmesh_endpoint   Virmesh endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
-    --sn_file            The file path of the serial number file, will skip if not provided
-    --sn_field           The field name of the serial number, should be provided with sn_file, unique field to identify the device
-    --remove_config      Remove all config files, current device will be treated as a new device.
+    --help                  Show this message
+    --server_url            Api server url, e.g. https://openapi.coscene.cn
+    --project_slug          The slug of the project to upload to
+    --org_slug              The slug of the organization device belongs to, project_slug or org_slug should be provided
+    --beta                  Use beta version for cos
+    --use_local             Use local binary file zip path e.g. /xx/path/xx.zip
+    --disable_service       Disable systemd or upstart service installation
+    --mod                   Select the mod to install - gs, agi, task, default (default is 'default')
+    --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
+    --sn_file               The file path of the serial number file, will skip if not provided
+    --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
+    --remove_config         Remove all config files, current device will be treated as a new device.
 EOF
 }
 
@@ -173,8 +173,8 @@ while test $# -gt 0; do
       exit 1
     fi
     ;;
-  --virmesh_endpoint=*)
-    VIRMESH_ENDPOINT="${1#*=}"
+  --coLink_endpoint=*)
+    COLINK_ENDPOINT="${1#*=}"
     shift
     ;;
   --sn_file=*)
@@ -216,7 +216,7 @@ get_user_input SERVER_URL "please input server_url: " "${SERVER_URL}"
 echo "server_url is ${SERVER_URL}"
 echo "org_slug is ${ORG_SLUG}"
 echo "project_slug is ${PROJECT_SLUG}"
-echo "virmesh_endpoint is ${VIRMESH_ENDPOINT}"
+echo "coLink_endpoint is ${COLINK_ENDPOINT}"
 echo "sn_file is ${SN_FILE}"
 echo "sn_field is ${SN_FIELD}"
 
@@ -279,25 +279,25 @@ if [[ -n $USE_LOCAL ]]; then
   tar -xzf "$USE_LOCAL" -C "$TEMP_DIR/cos_binaries" || error_exit "Failed to extract $USE_LOCAL"
 fi
 
-echo "Start install virmesh..."
+echo "Start install coLink..."
 format() {
   local input=$1
   echo "${input//[\"|.]/}"
 }
 
-# check old virmesh binary
-if [ -e /usr/local/bin/virmesh ]; then
+# check old coLink binary
+if [ -e /usr/local/bin/coLink ]; then
   echo "Previously installed version:"
-  /usr/local/bin/virmesh -V
+  /usr/local/bin/coLink -V
 fi
 
-if [[ -z $VIRMESH_ENDPOINT ]]; then
-  echo "Virmesh endpoint is empty, skip virmesh installation."
+if [[ -z $COLINK_ENDPOINT ]]; then
+  echo "coLink endpoint is empty, skip coLink installation."
 else
   VERSION_ID=$(format "$(awk -F= '$1=="VERSION_ID" { print $2 ;}' /etc/os-release)")
   SYSTEM_NAME=$(format "$(awk -F= '$1=="NAME" { print $2 ;}' /etc/os-release)")
   VERIFY_CERT=1
-  echo "Downloading new virmesh binary..."
+  echo "Downloading new coLink binary..."
   if [[ -z $USE_LOCAL && $SYSTEM_NAME = "Ubuntu" && $VERSION_ID -le 1606 ]]; then
     read -r -p "Your system version is outdated and does not have the latest root certificate. You may need to bypass the certificate verification process. Do you want to proceed? 你的操作系统版本太低，没有最新的根证书，需要忽略证书验证吗？ [Y/N]" anwser
     case $anwser in
@@ -309,16 +309,16 @@ else
   fi
 
   if [[ -n $USE_LOCAL ]]; then
-    mv -f "$TEMP_DIR/cos_binaries/virmesh/virmesh-${MESH_ARCH}" "$TEMP_DIR"/virmesh
+    mv -f "$TEMP_DIR/cos_binaries/virmesh/virmesh-${MESH_ARCH}" "$TEMP_DIR"/coLink
   else
-    download_file "$TEMP_DIR"/virmesh $VIRMESH_DOWNLOAD_URL $VERIFY_CERT
+    download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $VERIFY_CERT
   fi
 
-  chmod +x "$TEMP_DIR"/virmesh
-  echo "Installed new virmesh version:"
-  "$TEMP_DIR"/virmesh -V
+  chmod +x "$TEMP_DIR"/coLink
+  echo "Installed new coLink version:"
+  "$TEMP_DIR"/coLink -V
 
-  sudo mv -f "$TEMP_DIR"/virmesh /usr/local/bin/virmesh
+  sudo mv -f "$TEMP_DIR"/coLink /usr/local/bin/coLink
 
   echo "Downloading new trzsz binary..."
   if [[ -n $USE_LOCAL ]]; then
@@ -338,28 +338,30 @@ else
   if [[ $DISABLE_SERVICE -eq 0 ]]; then
     if [[ "$(ps --no-headers -o comm 1 2>&1)" == "systemd" ]] && command -v systemctl 2>&1; then
       echo "Installing systemd service..."
-      sudo tee /etc/systemd/system/virmesh.service >/dev/null <<EOF
+      sudo tee /etc/systemd/system/coLink.service >/dev/null <<EOF
 
 [Unit]
-Description=Virmesh Client Daemon
+Description=coLink Client Daemon
 
 [Service]
 WorkingDirectory=/etc
-ExecStart=/usr/local/bin/virmesh --endpoint $VIRMESH_ENDPOINT --allow-ssh
+ExecStart=/usr/local/bin/coLink --endpoint $COLINK_ENDPOINT --allow-ssh
 
 [Install]
 WantedBy=multi-user.target
 EOF
       sudo systemctl daemon-reload
 
-      echo "Starting virmesh service..."
-      sudo systemctl is-active --quiet virmesh && sudo systemctl stop virmesh
-      sudo systemctl enable virmesh
-      sudo systemctl start virmesh
+      echo "Starting coLink service..."
+      sudo systemctl is-active --quiet virmesh && sudo systemctl stop virmesh && sudo systemctl disable virmesh && sudo rm -f /etc/systemd/system/virmesh.service
+      sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink
+      sudo systemctl enable coLink
+      sudo systemctl start coLink
+      echo "Start coLink service done."
     elif /sbin/init --version 2>&1 | grep -q upstart; then
       echo "Installing upstart service..."
-      sudo tee /etc/init/virmesh.conf >/dev/null <<EOF
-description "Virmesh Client Daemon"
+      sudo tee /etc/init/coLink.conf >/dev/null <<EOF
+description "coLink Client Daemon"
 
 # Start the service when networking is up
 start on started networking
@@ -376,16 +378,16 @@ respawn limit 4 30
 # Consider exit code 0 as normal and not trigger a respawn
 normal exit 0
 
-env VIRMESH_ENDPOINT=$VIRMESH_ENDPOINT
+env COLINK_ENDPOINT=$COLINK_ENDPOINT
 script
     # Change to the appropriate working directory
     cd /etc
     # Start the daemon
-    exec /usr/local/bin/virmesh --endpoint $VIRMESH_ENDPOINT --allow-ssh
+    exec /usr/local/bin/coLink --endpoint $COLINK_ENDPOINT --allow-ssh
 end script
 EOF
 
-      SERVICE_NAME="virmesh"
+      SERVICE_NAME="coLink"
       STATUS_OUTPUT=$(sudo initctl status "$SERVICE_NAME")
       if echo "$STATUS_OUTPUT" | grep -q "start/running"; then
         echo "$SERVICE_NAME is running. Stopping it now..."
@@ -397,9 +399,9 @@ EOF
       sudo initctl start $SERVICE_NAME
     fi
   else
-    echo "Skipping systemd or upstart service installation, just install virmesh binary..."
+    echo "Skipping systemd or upstart service installation, just install coLink binary..."
   fi
-  echo "Successfully installed virmesh."
+  echo "Successfully installed coLink."
 fi
 
 echo "Start install cos..."
@@ -432,6 +434,11 @@ COS_SHELL_BASE="$CUR_USER_HOME/.local"
 COS_CONFIG_DIR="$CUR_USER_HOME/.config/cos"
 COS_STATE_DIR="$CUR_USER_HOME/.local/state/cos"
 sudo -u "$CUR_USER" mkdir -p "$COS_CONFIG_DIR" "$COS_STATE_DIR" "$COS_SHELL_BASE/bin"
+sudo -u "$CUR_USER" tee "${COS_STATE_DIR}/install.state.json" >/dev/null <<EOL
+{
+  "init_install": true
+}
+EOL
 
 # create config file
 echo "Creating config file..."
@@ -443,12 +450,12 @@ api:
   org_slug: $ORG_SLUG
 
 updater:
-  enabled: true
+  enabled: false
   artifact_base_url: $DEFAULT_BASE_URL
   binary_path: $COS_SHELL_BASE/bin/cos
 
 event_code:
-  enabled: true
+  enabled: false
   code_json_url: $DEFAULT_CODE_URL
 
 mod:
@@ -475,14 +482,22 @@ echo "Created config file: ${COS_CONFIG_DIR}/config.yaml"
 # endregion
 
 check_binary() {
+  cmd="$COS_SHELL_BASE/bin/${1}"
+  if [[ ! -e "$cmd" ]]; then
+    echo "$cmd not found, skip check."
+    return 0
+  fi
+
   echo -n "  - Checking ${1} executable ... "
+
   local output
-  if ! output=$("$COS_SHELL_BASE"/bin/"${1}" --version 2>&1); then
+  if ! output=$("$cmd" --version 2>&1); then
     echo "Error: $output"
   else
     echo "$output"
     return 0
   fi
+
   return 1
 }
 

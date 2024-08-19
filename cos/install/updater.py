@@ -149,13 +149,14 @@ class Updater:
             else:
                 p.unlink()
 
-    def run(self):
-        if not self.conf.enabled:
-            _log.debug("updater is disabled")
-            return
-        if self.conf.interval_in_secs + self.state.last_update_time > time.time():
-            _log.debug("updater is not due yet")
-            return
+    def run(self, skip=False):
+        if not skip:
+            if not self.conf.enabled:
+                _log.debug("updater is disabled")
+                return
+            if self.conf.interval_in_secs + self.state.last_update_time > time.time():
+                _log.debug("updater is not due yet")
+                return
         try:
             # update last_update_time on latest version check and on successful upgrade
             remote_version, update_success = self._check_upgrade()
@@ -182,7 +183,7 @@ class Updater:
 
             _log.info("updating binary")
             self._update_binary(Path(target_bin))
-            _log.info("upgrade completed, exiting")
+            _log.info("update cos to new version completed, exiting")
 
             self.state.last_update_time = time.time()
             self.state.save_state()
