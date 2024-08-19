@@ -16,7 +16,6 @@ import shutil
 import time
 from functools import partial
 from pathlib import Path
-from typing import Callable
 
 import pygtail
 from pydantic import BaseModel

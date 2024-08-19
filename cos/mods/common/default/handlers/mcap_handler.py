@@ -16,7 +16,6 @@ import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Callable
 
 from mcap.decoder import DecoderFactory
 from mcap.reader import make_reader
@@ -52,11 +51,7 @@ class McapHandler(BaseModel, HandlerInterface):
 
             start_time = reader.get_summary().statistics.message_start_time // 1_000_000_000
             end_time = reader.get_summary().statistics.message_end_time // 1_000_000_000
-            return {
-                "size": file_path.stat().st_size,
-                "start_time": start_time,
-                "end_time": end_time
-            }
+            return {"size": file_path.stat().st_size, "start_time": start_time, "end_time": end_time}
 
     def msg_iterator(self, file_path: Path):
         with file_path.open("rb") as f:

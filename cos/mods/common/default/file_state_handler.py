@@ -158,10 +158,7 @@ class FileStateHandler:
                         # If the file is in a newly added directory, mark it as processed
                         if src_dir in new_src_dirs_set - self.src_dirs:
                             state_to_set["processed"] = True
-                        self.__set_file_state(
-                            entry,
-                            state_to_set
-                        )
+                        self.__set_file_state(entry, state_to_set)
                     except Exception as e:
                         _log.error(f"Failed to update file state for {entry}, error: {e}")
                         self.__set_file_state(

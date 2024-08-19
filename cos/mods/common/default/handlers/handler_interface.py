@@ -15,7 +15,6 @@
 from abc import ABC, abstractmethod
 from functools import partial
 from pathlib import Path
-from typing import Callable
 
 from cos.core.api import ApiClient
 from cos.mods.common.default.rule_executor import RuleExecutor

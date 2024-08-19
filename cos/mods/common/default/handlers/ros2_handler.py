@@ -14,7 +14,6 @@
 
 import logging
 from pathlib import Path
-from typing import Callable
 
 from pydantic import BaseModel
 from rosbags.rosbag2 import Reader as Ros2Reader
