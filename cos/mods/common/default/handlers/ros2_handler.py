@@ -60,20 +60,17 @@ class Ros2Handler(BaseModel, HandlerInterface):
                 contains_db3 = True
         return contains_db3 and contains_metadata
 
-    def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):
+    def compute_path_state(self, file_path: Path):
         dir_size = self.__compute_ros2_dir_size(file_path)
         with Ros2Reader(file_path) as reader:
             start_time = reader.start_time // 1_000_000_000
             end_time = reader.end_time // 1_000_000_000
-            update_func(
-                file_path,
-                {
-                    "size": dir_size,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "is_dir": True,
-                },
-            )
+            return {
+                "size": dir_size,
+                "start_time": start_time,
+                "end_time": end_time,
+                "is_dir": True,
+            }
 
     def get_file_size(self, file_path: Path) -> int:
         return self.__compute_ros2_dir_size(file_path)

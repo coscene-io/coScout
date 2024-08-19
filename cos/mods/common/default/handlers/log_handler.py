@@ -47,7 +47,7 @@ class LogHandler(BaseModel, HandlerInterface):
     def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and file_path.name.endswith(".log")
 
-    def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):
+    def compute_path_state(self, file_path: Path):
         start_time = get_start_timestamp(file_path)
         if start_time is None:
             raise Exception(f"Failed to get start timestamp for log file: {file_path}.")
@@ -56,14 +56,11 @@ class LogHandler(BaseModel, HandlerInterface):
         if end_time is None:
             raise Exception(f"Failed to get end timestamp for log file: {file_path}.")
 
-        update_func(
-            file_path,
-            {
-                "size": file_path.stat().st_size,
-                "start_time": start_time,
-                "end_time": end_time,
-            },
-        )
+        return {
+            "size": file_path.stat().st_size,
+            "start_time": start_time,
+            "end_time": end_time,
+        }
 
     def msg_iterator(self, file_path: Path):
         _log.warning("==> This method is not supported for log handler")

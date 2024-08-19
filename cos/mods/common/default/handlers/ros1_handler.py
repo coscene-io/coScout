@@ -38,18 +38,15 @@ class Ros1Handler(BaseModel, HandlerInterface):
     def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and (file_path.name.endswith(".bag") or file_path.name.endswith(".bag.active"))
 
-    def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):
+    def compute_path_state(self, file_path: Path):
         with Ros1Reader(file_path) as reader:
             start_time = reader.start_time // 1_000_000_000
             end_time = reader.end_time // 1_000_000_000
-            update_func(
-                file_path,
-                {
-                    "size": file_path.stat().st_size,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                },
-            )
+            return {
+                "size": file_path.stat().st_size,
+                "start_time": start_time,
+                "end_time": end_time,
+            }
 
     @staticmethod
     def __normalize_msgtype(msgtype: str) -> str:

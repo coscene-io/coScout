@@ -44,7 +44,7 @@ class McapHandler(BaseModel, HandlerInterface):
     def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and file_path.name.endswith(".mcap")
 
-    def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):
+    def compute_path_state(self, file_path: Path):
         with file_path.open("rb") as f:
             reader = make_reader(f)
             if reader.get_summary() is None:
@@ -52,14 +52,11 @@ class McapHandler(BaseModel, HandlerInterface):
 
             start_time = reader.get_summary().statistics.message_start_time // 1_000_000_000
             end_time = reader.get_summary().statistics.message_end_time // 1_000_000_000
-            update_func(
-                file_path,
-                {
-                    "size": file_path.stat().st_size,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                },
-            )
+            return {
+                "size": file_path.stat().st_size,
+                "start_time": start_time,
+                "end_time": end_time
+            }
 
     def msg_iterator(self, file_path: Path):
         with file_path.open("rb") as f:

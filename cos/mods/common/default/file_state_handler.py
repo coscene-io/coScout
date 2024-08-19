@@ -34,7 +34,6 @@ class FileStateHandler:
     Note that end time might be nil to indicate that the file is still active.
     Also note that currently we only track .log .mcap files, and we assume that
     only .mcap files might be static.
-    Known limitations: does not work well with deleting files.
     E.g.:
     {
         "test.log": {
@@ -132,8 +131,8 @@ class FileStateHandler:
 
         # Delete the state of files in the directories that are no longer scanned
         for src_dir in self.src_dirs - new_src_dirs_set:
-            for filename in self.state.keys():
-                if Path(filename).is_relative_to(src_dir):
+            for filename in list(self.state.keys()):
+                if Path(filename).parent == src_dir:
                     self.__del_file_state(Path(filename))
 
         # Skip directories that user have no read access or do not exist
@@ -150,10 +149,19 @@ class FileStateHandler:
                     # Skip if file state is already up-to-date
                     file_state = self.get_file_state(entry)
                     if file_state and file_state.get("size") == handler.get_file_size(entry):
+                        if src_dir in new_src_dirs_set - self.src_dirs:
+                            self.__update_file_state(entry, "processed", True)
                         continue
 
                     try:
-                        handler.update_path_state(entry, self.__set_file_state)
+                        state_to_set = handler.compute_path_state(entry)
+                        # If the file is in a newly added directory, mark it as processed
+                        if src_dir in new_src_dirs_set - self.src_dirs:
+                            state_to_set["processed"] = True
+                        self.__set_file_state(
+                            entry,
+                            state_to_set
+                        )
                     except Exception as e:
                         _log.error(f"Failed to update file state for {entry}, error: {e}")
                         self.__set_file_state(
@@ -173,12 +181,6 @@ class FileStateHandler:
                             "unsupported": True,
                         },
                     )
-
-        # Mark all files in the newly scanned directories as processed
-        for src_dir in new_src_dirs_set - self.src_dirs:
-            for filename in self.state.keys():
-                if Path(filename).is_relative_to(src_dir):
-                    self.__update_file_state(Path(filename), "processed", True)
 
         self.src_dirs = new_src_dirs_set
         self.__update_deleted_file_state()

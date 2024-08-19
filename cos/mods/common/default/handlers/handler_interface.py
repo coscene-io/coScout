@@ -38,8 +38,8 @@ class HandlerInterface(ABC):
         pass
 
     @abstractmethod
-    def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):
-        """Update the path state"""
+    def compute_path_state(self, file_path: Path):
+        """compute the path state"""
         pass
 
     def get_file_size(self, file_path: Path) -> int:

@@ -274,14 +274,13 @@ class DefaultMod(Mod):
         if self.conf.base_dir:
             base_dir = Path(self.conf.base_dir).absolute()
             base_dirs_set.add(base_dir)
-        base_dirs = list(base_dirs_set)
         self.file_state_handler.update_dirs(base_dirs_set)
 
         state_dir = DEFAULT_MOD_STATE_DIR
         state_dir.mkdir(parents=True, exist_ok=True)
         temp_dir = DEFAULT_MOD_TEMP_DIR
         temp_dir.mkdir(parents=True, exist_ok=True)
-        self.start_log_listener(base_dirs, state_dir)
+        self.start_log_listener(state_dir)
 
         # handle waiting to upload files
         self.__handle_unprocessed_files(state_dir)
@@ -298,7 +297,7 @@ class DefaultMod(Mod):
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {error_json_path}", exc_info=True)
 
-    def start_log_listener(self, source_dirs: list[Path], state_dir: Path):
+    def start_log_listener(self, state_dir: Path):
         log_thread_flag = False
 
         for t in threading.enumerate():
