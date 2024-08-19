@@ -65,7 +65,7 @@ class FileStateHandler:
         self.file_handlers: list[HandlerInterface] = HANDLERS
         Ros2Handler.register_ros2_types(ros2_msg_dirs)
 
-    def __init__(self, ros2_msg_dirs: list[str]):
+    def __init__(self, ros2_msg_dirs: list[str], scan_history: bool):
         if not FileStateHandler._instance:
             with FileStateHandler._lock:
                 if not FileStateHandler._instance:
@@ -74,14 +74,15 @@ class FileStateHandler:
                     self.update_lock = threading.Lock()
                     self.__register_file_handlers(ros2_msg_dirs)
                     self.src_dirs = set()
+                    self.scan_history = scan_history
                     self.load_state()
 
     @classmethod
-    def get_instance(cls, ros2_msg_dirs=None):
+    def get_instance(cls, ros2_msg_dirs=None, scan_history: bool = False):
         if ros2_msg_dirs is None:
             ros2_msg_dirs = []
         if not cls._instance:
-            cls._instance = cls(ros2_msg_dirs)
+            cls._instance = cls(ros2_msg_dirs, scan_history)
         return cls._instance
 
     def load_state(self, state_path: Path = None):
@@ -149,14 +150,14 @@ class FileStateHandler:
                     # Skip if file state is already up-to-date
                     file_state = self.get_file_state(entry)
                     if file_state and file_state.get("size") == handler.get_file_size(entry):
-                        if src_dir in new_src_dirs_set - self.src_dirs:
+                        if not self.scan_history and src_dir in new_src_dirs_set - self.src_dirs:
                             self.__update_file_state(entry, "processed", True)
                         continue
 
                     try:
                         state_to_set = handler.compute_path_state(entry)
                         # If the file is in a newly added directory, mark it as processed
-                        if src_dir in new_src_dirs_set - self.src_dirs:
+                        if not self.scan_history and src_dir in new_src_dirs_set - self.src_dirs:
                             state_to_set["processed"] = True
                         self.__set_file_state(entry, state_to_set)
                     except Exception as e:

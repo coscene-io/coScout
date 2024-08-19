@@ -49,6 +49,7 @@ class DefaultModConfig(BaseModel):
     sn_field: str | None = ""
     ros2_customized_msgs_dirs: list[str] = []
     upload_files: list[str] = []
+    scan_history: bool = False
 
 
 class DefaultMod(Mod):
@@ -62,7 +63,7 @@ class DefaultMod(Mod):
         self.conf = _conf
         self.log_thread_name = "cos-log-listener"
         self.task_thread_name = "cos-task-handler"
-        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs)
+        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs, self.conf.scan_history)
 
         super().__init__()
 
