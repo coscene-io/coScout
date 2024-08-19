@@ -34,7 +34,8 @@ class Ros1Handler(BaseModel, HandlerInterface):
     def supports_static() -> bool:
         return True
 
-    def check_file_path(self, file_path: Path) -> bool:
+    @staticmethod
+    def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and (file_path.name.endswith(".bag") or file_path.name.endswith(".bag.active"))
 
     def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):

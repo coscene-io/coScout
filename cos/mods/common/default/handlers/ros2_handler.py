@@ -45,7 +45,8 @@ class Ros2Handler(BaseModel, HandlerInterface):
                 size += entry.stat().st_size
         return size
 
-    def check_file_path(self, file_path: Path) -> bool:
+    @staticmethod
+    def check_file_path(file_path: Path) -> bool:
         if not file_path.is_dir():
             return False
         contains_db3 = False

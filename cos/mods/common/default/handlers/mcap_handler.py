@@ -40,15 +40,15 @@ class McapHandler(BaseModel, HandlerInterface):
     def supports_static() -> bool:
         return True
 
-    def check_file_path(self, file_path: Path) -> bool:
+    @staticmethod
+    def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and file_path.name.endswith(".mcap")
 
     def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):
         with file_path.open("rb") as f:
             reader = make_reader(f)
             if reader.get_summary() is None:
-                _log.warning(f"Failed to get summary for mcap file: {file_path}, need reindexing.")
-                return
+                raise Exception(f"Failed to get summary for mcap file: {file_path}, need reindexing.")
 
             start_time = reader.get_summary().statistics.message_start_time // 1_000_000_000
             end_time = reader.get_summary().statistics.message_end_time // 1_000_000_000

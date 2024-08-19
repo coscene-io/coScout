@@ -31,8 +31,9 @@ class HandlerInterface(ABC):
         it means the handler supports handling files that are not changing"""
         pass
 
+    @staticmethod
     @abstractmethod
-    def check_file_path(self, file_path: Path) -> bool:
+    def check_file_path(file_path: Path) -> bool:
         """Check if the file path is supported by the handler"""
         pass
 

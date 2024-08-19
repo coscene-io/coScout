@@ -62,6 +62,7 @@ class DefaultMod(Mod):
         self.conf = _conf
         self.log_thread_name = "cos-log-listener"
         self.task_thread_name = "cos-task-handler"
+        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs)
 
         super().__init__()
 
@@ -127,8 +128,7 @@ class DefaultMod(Mod):
         else:
             _log.debug(f"==> Skip handle err file: {error_json_path}")
 
-    @staticmethod
-    def __find_files_and_update_error_json(error_json_path: str, source_dirs: list[Path], temp_dir: Path):
+    def __find_files_and_update_error_json(self, error_json_path: str, temp_dir: Path):
         with open(error_json_path, "r", encoding="utf8") as fp:
             error_json = json.load(fp)
 
@@ -140,19 +140,25 @@ class DefaultMod(Mod):
 
         start_time = error_json["cut"]["start"]
         end_time = error_json["cut"]["end"]
-        file_state_handler = FileStateHandler.get_instance()
-        file_state_handler.update_dirs(source_dirs)
         error_json_id, _ = os.path.splitext(os.path.basename(error_json_path))
         temp_files_dir = temp_dir / error_json_id
         temp_files_dir.mkdir(parents=True, exist_ok=True)
 
-        _log.info(f"==> Search for files in {source_dirs}" + f", start_time: {start_time}, end_time: {end_time}")
-        raw_files = file_state_handler.get_files(source_dirs, start_time, end_time)
+        _log.info(
+            f"==> Search for files in {self.file_state_handler.src_dirs}, start_time: {start_time}, end_time: {end_time}"
+        )
+        raw_files = self.file_state_handler.get_files(
+            FileStateHandler.state_timestamp_filter(start_time, end_time),
+            FileStateHandler.state_dir_filter(False),
+        )
         _log.info(f"==> Found files: {raw_files}")
         raw_files += error_json["cut"]["extraFiles"]
 
-        _log.info(f"==> Search for dirs in {source_dirs}" + f", start_time: {start_time}, end_time: {end_time}")
-        raw_dirs = file_state_handler.get_files(source_dirs, start_time, end_time, True)
+        _log.info(f"==> Search for dirs in {self.file_state_handler.src_dirs}, start_time: {start_time}, end_time: {end_time}")
+        raw_dirs = self.file_state_handler.get_files(
+            FileStateHandler.state_timestamp_filter(start_time, end_time),
+            FileStateHandler.state_dir_filter(True),
+        )
         _log.info(f"==> Found dirs: {raw_dirs}")
 
         bag_files = []
@@ -242,19 +248,14 @@ class DefaultMod(Mod):
 
         DefaultMod.__update_error_json(upload_data, json_path)
 
-    def __handle_upload_files(self, source_dirs: list[Path], state_dir: Path):
-        file_state_handler = FileStateHandler.get_instance()
-        _log.info(f"Updating file states in dir: {source_dirs}")
-        file_state_handler.update_dirs(source_dirs)
-
-        _log.info(f"==> Search for unprocessed files in {source_dirs}")
-        for source_dir in source_dirs:
-            for file in source_dir.iterdir():
-                file_state_handler.static_file_diagnosis(
-                    self._api_client,
-                    file,
-                    partial(DefaultMod.__dump_upload_json, state_dir=state_dir),
-                )
+    def __handle_unprocessed_files(self, state_dir: Path):
+        _log.info(f"==> Search for files in {self.file_state_handler.src_dirs}")
+        for file in self.file_state_handler.get_files():
+            self.file_state_handler.static_file_diagnosis(
+                self._api_client,
+                Path(file),
+                partial(DefaultMod.__dump_upload_json, state_dir=state_dir),
+            )
 
     def run(self):
         if not self.conf.enabled:
@@ -266,18 +267,15 @@ class DefaultMod(Mod):
             _log.info("Default Mod base dirs/dir is empty, skip!")
             return
 
-        # todo Find a better place to initialize FileStateHandler
-        FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs)
         base_dirs_set: set[Path] = set()
         for base_dir_str in self.conf.base_dirs:
             base_dir = Path(base_dir_str).absolute()
-            base_dir.mkdir(parents=True, exist_ok=True)
             base_dirs_set.add(base_dir)
         if self.conf.base_dir:
             base_dir = Path(self.conf.base_dir).absolute()
-            base_dir.mkdir(parents=True, exist_ok=True)
             base_dirs_set.add(base_dir)
         base_dirs = list(base_dirs_set)
+        self.file_state_handler.update_dirs(base_dirs_set)
 
         state_dir = DEFAULT_MOD_STATE_DIR
         state_dir.mkdir(parents=True, exist_ok=True)
@@ -286,13 +284,15 @@ class DefaultMod(Mod):
         self.start_log_listener(base_dirs, state_dir)
 
         # handle waiting to upload files
-        self.__handle_upload_files(base_dirs, state_dir)
+        self.__handle_unprocessed_files(state_dir)
         # handle error json files
         _log.info(f"==> Search for new error json {str(state_dir)}")
+
+        self.file_state_handler.update_dirs(base_dirs_set)  # update dirs before find error json
         for error_json_path in self.__find_error_json(state_dir):
             # noinspection PyBroadException
             try:
-                self.__find_files_and_update_error_json(error_json_path, base_dirs, temp_dir)
+                self.__find_files_and_update_error_json(error_json_path, temp_dir)
                 self.handle_error_json(error_json_path)
             except Exception:
                 # 打印错误，但保证循环不被打断
@@ -300,7 +300,6 @@ class DefaultMod(Mod):
 
     def start_log_listener(self, source_dirs: list[Path], state_dir: Path):
         log_thread_flag = False
-        LogHandler.update_dirs_to_scan(source_dirs)
 
         for t in threading.enumerate():
             if t.name == self.log_thread_name:
@@ -322,7 +321,6 @@ class DefaultMod(Mod):
             t.start()
             _log.info("Thread start log listener")
         else:
-            LogHandler().update_dirs_to_scan(source_dirs)
             _log.info("Thread already start log listener, skip!")
 
     def start_task_handler(self, api_client: ApiClient, upload_files: list[str]):
