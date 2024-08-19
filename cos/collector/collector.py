@@ -130,12 +130,19 @@ class Collector:
             )
 
             if moment.task:
-                _ = self.api.create_task(
+                created_task = self.api.create_task(
                     record_name=record.get("name"),
                     title=moment.title if moment.title else record_title,
                     description=moment.description if moment.description else record_title,
                     assignee=moment.task.assignee,
                 )
+                if moment.task.sync_task and created_task.get("name"):
+                    try:
+                        _log.info(f"==> Sync task: {created_task.get('name')}")
+                        self.api.sync_task(created_task.get("name"))
+                        _log.info(f"==> Sync task done: {created_task.get('name')}")
+                    except Exception:
+                        _log.error(f"Failed to sync task: {created_task.get('name')}", exc_info=True)
 
         return record
 

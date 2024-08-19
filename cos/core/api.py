@@ -711,6 +711,14 @@ class ApiClient(metaclass=ABCMeta):
         """
         pass
 
+    @abstractmethod
+    def sync_task(self, task_name: str) -> None:
+        """
+        :param task_name: 任务的resource name
+        :return: 更新后的任务
+        """
+        pass
+
     # endregion
 
 
