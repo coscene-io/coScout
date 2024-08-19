@@ -56,9 +56,8 @@ class TaskMod(Mod):
             _log.info("==> Task Mod disabled. skip check folder!")
             return
 
-        folders = self.conf.base_dirs + self.conf.upload_files
         _log.info("==> Task mod enabled, check upload tasks.")
-        TaskHandler(self._api_client, folders).run()
+        TaskHandler(self._api_client, []).run()
 
     def get_device(self):
         if not self.conf.sn_file:
