@@ -120,6 +120,8 @@ class GrpcClient(ApiClient):
             return result
         except grpc.RpcError as rpc_error:
             _log.error("Get the organization failure: %s", rpc_error)
+            if UNAUTHENTICATED == rpc_error.code():
+                raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to get organization")
 
     def get_configmap(self, config_key, parent_name):
@@ -135,6 +137,8 @@ class GrpcClient(ApiClient):
             return result
         except grpc.RpcError as rpc_error:
             _log.error("Get the config map failure: %s", rpc_error)
+            if UNAUTHENTICATED == rpc_error.code():
+                raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to get config map")
 
     def get_configmap_metadata(self, config_key, parent_name):
@@ -150,6 +154,8 @@ class GrpcClient(ApiClient):
             return result
         except grpc.RpcError as rpc_error:
             _log.error("Get the config map metadata failure: %s", rpc_error)
+            if UNAUTHENTICATED == rpc_error.code():
+                raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to get config map metadata")
 
     def list_device_projects(self, device_name: str) -> List[Dict]:
@@ -161,6 +167,8 @@ class GrpcClient(ApiClient):
             return [json_format.MessageToDict(proj) for proj in res.device_projects]
         except grpc.RpcError as rpc_error:
             _log.error("Get device projects failure: %s", rpc_error)
+            if UNAUTHENTICATED == rpc_error.code():
+                raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to get device projects")
 
     def project_slug_to_name(self, proj_slug: str):
@@ -173,6 +181,8 @@ class GrpcClient(ApiClient):
             return res.name
         except grpc.RpcError as rpc_error:
             _log.error("Get the organization failure: %s", rpc_error)
+            if UNAUTHENTICATED == rpc_error.code():
+                raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to get project name")
 
     def create_record(self, file_infos, title="Untitled", description="", labels=None, device_name=None):
@@ -364,6 +374,8 @@ class GrpcClient(ApiClient):
             stub.HeartbeatDevice(req, timeout=10)
         except grpc.RpcError as rpc_error:
             _log.error("Device heartbeat failure: %s", rpc_error)
+            if UNAUTHENTICATED == rpc_error.code():
+                raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to send device heartbeat")
 
     def create_event(

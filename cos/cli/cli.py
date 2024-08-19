@@ -18,7 +18,7 @@ import sys
 import click
 from pydantic import ValidationError
 
-from cos.cli import collector, remote_config
+from cos.cli import collector, remote_config, update
 from cos.cli.context import Context
 from cos.collector.openers import CosHandler
 from cos.config import AppConfig, load_kebab_source
@@ -69,3 +69,4 @@ def cli(ctx, config_file, verbose):
 
 cli.add_command(collector.daemon)
 cli.add_command(remote_config.remote_config)
+cli.add_command(update.update)
