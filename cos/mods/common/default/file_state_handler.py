@@ -16,10 +16,12 @@ import json
 import logging
 import threading
 from pathlib import Path
+from typing import Callable
 
 from cos.constant import FILE_STATE_PATH
 from cos.core.api import ApiClient
 from cos.mods.common.default.handlers import HANDLERS, HandlerInterface, Ros2Handler
+from cos.utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
 
@@ -32,7 +34,6 @@ class FileStateHandler:
     Note that end time might be nil to indicate that the file is still active.
     Also note that currently we only track .log .mcap files, and we assume that
     only .mcap files might be static.
-    Known limitations: does not work well with deleting files.
     E.g.:
     {
         "test.log": {
@@ -46,6 +47,10 @@ class FileStateHandler:
             "start_time": 1692089151
             "end_time": 1692089210
         },
+        "test.zip": {
+            "size" : 1234,
+            "unsupported": true
+        },
     }
     """
 
@@ -56,26 +61,28 @@ class FileStateHandler:
     _instance = None
     _lock = threading.Lock()
 
-    def __register_file_handlers(self):
+    def __register_file_handlers(self, ros2_msg_dirs: list[str]):
         self.file_handlers: list[HandlerInterface] = HANDLERS
+        Ros2Handler.register_ros2_types(ros2_msg_dirs)
 
-    def __init__(self, ros2_msg_dirs: list[str]):
+    def __init__(self, ros2_msg_dirs: list[str], scan_history: bool):
         if not FileStateHandler._instance:
             with FileStateHandler._lock:
                 if not FileStateHandler._instance:
                     FileStateHandler._instance = self
-                    self.state = dict()
+                    self.state: dict[str, dict] = dict()
                     self.update_lock = threading.Lock()
-                    self.__register_file_handlers()
-                    Ros2Handler.register_ros2_types(ros2_msg_dirs)
+                    self.__register_file_handlers(ros2_msg_dirs)
+                    self.src_dirs = set()
+                    self.scan_history = scan_history
                     self.load_state()
 
     @classmethod
-    def get_instance(cls, ros2_msg_dirs=None):
+    def get_instance(cls, ros2_msg_dirs=None, scan_history: bool = False):
         if ros2_msg_dirs is None:
             ros2_msg_dirs = []
         if not cls._instance:
-            cls._instance = cls(ros2_msg_dirs)
+            cls._instance = cls(ros2_msg_dirs, scan_history)
         return cls._instance
 
     def load_state(self, state_path: Path = None):
@@ -118,9 +125,23 @@ class FileStateHandler:
             if not file_path.exists():
                 self.__del_file_state(file_path)
 
-    def update_dirs(self, dir_paths: list[Path]):
-        for dir_path in dir_paths:
-            for entry in dir_path.iterdir():
+    def update_dirs(self, new_src_dirs_set: set[Path] = None):
+        """Update the source directories to scan for files."""
+        if new_src_dirs_set is None:
+            new_src_dirs_set = self.src_dirs
+
+        # Delete the state of files in the directories that are no longer scanned
+        for src_dir in self.src_dirs - new_src_dirs_set:
+            for filename in list(self.state.keys()):
+                if Path(filename).parent == src_dir:
+                    self.__del_file_state(Path(filename))
+
+        # Skip directories that user have no read access or do not exist
+        new_src_dirs_set = {src_dir for src_dir in new_src_dirs_set if can_read_path(str(src_dir))}
+
+        # Update the state of files in the new directories
+        for src_dir in new_src_dirs_set:
+            for entry in src_dir.iterdir():
                 for handler in self.file_handlers:
                     # Skip if the file handler does not support entry
                     if not handler.check_file_path(entry):
@@ -129,10 +150,16 @@ class FileStateHandler:
                     # Skip if file state is already up-to-date
                     file_state = self.get_file_state(entry)
                     if file_state and file_state.get("size") == handler.get_file_size(entry):
+                        if not self.scan_history and src_dir in new_src_dirs_set - self.src_dirs:
+                            self.__update_file_state(entry, "processed", True)
                         continue
 
                     try:
-                        handler.update_path_state(entry, self.__set_file_state)
+                        state_to_set = handler.compute_path_state(entry)
+                        # If the file is in a newly added directory, mark it as processed
+                        if not self.scan_history and src_dir in new_src_dirs_set - self.src_dirs:
+                            state_to_set["processed"] = True
+                        self.__set_file_state(entry, state_to_set)
                     except Exception as e:
                         _log.error(f"Failed to update file state for {entry}, error: {e}")
                         self.__set_file_state(
@@ -142,26 +169,30 @@ class FileStateHandler:
                                 "unsupported": True,
                             },
                         )
+
+                # For files that are not supported by any handler, mark them as unsupported
+                if not self.get_file_state(entry):
+                    self.__set_file_state(
+                        entry,
+                        {
+                            "size": entry.stat().st_size,
+                            "unsupported": True,
+                        },
+                    )
+
+        self.src_dirs = new_src_dirs_set
         self.__update_deleted_file_state()
         self.save_state()
 
     def static_file_diagnosis(self, api_client: ApiClient, file_path: Path, upload_fn):
+        file_state = self.get_file_state(file_path)
         for handler in self.file_handlers:
             # Skip if the file handler is not static or does not support the file
             if not handler.supports_static() or not handler.check_file_path(file_path):
                 continue
 
-            file_state = self.get_file_state(file_path)
-            if not file_state:
-                _log.warning(f"File {file_path.absolute()} not found in state.")
-                return
-
             # Skip if file is already processed and size unchanged
             if file_state.get("processed") and handler.get_file_size(file_path) == file_state.get("size"):
-                return
-
-            # Skip if file is unsupported
-            if file_state.get("unsupported"):
                 return
 
             _log.info(f"Found unprocessed file {file_path}, processing with {handler}")
@@ -170,21 +201,41 @@ class FileStateHandler:
             handler.diagnose(api_client, file_path, upload_fn)
             _log.info(f"Finished processing file {file_path}")
 
-    def get_files(self, dir_paths: list[Path], start_time: int, end_time: int, get_dir: bool = False):
+    def get_files(self, *filters: Callable[[dict], bool]):
         """
-        Get a list of files that overlap with the given time range.
-        :param dir_paths: The directories to search in.
-        :param start_time: The start time of the time range in seconds.
-        :param end_time: The end time of the time range in seconds.
-        :param get_dir: Whether to fetch directories.
-        :return: A list of files that overlap with the given time range.
+        Get a list of supported files that match the given filters.
+        :param filters: A list of filters to apply to the file state.
+        :return: A list of supported files that match the given filters.
         """
         return [
             filename
             for filename, file_state in self.state.items()
-            if Path(filename).parent in set(dir_paths)
-            and not file_state.get("unsupported")
-            and file_state.get("start_time") <= end_time
-            and file_state.get("end_time") >= start_time
-            and bool(file_state.get("is_dir")) == get_dir
+            if not file_state.get("unsupported") and all(filter_func(file_state) for filter_func in filters)
         ]
+
+    @staticmethod
+    def state_unprocessed_filter() -> Callable[[dict], bool]:
+        """
+        Create a filter that checks if the file state is unprocessed.
+        :return: A filter that checks if the file state is unprocessed.
+        """
+        return lambda file_state: not file_state.get("processed")
+
+    @staticmethod
+    def state_timestamp_filter(start_time: int, end_time: int) -> Callable[[dict], bool]:
+        """
+        Create a filter that checks if the file state overlaps with the given time range.
+        :param start_time: The start time of the time range in seconds.
+        :param end_time: The end time of the time range in seconds.
+        :return: A filter that checks if the file state overlaps with the given time range.
+        """
+        return lambda file_state: file_state.get("start_time") <= end_time and file_state.get("end_time") >= start_time
+
+    @staticmethod
+    def state_dir_filter(get_dir: bool) -> Callable[[dict], bool]:
+        """
+        Create a filter that checks if the file state is a directory.
+        :param get_dir: Whether to fetch directories.
+        :return: A filter that checks if the file state is a directory.
+        """
+        return lambda file_state: bool(file_state.get("is_dir")) == get_dir

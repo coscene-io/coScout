@@ -15,7 +15,6 @@
 from abc import ABC, abstractmethod
 from functools import partial
 from pathlib import Path
-from typing import Callable
 
 from cos.core.api import ApiClient
 from cos.mods.common.default.rule_executor import RuleExecutor
@@ -31,14 +30,15 @@ class HandlerInterface(ABC):
         it means the handler supports handling files that are not changing"""
         pass
 
+    @staticmethod
     @abstractmethod
-    def check_file_path(self, file_path: Path) -> bool:
+    def check_file_path(file_path: Path) -> bool:
         """Check if the file path is supported by the handler"""
         pass
 
     @abstractmethod
-    def update_path_state(self, file_path: Path, update_func: Callable[[Path, dict], None]):
-        """Update the path state"""
+    def compute_path_state(self, file_path: Path):
+        """compute the path state"""
         pass
 
     def get_file_size(self, file_path: Path) -> int:
