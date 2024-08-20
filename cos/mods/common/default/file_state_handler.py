@@ -22,6 +22,7 @@ from typing import Callable
 from cos.constant import FILE_STATE_PATH
 from cos.core.api import ApiClient
 from cos.mods.common.default.handlers import HANDLERS, HandlerInterface, Ros2Handler
+from cos.utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ class FileStateHandler:
                     self.__del_file_state(Path(filename))
 
         # Skip directories that user have no read access or do not exist
-        new_src_dirs_set = {src_dir for src_dir in new_src_dirs_set if src_dir.exists() and os.access(src_dir, os.R_OK)}
+        new_src_dirs_set = {src_dir for src_dir in new_src_dirs_set if can_read_path(str(src_dir))}
 
         # Update the state of files in the new directories
         for src_dir in new_src_dirs_set:
