@@ -90,11 +90,11 @@ jobs:
           submodules: 'true'
           token: ${{ secrets.GH_TOKEN }}
 
-      - uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-${{ matrix.arch }}-pip
-          restore-keys: ${{ runner.os }}-${{ matrix.arch }}-pip
+#      - uses: actions/cache@v3
+#        with:
+#          path: ~/.cache/pip
+#          key: ${{ runner.os }}-${{ matrix.arch }}-pip
+#          restore-keys: ${{ runner.os }}-${{ matrix.arch }}-pip
 
       - name: Install Dependencies
         shell: bash
@@ -105,15 +105,15 @@ jobs:
           mkdir -p dist
           bash .github/scripts/update_version.sh $version
 
-      - name: Cache Nuitka cache directory
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.NUITKA_CACHE_DIR }}
-          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-nuitka-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-
-            ${{ runner.os }}-${{ runner.arch }}-python-
-            ${{ runner.os }}-${{ runner.arch }}-
+#      - name: Cache Nuitka cache directory
+#        uses: actions/cache@v3
+#        with:
+#          path: ${{ env.NUITKA_CACHE_DIR }}
+#          key: ${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-nuitka-${{ github.sha }}
+#          restore-keys: |
+#            ${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-
+#            ${{ runner.os }}-${{ runner.arch }}-python-
+#            ${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build cos binary
         shell: bash
@@ -132,7 +132,7 @@ jobs:
           sha256sum dist/${{ matrix.file }} | cut -f 1 -d " " > dist/cos.sha256
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v1
         with:
           name: cos_${{matrix.os}}_${{matrix.arch}}
           path: |
