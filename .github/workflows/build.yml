@@ -44,17 +44,24 @@ jobs:
 #            os: windows
 #            label: windows-latest
 #            file: cos.exe
-          - arch: x86_64
-            os: linux
-            label: ubuntu-latest
-            file: cos
-          - arch: arm64
+#          - arch: x86_64
+#            os: linux
+#            label: ubuntu-latest
+#            file: cos
+#            container: coscene/nuitka:ubuntu-16.04
+#          - arch: arm64
+#            os: linux
+#            label: [ linux-arm-64-8c-32g-300gb ]
+#            file: cos
+#            container: coscene/nuitka:ubuntu-16.04
+          - arch: arm
             os: linux
             label: [ linux-arm-64-8c-32g-300gb ]
             file: cos
+            container: coscene/nuitka:ubuntu-16.04-32bit
     runs-on: ${{ matrix.label }}
     needs: [check, lint-n-test]
-    container: coscene/nuitka:ubuntu-16.04
+    container: ${{ matrix.container }}
     permissions:
       contents: write
     env:
