@@ -723,7 +723,11 @@ class ApiClient(metaclass=ABCMeta):
 
 
 def get_client(api_conf: ApiClientConfig) -> ApiClient:
-    if api_conf.type == "grpc" or api_conf.server_url.startswith("https://openapi") or api_conf.server_url.startswith("openapi"):
+    if (
+        api_conf.type == "grpc"
+        or api_conf.server_url.startswith("https://openapi")
+        or api_conf.server_url.startswith("openapi")
+    ):
         from cos.core.grpc import GrpcClient
 
         return GrpcClient(api_conf)
@@ -731,6 +735,5 @@ def get_client(api_conf: ApiClientConfig) -> ApiClient:
         from cos.core.rest import RestApiClient
 
         return RestApiClient(api_conf)
-
     else:
         raise ValueError(f"Unsupported api client type: {api_conf.type}")
