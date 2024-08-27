@@ -81,7 +81,7 @@ jobs:
           apt install -y software-properties-common
           add-apt-repository -y ppa:git-core/ppa
           apt update
-          apt install -y git patchelf ccache
+          apt install -y git patchelf ccache build-essential cmake
 
       - name: Check-out repo
         uses: actions/checkout@v1
