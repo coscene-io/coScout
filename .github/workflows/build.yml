@@ -81,7 +81,10 @@ jobs:
           apt install -y software-properties-common
           add-apt-repository -y ppa:git-core/ppa
           apt update
-          apt install -y git patchelf ccache
+          apt install -y git patchelf ccache curl
+          
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          export PATH="$HOME/.cargo/bin:$PATH"
 
       - name: Check-out repo
         uses: actions/checkout@v1
