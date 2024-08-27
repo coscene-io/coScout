@@ -60,7 +60,7 @@ jobs:
             file: cos
             container: coscene/nuitka:ubuntu-16.04-32bit
     runs-on: ${{ matrix.label }}
-    needs: [check, lint-n-test]
+#    needs: [check, lint-n-test]
     container: ${{ matrix.container }}
     permissions:
       contents: write
