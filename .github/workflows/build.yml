@@ -84,7 +84,7 @@ jobs:
           apt install -y git patchelf ccache
 
       - name: Check-out repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v1
         with:
           fetch-depth: 0
           submodules: 'true'
