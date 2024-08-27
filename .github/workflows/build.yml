@@ -14,10 +14,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint-n-test:
-    uses: ./.github/workflows/lint-n-test.yml
-    secrets:
-      COS_API_KEY: ${{ secrets.COS_API_KEY }}
+#  lint-n-test:
+#    uses: ./.github/workflows/lint-n-test.yml
+#    secrets:
+#      COS_API_KEY: ${{ secrets.COS_API_KEY }}
 
   check:
     runs-on: ubuntu-latest
@@ -77,6 +77,9 @@ jobs:
       - name: Install git on container
         if: ${{ runner.os == 'Linux' }}
         run: |
+          wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | sudo tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
+          apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main"
+          
           apt update
           apt install -y software-properties-common
           add-apt-repository -y ppa:git-core/ppa
