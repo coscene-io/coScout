@@ -59,6 +59,11 @@ jobs:
             label: [ linux-arm-64-8c-32g-300gb ]
             file: cos
             container: coscene/nuitka:ubuntu-16.04-32bit
+#          - arch: x86
+#            os: linux
+#            label: ubuntu-latest
+#            file: cos
+#            container: coscene/nuitka:ubuntu-16.04-32bit
     runs-on: ${{ matrix.label }}
 #    needs: [check, lint-n-test]
     container: ${{ matrix.container }}
@@ -79,12 +84,24 @@ jobs:
         run: |
           apt update
           apt install -y software-properties-common
-          add-apt-repository -y ppa:git-core/ppa
-          apt update
-          apt install -y git patchelf ccache curl
           
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-          export PATH="$HOME/.cargo/bin:$PATH"
+          # Add repositories one at a time
+          add-apt-repository -y ppa:git-core/ppa
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          
+          apt update
+          apt install -y git patchelf ccache curl gcc-9 g++-9 cmake
+          
+          # Set GCC 9 as the default
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
+          update-alternatives --set gcc /usr/bin/gcc-9
+          
+          wget https://github.com/Kitware/CMake/releases/download/v3.21.0/cmake-3.21.0.tar.gz
+          tar xzf cmake-3.21.0.tar.gz
+          cd cmake-3.21.0
+          ./bootstrap
+          make
+          make install
 
       - name: Check-out repo
         uses: actions/checkout@v1
@@ -104,6 +121,9 @@ jobs:
         env:
           version: ${{ needs.check.outputs.version }}
         run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "$HOME/.cargo/env"
+          
           python3 -m pip install -r requirements.txt --extra-index-url https://buf.build/gen/python
           mkdir -p dist
           bash .github/scripts/update_version.sh $version
@@ -118,13 +138,13 @@ jobs:
 #            ${{ runner.os }}-${{ runner.arch }}-python-
 #            ${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Build cos binary
-        shell: bash
-        env:
-          version: ${{ needs.check.outputs.version }}
-        run: |
-          python3 -m pip install -q -r requirements.txt nuitka --extra-index-url https://buf.build/gen/python
-          python3 -m nuitka --standalone --onefile --static-libpython=no --include-package=rosbags --output-filename=${{ matrix.file }} --output-dir=dist --company-name=coscene --onefile-tempdir-spec="{CACHE_DIR}/{COMPANY}/onefile_{PID}_{TIME}" --assume-yes-for-downloads main.py
+#      - name: Build cos binary
+#        shell: bash
+#        env:
+#          version: ${{ needs.check.outputs.version }}
+#        run: |
+#          python3 -m pip install -q -r requirements.txt nuitka --extra-index-url https://buf.build/gen/python
+#          python3 -m nuitka --standalone --onefile --static-libpython=no --include-package=rosbags --output-filename=${{ matrix.file }} --output-dir=dist --company-name=coscene --onefile-tempdir-spec="{CACHE_DIR}/{COMPANY}/onefile_{PID}_{TIME}" --assume-yes-for-downloads main.py
 
       - name: Calculate SHA256
         shell: bash
@@ -132,14 +152,13 @@ jobs:
           version: ${{ needs.check.outputs.version }}
         run: |
           echo $version > dist/version
-          sha256sum dist/${{ matrix.file }} | cut -f 1 -d " " > dist/cos.sha256
+          sha256sum dist/version | cut -f 1 -d " " > dist/cos.sha256
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v1
         with:
           name: cos_${{matrix.os}}_${{matrix.arch}}
           path: |
-            dist/${{ matrix.file }}
             dist/cos.sha256
             dist/version
 
