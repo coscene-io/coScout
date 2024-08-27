@@ -71,10 +71,12 @@ REMOVE_CONFIG=0
 MOD="default"
 SN_FILE=""
 SN_FIELD=""
-
+COLINK_NETWORK=""
 COLINK_ENDPOINT=""
+
+COLINK_VERSION=1.0.0
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
-COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
+COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/colink/v${COLINK_VERSION}/colink-${MESH_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz
 
 help() {
@@ -92,7 +94,8 @@ usage: $0 [OPTIONS]
     --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
-    --remove_config         Remove all config files, current device will be treated as a new device.
+    --remove_config         Remove all config files, current device will be treated as a new device
+    --coLink_network        coLink network id, e.g. organization id, will skip if not provided
 EOF
 }
 
@@ -189,6 +192,10 @@ while test $# -gt 0; do
     REMOVE_CONFIG=1
     shift
     ;;
+  --coLink_network=*)
+    COLINK_NETWORK="${1#*=}"
+    shift
+    ;;
   *)
     echo "unknown option: $1"
     help
@@ -230,6 +237,16 @@ fi
 # Check if both ORG_SLUG and PROJECT_SLUG are not empty
 if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
   echo "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
+  exit 1
+fi
+
+# check colink endpoint and network
+if [[ -z "$COLINK_ENDPOINT" && -z "$COLINK_NETWORK" ]]; then
+  echo "Both COLINK_ENDPOINT and COLINK_NETWORK are empty."
+elif [[ -n "$COLINK_ENDPOINT" && -n "$COLINK_NETWORK" ]]; then
+  echo "Both COLINK_ENDPOINT and COLINK_NETWORK are not empty."
+else
+  echo "ERROR: coLink_endpoint and coLink_network must either both be empty or both be not empty."
   exit 1
 fi
 
@@ -286,9 +303,9 @@ format() {
 }
 
 # check old coLink binary
-if [ -e /usr/local/bin/coLink ]; then
+if [ -e /usr/local/bin/colink ]; then
   echo "Previously installed version:"
-  /usr/local/bin/coLink -V
+  /usr/local/bin/colink -V
 fi
 
 if [[ -z $COLINK_ENDPOINT ]]; then
@@ -309,16 +326,16 @@ else
   fi
 
   if [[ -n $USE_LOCAL ]]; then
-    mv -f "$TEMP_DIR/cos_binaries/virmesh/virmesh-${MESH_ARCH}" "$TEMP_DIR"/coLink
+    mv -f "$TEMP_DIR/cos_binaries/colink/colink-${MESH_ARCH}" "$TEMP_DIR"/colink
   else
-    download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $VERIFY_CERT
+    download_file "$TEMP_DIR"/colink $COLINK_DOWNLOAD_URL $VERIFY_CERT
   fi
 
-  chmod +x "$TEMP_DIR"/coLink
+  chmod +x "$TEMP_DIR"/colink
   echo "Installed new coLink version:"
-  "$TEMP_DIR"/coLink -V
+  "$TEMP_DIR"/colink -V
 
-  sudo mv -f "$TEMP_DIR"/coLink /usr/local/bin/coLink
+  sudo mv -f "$TEMP_DIR"/colink /usr/local/bin/colink
 
   echo "Downloading new trzsz binary..."
   if [[ -n $USE_LOCAL ]]; then
@@ -338,14 +355,16 @@ else
   if [[ $DISABLE_SERVICE -eq 0 ]]; then
     if [[ "$(ps --no-headers -o comm 1 2>&1)" == "systemd" ]] && command -v systemctl 2>&1; then
       echo "Installing systemd service..."
-      sudo tee /etc/systemd/system/coLink.service >/dev/null <<EOF
+      sudo tee /etc/systemd/system/colink.service >/dev/null <<EOF
 
 [Unit]
 Description=coLink Client Daemon
 
 [Service]
 WorkingDirectory=/etc
-ExecStart=/usr/local/bin/coLink --endpoint $COLINK_ENDPOINT --allow-ssh
+ExecStart=/usr/local/bin/colink --endpoint ${COLINK_ENDPOINT}/api --network ${COLINK_NETWORK} --allow-ssh
+Restart=always
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target
@@ -353,14 +372,15 @@ EOF
       sudo systemctl daemon-reload
 
       echo "Starting coLink service..."
+      sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink && sudo systemctl disable coLink && sudo rm -f /etc/systemd/system/coLink.service
       sudo systemctl is-active --quiet virmesh && sudo systemctl stop virmesh && sudo systemctl disable virmesh && sudo rm -f /etc/systemd/system/virmesh.service
-      sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink
-      sudo systemctl enable coLink
-      sudo systemctl start coLink
+      sudo systemctl is-active --quiet colink && sudo systemctl stop colink
+      sudo systemctl enable colink
+      sudo systemctl start colink
       echo "Start coLink service done."
     elif /sbin/init --version 2>&1 | grep -q upstart; then
       echo "Installing upstart service..."
-      sudo tee /etc/init/coLink.conf >/dev/null <<EOF
+      sudo tee /etc/init/colink.conf >/dev/null <<EOF
 description "coLink Client Daemon"
 
 # Start the service when networking is up
@@ -379,15 +399,16 @@ respawn limit 4 30
 normal exit 0
 
 env COLINK_ENDPOINT=$COLINK_ENDPOINT
+env COLINK_NETWORK=$COLINK_NETWORK
 script
     # Change to the appropriate working directory
     cd /etc
     # Start the daemon
-    exec /usr/local/bin/coLink --endpoint $COLINK_ENDPOINT --allow-ssh
+    exec /usr/local/bin/colink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
 end script
 EOF
 
-      SERVICE_NAME="coLink"
+      SERVICE_NAME="colink"
       STATUS_OUTPUT=$(sudo initctl status "$SERVICE_NAME")
       if echo "$STATUS_OUTPUT" | grep -q "start/running"; then
         echo "$SERVICE_NAME is running. Stopping it now..."
