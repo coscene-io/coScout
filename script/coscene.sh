@@ -92,7 +92,7 @@ usage: $0 [OPTIONS]
     --beta                  Use beta version for cos
     --use_local             Use local binary file zip path e.g. /xx/path/xx.zip
     --disable_service       Disable systemd or upstart service installation
-    --mod                   Select the mod to install - gs, agi, task, default (default is 'default')
+    --mod                   Select the mod to install - task, default or other custom mod (default is 'default')
     --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
@@ -171,11 +171,12 @@ while test $# -gt 0; do
   --mod=*)
     mod_value="${1#*=}"
     shift
-    if [[ "$mod_value" == "gs" ]] || [[ "$mod_value" == "agi" ]] || [[ "$mod_value" == "task" ]] || [[ "$mod_value" == "default" ]]; then
-      MOD="$mod_value"
-    else
-      echo "Invalid value for --mod. Allowed values are 'gs', 'agi', 'task', 'default'."
+    # Check if the mod value is not empty
+    if [[ -z $mod_value ]]; then
+      echo "ERROR: --mod value cannot be empty. Exiting."
       exit 1
+    else
+      MOD="$mod_value"
     fi
     ;;
   --coLink_endpoint=*)
