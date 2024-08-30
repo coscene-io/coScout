@@ -44,6 +44,9 @@ arm64 | aarch64)
   ARCH="arm64"
   MESH_ARCH="aarch64"
   ;;
+armv7l)
+  ARCH="arm"
+  ;;
 *)
   echo "Unsupported architecture: $ARCH. Only x86_64 and arm64 are supported." >&2
   exit 1
@@ -71,6 +74,7 @@ REMOVE_CONFIG=0
 MOD="default"
 SN_FILE=""
 SN_FIELD=""
+USE_32BIT=0
 
 COLINK_ENDPOINT=""
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
@@ -93,6 +97,7 @@ usage: $0 [OPTIONS]
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
     --remove_config         Remove all config files, current device will be treated as a new device.
+    --use_32bit             Use 32-bit version for cos
 EOF
 }
 
@@ -128,7 +133,7 @@ download_file() {
   if [[ "$verify_cert" -eq 0 ]]; then
     curl -SLko "$dest" "$url" || error_exit "Failed to download $url without verifying the certificate"
   else
-    curl -SLo "$dest" "$url" || error_exit "Failed to download $url"
+    curl -SLko "$dest" "$url" || error_exit "Failed to download $url"
   fi
 }
 
@@ -189,6 +194,10 @@ while test $# -gt 0; do
     REMOVE_CONFIG=1
     shift
     ;;
+  --use_32bit)
+    USE_32BIT=1
+    shift # past argument
+    ;;
   *)
     echo "unknown option: $1"
     help
@@ -196,6 +205,14 @@ while test $# -gt 0; do
     ;;
   esac
 done
+
+if [[ $USE_32BIT -eq 1 ]]; then
+  if [[ $ARCH != "arm64" ]] && [[  $ARCH != "arm" ]]; then
+    echo "32-bit version is only supported on arm64 and arm architecture."
+    exit 1
+  fi
+  ARCH="arm"
+fi
 
 CUR_USER=${SUDO_USER:-${USER:-$(whoami)}}
 if [ -z "$CUR_USER" ]; then
@@ -291,8 +308,9 @@ if [ -e /usr/local/bin/coLink ]; then
   /usr/local/bin/coLink -V
 fi
 
-if [[ -z $COLINK_ENDPOINT ]]; then
-  echo "coLink endpoint is empty, skip coLink installation."
+# check coLink endpoint or mesh arch
+if [[ -z $COLINK_ENDPOINT ]] || [[ -z $MESH_ARCH ]]; then
+  echo "coLink endpoint and mesh arch are empty, skip coLink installation."
 else
   VERSION_ID=$(format "$(awk -F= '$1=="VERSION_ID" { print $2 ;}' /etc/os-release)")
   SYSTEM_NAME=$(format "$(awk -F= '$1=="NAME" { print $2 ;}' /etc/os-release)")
@@ -520,7 +538,7 @@ else
   TMP_FILE="$TEMP_DIR/cos_binaries/cos/$ARCH/cos"
   download_file "$TMP_FILE" "$DEFAULT_BINARY_URL"
   # check cos sha256sum
-  REMOTE_SHA256=$(curl -sSfL "$DEFAULT_BINARY_URL.sha256")
+  REMOTE_SHA256=$(curl -sSfLk "$DEFAULT_BINARY_URL.sha256")
 fi
 
 LOCAL_SHA256=$(sha256sum "$TMP_FILE" | awk '{print $1}')
