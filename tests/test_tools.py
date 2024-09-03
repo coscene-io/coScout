@@ -105,7 +105,7 @@ def test_limit_reader(tmp_path):
 
 def test_size_fmt():
     assert size_fmt(1) == "1.00B"
-    assert size_fmt(1024) == "1.00KB"
-    assert size_fmt(1024**2) == "1.00MB"
-    assert size_fmt(1024**3) == "1.00GB"
-    assert size_fmt(1024**4) == "1024.00GB"
+    assert size_fmt(1000) == "1.00KB"
+    assert size_fmt(1000**2) == "1.00MB"
+    assert size_fmt(1000**3) == "1.00GB"
+    assert size_fmt(1000**4) == "1000.00GB"
