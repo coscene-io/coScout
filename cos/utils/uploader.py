@@ -93,7 +93,7 @@ class S3MultipartUploader:
             )
 
             res_length = result.get("ResponseMetadata", {}).get("HTTPHeaders", {}).get("content-length", 0)
-            req_length = len(json.dumps(parts))
+            req_length = len(json.dumps(parts).encode("utf-8"))
             request_hook.increase_upload_bytes(req_length)
             request_hook.increase_download_bytes(int(res_length))
         except Exception as e:
@@ -183,7 +183,7 @@ class S3MultipartUploader:
                     uploaded_bytes += len(data)
 
                     res_length = part.get("ResponseMetadata", {}).get("HTTPHeaders", {}).get("content-length", 0)
-                    request_hook.increase_upload_bytes(uploaded_bytes)
+                    request_hook.increase_upload_bytes(len(data))
                     request_hook.increase_download_bytes(int(res_length))
 
                     # update info file
