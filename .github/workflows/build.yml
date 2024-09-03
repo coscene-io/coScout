@@ -187,20 +187,20 @@ jobs:
       - name: Upload beta files to oss
         shell: bash
         run: |
-          ossutil cp dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
-          ossutil cp dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/${{ matrix.file }}
-          ossutil cp dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
-          ossutil cp dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/version
-          ossutil cp dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
-          ossutil cp dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/cos.sha256
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/${{ matrix.file }}
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/version
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/cos.sha256
 
       - name: Upload latest files to oss
         if: github.event_name == 'release'
         shell: bash
         run: |
-          ossutil cp dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
-          ossutil cp dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/${{ matrix.file }}
-          ossutil cp dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
-          ossutil cp dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/version
-          ossutil cp dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
-          ossutil cp dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/cos.sha256
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/${{ matrix.file }}
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/version
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/cos.sha256
