@@ -229,6 +229,7 @@ class RestApiClient(ApiClient):
         description="",
         labels=None,
         device_name=None,
+        rules=None,
     ):
         """
         :param file_infos: 文件信息，是用make_file_info函数生成
@@ -236,6 +237,7 @@ class RestApiClient(ApiClient):
         :param description: 记录的描述
         :param labels: 每个记录的显示名称
         :param device_name: 关联的设备
+        :param rules: 关联的规则
         :return: 创建的新记录，以json形式呈现
         """
         url = "{api_base}/dataplatform/v1alpha2/{parent}/records".format(api_base=self.api_base, parent=self.project_name)
@@ -243,6 +245,7 @@ class RestApiClient(ApiClient):
             "title": title,
             "description": description,
             "labels": [self.ensure_label(lbl) for lbl in labels or []],
+            "rules": rules if rules else [],
         }
         if device_name:
             payload["device"] = {"name": device_name}

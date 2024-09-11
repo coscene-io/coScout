@@ -116,6 +116,7 @@ class DefaultMod(Mod):
             rc.record = {
                 "title": error_json.get("record", {}).get("title", "Device Auto Upload - " + str(rc.timestamp)),
                 "description": error_json.get("record", {}).get("description", "Device Auto Upload"),
+                "rules": error_json.get("record", {}).get("rules", []),
             }
             rc.labels = error_json.get("record", {}).get("labels", [])
             rc.paths_to_delete = error_json.get("paths_to_delete", [])

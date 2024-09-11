@@ -215,6 +215,7 @@ class ApiClient(metaclass=ABCMeta):
         description="",
         labels=None,
         device_name=None,
+        rules=None,
     ):
         """
         :param file_infos: 文件信息，是用make_file_info函数生成
@@ -222,6 +223,7 @@ class ApiClient(metaclass=ABCMeta):
         :param description: 记录的描述
         :param labels: 每个记录的显示名称
         :param device_name: 关联的设备
+        :param rules: 关联的规则
         :return: 创建的新记录，以json形式呈现
         """
         pass
@@ -254,6 +256,7 @@ class ApiClient(metaclass=ABCMeta):
         device_name=None,
         record_name=None,
         reserve_file_infos=False,
+        rules=None,
     ):
         """
         :param title: 记录的标题
@@ -263,8 +266,11 @@ class ApiClient(metaclass=ABCMeta):
         :param device_name: 关联的设备
         :param record_name: 记录的名称，如果不指定则自动生成
         :param reserve_file_infos: 是否使用已有的文件清单
+        :param rules
         :return: 创建的记录
         """
+        if rules is None:
+            rules = []
         _log.info("==> Start creating records for Project {project_name}".format(project_name=self.project_name))
         # 1. 计算sha256，生成文件清单
         file_infos = [f.complete(inplace=True) for f in file_infos]
@@ -272,11 +278,7 @@ class ApiClient(metaclass=ABCMeta):
         # 2. 为即将上传的文件创建记录
         if not record_name or str(record_name) == "True":
             record = self.create_record(
-                file_infos,
-                title,
-                description=description,
-                labels=labels,
-                device_name=device_name,
+                file_infos, title, description=description, labels=labels, device_name=device_name, rules=rules
             )
         else:
             record = self.get_record(record_name)

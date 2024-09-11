@@ -94,10 +94,10 @@ class Collector:
 
         result = textwrap.dedent(
             f"""\
-            ### {title}
-            the record is triggered @ {rec_cache.timestamp}
-            the files are from {rec_cache.base_dir_path}
-            on robot:
+            ### {title} \n
+            the record is triggered @ {rec_cache.timestamp} \n
+            the files are from {rec_cache.base_dir_path} \n
+            on robot: {self.device.get("serial_number", "")} \n
         """
         )
         if self.device:
@@ -115,6 +115,7 @@ class Collector:
             device_name=self.device.get("name"),
             record_name=rec_cache.record.get("name") if rec_cache.record else None,
             reserve_file_infos=True,
+            rules=rec_cache.record.get("rules", []),
         )
         self._upload_record_thumbnail(record.get("name"), rec_cache)
 

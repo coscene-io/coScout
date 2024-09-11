@@ -185,7 +185,7 @@ class GrpcClient(ApiClient):
                 raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to get project name")
 
-    def create_record(self, file_infos, title="Untitled", description="", labels=None, device_name=None):
+    def create_record(self, file_infos, title="Untitled", description="", labels=None, device_name=None, rules=None):
         try:
             device = device_pb2_resource.Device()
             if device_name:
