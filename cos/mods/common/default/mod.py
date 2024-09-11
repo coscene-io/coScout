@@ -220,6 +220,7 @@ class DefaultMod(Mod):
         state_dir: Path,
         project_name,
         trigger_ts,
+        rule,
         after=0,
     ):
         assert before >= 0 or after >= 0, "before or after must be greater than 0"
@@ -247,6 +248,8 @@ class DefaultMod(Mod):
             upload_data["record"]["description"] = description
         if labels:
             upload_data["record"]["labels"] = labels
+        if rule:
+            upload_data["record"]["rules"] = [{"id": rule.get("id", "")}]
 
         DefaultMod.__update_error_json(upload_data, json_path)
 
