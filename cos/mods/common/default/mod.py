@@ -268,12 +268,13 @@ class DefaultMod(Mod):
             return
 
         self.start_task_handler(self._api_client, self.conf.upload_files)
-        if (not self.conf.base_dirs or len(self.conf.base_dirs) == 0) and not self.conf.base_dir:
+        base_dirs = self.conf.base_dirs if self.conf.base_dirs else []
+        if len(base_dirs) == 0 and not self.conf.base_dir:
             _log.info("Default Mod base dirs/dir is empty, skip!")
             return
 
         base_dirs_set: set[Path] = set()
-        for base_dir_str in self.conf.base_dirs:
+        for base_dir_str in base_dirs:
             base_dir = Path(base_dir_str).absolute()
             base_dirs_set.add(base_dir)
         if self.conf.base_dir:
