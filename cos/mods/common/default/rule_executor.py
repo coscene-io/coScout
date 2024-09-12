@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from functools import partial
 
 from ruleengine.dsl.base_actions import noop_create_moment
-from ruleengine.dsl.validation.config_validator import validate_config, validate_config_wrapped
+from ruleengine.dsl.validation.config_validator import validate_config_wrapped
 from ruleengine.engine import Engine
 
 from cos.core.api import ApiClient
