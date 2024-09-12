@@ -35,7 +35,7 @@ _log = logging.getLogger(__name__)
 
 
 class UpdaterConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     interval_in_secs: int = 86400
     artifact_base_url: str = None
     binary_path: str = None
