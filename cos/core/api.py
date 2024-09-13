@@ -687,6 +687,30 @@ class ApiClient(metaclass=ABCMeta):
         pass
 
     @abstractmethod
+    def create_diagnosis_task(
+        self,
+        title: str,
+        description: str,
+        device: str,
+        rule_id: str,
+        rule_name: str,
+        trigger_time: int,
+        start_time: int,
+        end_time: int,
+    ):
+        """
+        :param title: 任务的标题
+        :param description: 任务的描述
+        :param device: 设备的resource name
+        :param rule_id: 规则的id
+        :param rule_name: 规则的名称
+        :param trigger_time: 触发时间
+        :param start_time: 采集目标起始时间
+        :param end_time: 采集目标结束时间
+        """
+        pass
+
+    @abstractmethod
     def list_device_tasks(self, device_name: str, filter_state: str = None) -> List[Dict]:
         """
         :param filter_state: 任务的状态

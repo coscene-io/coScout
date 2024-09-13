@@ -145,6 +145,18 @@ class Collector:
                     except Exception:
                         _log.error(f"Failed to sync task: {created_task.get('name')}", exc_info=True)
 
+        if rec_cache.diagnosis_task:
+            created_diagnosis_task = self.api.create_diagnosis_task(
+                title=record_title,
+                description=self.__make_record_description(record_title, rec_cache),
+                device=self.device.get("name"),
+                rule_id=rec_cache.diagnosis_task.get("rule_id"),
+                rule_name=rec_cache.diagnosis_task.get("rule_name"),
+                trigger_time=rec_cache.diagnosis_task.get("trigger_time"),
+                start_time=rec_cache.diagnosis_task.get("start_time"),
+                end_time=rec_cache.diagnosis_task.get("end_time"),
+            )
+            rec_cache.diagnosis_task["name"] = created_diagnosis_task.get("name")
         return record
 
     def handle_record(self, rec_cache: RecordCache):
@@ -215,6 +227,8 @@ class Collector:
                     if task_name:
                         self.api.put_task_tags(task_name, {"recordName": rec_cache.record.get("name")})
                         self.api.update_task_state(task_name, "SUCCEEDED")
+                    if rec_cache.diagnosis_task.get("name", ""):
+                        self.api.update_task_state(rec_cache.diagnosis_task.get("name"), "SUCCEEDED")
 
                     rec_cache.uploaded = True
                     rec_cache.save_state()

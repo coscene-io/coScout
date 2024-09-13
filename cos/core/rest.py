@@ -949,6 +949,72 @@ class RestApiClient(ApiClient):
         except RequestException as e:
             six.raise_from(CosException("Create the task failed"), e)
 
+    def create_diagnosis_task(
+        self,
+        title: str,
+        description: str,
+        device: str,
+        rule_id: str,
+        rule_name: str,
+        trigger_time: int,
+        start_time: int,
+        end_time: int,
+    ):
+        """
+        :param title: task 标题
+        :param description: task 描述
+        :param device: 设备名称
+        :param rule_id: 规则id
+        :param rule_name: 规则名称
+        :param trigger_time: 触发时间
+        :param start_time: 开始时间
+        :param end_time: 结束时间
+        """
+        url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
+            api_base=self.api_base,
+            parent=self.project_name,
+        )
+
+        try:
+            response = requests.post(
+                url=url,
+                json={
+                    "title": title,
+                    "description": description,
+                    "category": "DIAGNOSIS",
+                    "state": "PROCESSING",
+                    "diagnosisTaskDetail": {
+                        "device": device,
+                        "startTime": {
+                            "seconds": start_time,
+                            "nanos": 0,
+                        },
+                        "endTime": {
+                            "seconds": end_time,
+                            "nanos": 0,
+                        },
+                        "ruleSpecId": rule_id,
+                        "displayName": rule_name,
+                        "triggerTime": {
+                            "seconds": trigger_time,
+                            "nanos": 0,
+                        },
+                    },
+                },
+                headers=self.request_headers,
+                auth=self.basic_auth,
+                timeout=10,
+            )
+            if response.status_code == 401:
+                raise Unauthorized("Unauthorized")
+            response.raise_for_status()
+
+            result = response.json()
+            _log.info("==> Create the diagnosis task succeed {task_name}".format(task_name=result.get("name")))
+            return result
+        except RequestException as e:
+            six.raise_from(CosException("Create the diagnosis task failed"), e)
+
     def list_device_tasks(self, device_name: str, filter_state: str = None) -> List[Dict]:
         url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
             api_base=self.api_base,

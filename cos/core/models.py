@@ -176,6 +176,8 @@ class RecordCache(BaseState):
 
     # upload task
     task: dict = {}
+    # diagnosis task
+    diagnosis_task: dict = {}
 
     # the original files (might be copied from file_infos)
     files: List[str] = []

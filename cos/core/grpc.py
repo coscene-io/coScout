@@ -45,7 +45,7 @@ from coscene.openapi.dataplatform.v1alpha1.resources import (
     device_pb2 as device_pb2_resource,
     event_pb2 as event_pb2_resource,
 )
-from coscene.openapi.dataplatform.v1alpha1.enums import task_category_pb2
+from coscene.openapi.dataplatform.v1alpha1.enums import task_category_pb2, task_state_pb2
 
 from google.protobuf import json_format, field_mask_pb2, duration_pb2, timestamp_pb2
 from google.rpc.code_pb2 import UNAUTHENTICATED
@@ -86,7 +86,8 @@ class GrpcClient(ApiClient):
         self._api_key = self.state.api_key
         self._conf = conf
 
-        self._channel = self.__create_client_channel(self.__get_address(), self.__get_basic_token("apikey", self._api_key))
+        self._channel = self.__create_client_channel(self.__get_address(),
+                                                     self.__get_basic_token("apikey", self._api_key))
 
     def __get_address(self):
         url = self._conf.server_url.removeprefix("https://").removeprefix("http://")
@@ -290,7 +291,8 @@ class GrpcClient(ApiClient):
                 raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to get device")
 
-    def register_device(self, serial_number=None, display_name=None, description=None, labels=None, tags=None) -> dict | None:
+    def register_device(self, serial_number=None, display_name=None, description=None, labels=None,
+                        tags=None) -> dict | None:
         if not serial_number:
             return None
 
@@ -521,12 +523,14 @@ class GrpcClient(ApiClient):
 
     def count_diagnosis_rules_hit(self, diagnosis_rule, hit, device) -> dict:
         try:
-            req = diagnosis_rule_pb2.CountDiagnosisRuleHitsRequest(diagnosis_rule=diagnosis_rule, hit=hit, device=device)
+            req = diagnosis_rule_pb2.CountDiagnosisRuleHitsRequest(diagnosis_rule=diagnosis_rule, hit=hit,
+                                                                   device=device)
             stub = diagnosis_rule_pb2_grpc.DiagnosisServiceStub(self._channel)
             res = stub.CountDiagnosisRuleHits(req, timeout=10)
 
             result = json_format.MessageToDict(res)
-            _log.info("==> Fetched diagnosis rule hit counts for {diagnosis_rule}".format(diagnosis_rule=diagnosis_rule))
+            _log.info(
+                "==> Fetched diagnosis rule hit counts for {diagnosis_rule}".format(diagnosis_rule=diagnosis_rule))
             return result
         except grpc.RpcError as rpc_error:
             _log.error("count diagnosis rule failure: %s", rpc_error)
@@ -591,6 +595,20 @@ class GrpcClient(ApiClient):
             if UNAUTHENTICATED == rpc_error.code():
                 raise Unauthorized("Unauthorized")
             raise RuntimeError("Failed to update task state")
+
+    def create_diagnosis_task(
+        self,
+        title: str,
+        description: str,
+        device: str,
+        rule_id: str,
+        rule_name: str,
+        trigger_time: int,
+        start_time: int,
+        end_time: int,
+    ):
+        _log.error("create_diagnosis_task is not implemented")
+        return
 
     def list_device_tasks(self, device_name: str, filter_state: str = None) -> List[Dict]:
         try:
