@@ -26,3 +26,4 @@ coscene_io_coscene_openapi_community_nipunn1313_mypy_grpc==3.6.0.1.2024091207554
 coscene_io_coscene_openapi_grpc_python==1.66.1.1.20240912075549+0b61fe68881e
 coscene_io_coscene_openapi_community_nipunn1313_mypy==3.6.0.1.20240912075549+0b61fe68881e
 bufbuild_protovalidate_community_nipunn1313_mypy_grpc==3.6.0.1.20240717164558+a6c49f84cc0f
+googleapis_googleapis_community_nipunn1313_mypy_grpc==3.6.0.1.20240827201746+e7f8d366f526
