@@ -25,3 +25,4 @@ numpy==2.1.0
 coscene_io_coscene_openapi_community_nipunn1313_mypy_grpc==3.6.0.1.20240912075549+0b61fe68881e
 coscene_io_coscene_openapi_grpc_python==1.66.1.1.20240912075549+0b61fe68881e
 coscene_io_coscene_openapi_community_nipunn1313_mypy==3.6.0.1.20240912075549+0b61fe68881e
+bufbuild-protovalidate-community-nipunn1313-mypy-grpc==3.6.0.1.20240717164558+a6c49f84cc0f
