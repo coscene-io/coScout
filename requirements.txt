@@ -22,6 +22,6 @@ boto3~=1.34.100
 numpy==2.1.0
 
 # --extra-index-url https://buf.build/gen/python
-coscene_io_coscene_openapi_community_nipunn1313_mypy_grpc==3.6.0.1.20240912075549+0b61fe68881e
-coscene_io_coscene_openapi_grpc_python==1.66.1.1.20240912075549+0b61fe68881e
-coscene_io_coscene_openapi_community_nipunn1313_mypy==3.6.0.1.20240912075549+0b61fe68881e
+coscene_io_coscene_openapi_community_nipunn1313_mypy_grpc
+coscene_io_coscene_openapi_grpc_python
+coscene_io_coscene_openapi_community_nipunn1313_mypy
