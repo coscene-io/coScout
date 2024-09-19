@@ -138,7 +138,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           . "$HOME/.cargo/env"
 
-          python3 -m pip install -r requirements.txt --extra-index-url https://buf.build/gen/python --no-cache-dir
+          python3 -m pip install -r requirements.txt --extra-index-url https://buf.build/gen/python
           mkdir -p dist
           bash .github/scripts/update_version.sh $version
 

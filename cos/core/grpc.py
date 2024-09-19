@@ -290,7 +290,8 @@
 #                 raise Unauthorized("Unauthorized")
 #             raise RuntimeError("Failed to get device")
 #
-#     def register_device(self, serial_number=None, display_name=None, description=None, labels=None, tags=None) -> dict | None:
+#     def register_device(self,
+#     serial_number=None, display_name=None, description=None, labels=None, tags=None) -> dict | None:
 #         if not serial_number:
 #             return None
 #
