@@ -131,8 +131,14 @@ class S3MultipartUploader:
         self.stop_event.clear()
 
         with open(self.multipart_info_file_path, "r+", encoding="utf8") as multipart_info_file:
-            # get current part number
-            multipart_info = json.load(multipart_info_file)
+            try:
+                # get current part number
+                multipart_info = json.load(multipart_info_file)
+            except Exception:
+                Path(self.multipart_info_file_path).unlink(missing_ok=True)
+                _log.error(f"handle multipart file {self.multipart_info_file_path} error", exc_info=True)
+                raise CosException("handle multipart file error")
+
             starting_part_num = multipart_info["current_part_number"]
             uploaded_bytes = multipart_info["uploaded_bytes"]
             parts = multipart_info["parts"]

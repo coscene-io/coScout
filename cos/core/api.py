@@ -215,6 +215,7 @@ class ApiClient(metaclass=ABCMeta):
         description="",
         labels=None,
         device_name=None,
+        rules=None,
     ):
         """
         :param file_infos: 文件信息，是用make_file_info函数生成
@@ -222,6 +223,7 @@ class ApiClient(metaclass=ABCMeta):
         :param description: 记录的描述
         :param labels: 每个记录的显示名称
         :param device_name: 关联的设备
+        :param rules: 关联的规则
         :return: 创建的新记录，以json形式呈现
         """
         pass
@@ -254,6 +256,7 @@ class ApiClient(metaclass=ABCMeta):
         device_name=None,
         record_name=None,
         reserve_file_infos=False,
+        rules=None,
     ):
         """
         :param title: 记录的标题
@@ -263,8 +266,11 @@ class ApiClient(metaclass=ABCMeta):
         :param device_name: 关联的设备
         :param record_name: 记录的名称，如果不指定则自动生成
         :param reserve_file_infos: 是否使用已有的文件清单
+        :param rules
         :return: 创建的记录
         """
+        if rules is None:
+            rules = []
         _log.info("==> Start creating records for Project {project_name}".format(project_name=self.project_name))
         # 1. 计算sha256，生成文件清单
         file_infos = [f.complete(inplace=True) for f in file_infos]
@@ -272,11 +278,7 @@ class ApiClient(metaclass=ABCMeta):
         # 2. 为即将上传的文件创建记录
         if not record_name or str(record_name) == "True":
             record = self.create_record(
-                file_infos,
-                title,
-                description=description,
-                labels=labels,
-                device_name=device_name,
+                file_infos, title, description=description, labels=labels, device_name=device_name, rules=rules
             )
         else:
             record = self.get_record(record_name)
@@ -685,6 +687,30 @@ class ApiClient(metaclass=ABCMeta):
         pass
 
     @abstractmethod
+    def create_diagnosis_task(
+        self,
+        title: str,
+        description: str,
+        device: str,
+        rule_id: str,
+        rule_name: str,
+        trigger_time: int,
+        start_time: int,
+        end_time: int,
+    ):
+        """
+        :param title: 任务的标题
+        :param description: 任务的描述
+        :param device: 设备的resource name
+        :param rule_id: 规则的id
+        :param rule_name: 规则的名称
+        :param trigger_time: 触发时间
+        :param start_time: 采集目标起始时间
+        :param end_time: 采集目标结束时间
+        """
+        pass
+
+    @abstractmethod
     def list_device_tasks(self, device_name: str, filter_state: str = None) -> List[Dict]:
         """
         :param filter_state: 任务的状态
@@ -723,15 +749,7 @@ class ApiClient(metaclass=ABCMeta):
 
 
 def get_client(api_conf: ApiClientConfig) -> ApiClient:
-    if (
-        api_conf.type == "grpc"
-        or api_conf.server_url.startswith("https://openapi")
-        or api_conf.server_url.startswith("openapi")
-    ):
-        from cos.core.grpc import GrpcClient
-
-        return GrpcClient(api_conf)
-    elif api_conf.type == "rest":
+    if api_conf.type == "rest":
         from cos.core.rest import RestApiClient
 
         return RestApiClient(api_conf)

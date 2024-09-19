@@ -229,6 +229,7 @@ class RestApiClient(ApiClient):
         description="",
         labels=None,
         device_name=None,
+        rules=None,
     ):
         """
         :param file_infos: 文件信息，是用make_file_info函数生成
@@ -236,6 +237,7 @@ class RestApiClient(ApiClient):
         :param description: 记录的描述
         :param labels: 每个记录的显示名称
         :param device_name: 关联的设备
+        :param rules: 关联的规则
         :return: 创建的新记录，以json形式呈现
         """
         url = "{api_base}/dataplatform/v1alpha2/{parent}/records".format(api_base=self.api_base, parent=self.project_name)
@@ -243,6 +245,7 @@ class RestApiClient(ApiClient):
             "title": title,
             "description": description,
             "labels": [self.ensure_label(lbl) for lbl in labels or []],
+            "rules": rules if rules else [],
         }
         if device_name:
             payload["device"] = {"name": device_name}
@@ -945,6 +948,72 @@ class RestApiClient(ApiClient):
             return result
         except RequestException as e:
             six.raise_from(CosException("Create the task failed"), e)
+
+    def create_diagnosis_task(
+        self,
+        title: str,
+        description: str,
+        device: str,
+        rule_id: str,
+        rule_name: str,
+        trigger_time: int,
+        start_time: int,
+        end_time: int,
+    ):
+        """
+        :param title: task 标题
+        :param description: task 描述
+        :param device: 设备名称
+        :param rule_id: 规则id
+        :param rule_name: 规则名称
+        :param trigger_time: 触发时间
+        :param start_time: 开始时间
+        :param end_time: 结束时间
+        """
+        url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
+            api_base=self.api_base,
+            parent=self.project_name,
+        )
+
+        try:
+            response = requests.post(
+                url=url,
+                json={
+                    "title": title,
+                    "description": description,
+                    "category": "DIAGNOSIS",
+                    "state": "PROCESSING",
+                    "diagnosisTaskDetail": {
+                        "device": device,
+                        "startTime": {
+                            "seconds": start_time,
+                            "nanos": 0,
+                        },
+                        "endTime": {
+                            "seconds": end_time,
+                            "nanos": 0,
+                        },
+                        "ruleSpecId": rule_id,
+                        "displayName": rule_name,
+                        "triggerTime": {
+                            "seconds": trigger_time,
+                            "nanos": 0,
+                        },
+                    },
+                },
+                headers=self.request_headers,
+                auth=self.basic_auth,
+                timeout=10,
+            )
+            if response.status_code == 401:
+                raise Unauthorized("Unauthorized")
+            response.raise_for_status()
+
+            result = response.json()
+            _log.info("==> Create the diagnosis task succeed {task_name}".format(task_name=result.get("name")))
+            return result
+        except RequestException as e:
+            six.raise_from(CosException("Create the diagnosis task failed"), e)
 
     def list_device_tasks(self, device_name: str, filter_state: str = None) -> List[Dict]:
         url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(

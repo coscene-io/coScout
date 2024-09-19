@@ -116,9 +116,14 @@ class DefaultMod(Mod):
             rc.record = {
                 "title": error_json.get("record", {}).get("title", "Device Auto Upload - " + str(rc.timestamp)),
                 "description": error_json.get("record", {}).get("description", "Device Auto Upload"),
+                "rules": error_json.get("record", {}).get("rules", []),
             }
             rc.labels = error_json.get("record", {}).get("labels", [])
             rc.paths_to_delete = error_json.get("paths_to_delete", [])
+
+            # update diagnosis task
+            rc.diagnosis_task = error_json.get("diagnosis_task", {})
+
             rc.save_state()
             _log.info(f"==> Converted error log to record state: {rc.state_path}")
 
@@ -219,6 +224,7 @@ class DefaultMod(Mod):
         state_dir: Path,
         project_name,
         trigger_ts,
+        rule,
         after=0,
     ):
         assert before >= 0 or after >= 0, "before or after must be greater than 0"
@@ -234,6 +240,7 @@ class DefaultMod(Mod):
             "flag": False,
             "projectName": project_name,
             "record": {},
+            "diagnosis_task": {},
             "cut": {
                 "extraFiles": extra_files,
                 "start": start_time,
@@ -246,6 +253,13 @@ class DefaultMod(Mod):
             upload_data["record"]["description"] = description
         if labels:
             upload_data["record"]["labels"] = labels
+        if rule:
+            upload_data["record"]["rules"] = [{"id": rule.get("id", "")}]
+            upload_data["diagnosis_task"]["rule_id"] = rule.get("id", "")
+            upload_data["diagnosis_task"]["rule_name"] = rule.get("name", "")
+        upload_data["diagnosis_task"]["trigger_time"] = trigger_ts
+        upload_data["diagnosis_task"]["start_time"] = start_time
+        upload_data["diagnosis_task"]["end_time"] = end_time
 
         DefaultMod.__update_error_json(upload_data, json_path)
 
