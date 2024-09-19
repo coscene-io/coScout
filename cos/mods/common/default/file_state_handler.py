@@ -141,6 +141,10 @@ class FileStateHandler:
 
         # Update the state of files in the new directories
         for src_dir in new_src_dirs_set:
+            if not src_dir.is_dir():
+                _log.warning(f"{str(src_dir.absolute())} is not dir, skip handle.")
+                continue
+
             for entry in src_dir.iterdir():
                 for handler in self.file_handlers:
                     # Skip if the file handler does not support entry
