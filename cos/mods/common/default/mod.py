@@ -273,7 +273,6 @@ class DefaultMod(Mod):
                 Path(file),
                 partial(DefaultMod.__dump_upload_json, state_dir=state_dir),
             )
-        time.sleep(90)
 
     def run(self):
         if not self.conf.enabled:
