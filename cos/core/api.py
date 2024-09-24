@@ -528,6 +528,27 @@ class ApiClient(metaclass=ABCMeta):
         """
         pass
 
+    @abstractmethod
+    def clone_file(self, record_name: str, file_name: str, sha256: str):
+        """
+        @param file_name: full file name
+        @param record_name: record name
+        @param sha256: file sha256
+        :return: file info
+        """
+        pass
+
+    def check_clone_file(self, record_name: str, file_info: FileInfo) -> bool:
+        rc = RecordName.from_str(record_name)
+        file_info.complete(inplace=True, skip_sha256=False)
+
+        file_name = rc.name + "/files/" + file_info.filename
+        try:
+            self.clone_file(rc.name, file_name, file_info.sha256)
+            return True
+        except Exception:
+            return False
+
     def resumable_upload_files(self, record_name, file_infos, remove_after=False):
         """
         :param record_name: 记录的 resource_name
@@ -559,9 +580,11 @@ class ApiClient(metaclass=ABCMeta):
         sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
         for f in sorted_files:
             try:
-                key = rc.simple_record_name() + "/files/" + f.filename
-                uploader = S3MultipartUploader(s3_client, bucket="default", file_path=str(f.filepath.absolute()), key=key)
-                uploader.upload()
+                has_clone = self.check_clone_file(record_name=record_name, file_info=f)
+                if not has_clone:
+                    key = rc.simple_record_name() + "/files/" + f.filename
+                    uploader = S3MultipartUploader(s3_client, bucket="default", file_path=str(f.filepath.absolute()), key=key)
+                    uploader.upload()
                 if remove_after:
                     f.filepath.unlink()
                     _log.info(f"==> Deleted after upload: {f.filepath}")
