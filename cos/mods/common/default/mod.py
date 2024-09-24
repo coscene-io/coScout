@@ -302,7 +302,6 @@ class DefaultMod(Mod):
         self.start_log_listener(state_dir)
         self.start_static_file_listener(state_dir)
 
-
         # handle error json files
         _log.info(f"==> Search for new error json {str(state_dir)}")
 
@@ -338,7 +337,6 @@ class DefaultMod(Mod):
             _log.info("Thread start static file listener")
         else:
             _log.info("Thread already start static file listener, skip!")
-
 
     def start_log_listener(self, state_dir: Path):
         log_thread_flag = False
