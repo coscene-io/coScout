@@ -62,6 +62,7 @@ class DefaultMod(Mod):
         self._api_client = api_client
         self.conf = _conf
         self.log_thread_name = "cos-log-listener"
+        self.static_file_thread_name = "cos-static-file-listener"
         self.task_thread_name = "cos-task-handler"
         self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs, self.conf.scan_history)
 
@@ -263,14 +264,16 @@ class DefaultMod(Mod):
 
         DefaultMod.__update_error_json(upload_data, json_path)
 
-    def __handle_unprocessed_files(self, state_dir: Path):
-        _log.info(f"==> Search for files in {self.file_state_handler.src_dirs}")
-        for file in self.file_state_handler.get_files():
-            self.file_state_handler.static_file_diagnosis(
-                self._api_client,
+    @staticmethod
+    def __handle_unprocessed_files(api_client: ApiClient, file_state_handler: FileStateHandler, state_dir: Path):
+        _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
+        for file in file_state_handler.get_files():
+            file_state_handler.static_file_diagnosis(
+                api_client,
                 Path(file),
                 partial(DefaultMod.__dump_upload_json, state_dir=state_dir),
             )
+        time.sleep(90)
 
     def run(self):
         if not self.conf.enabled:
@@ -297,9 +300,9 @@ class DefaultMod(Mod):
         temp_dir = DEFAULT_MOD_TEMP_DIR
         temp_dir.mkdir(parents=True, exist_ok=True)
         self.start_log_listener(state_dir)
+        self.start_static_file_listener(state_dir)
 
-        # handle waiting to upload files
-        self.__handle_unprocessed_files(state_dir)
+
         # handle error json files
         _log.info(f"==> Search for new error json {str(state_dir)}")
 
@@ -312,6 +315,30 @@ class DefaultMod(Mod):
             except Exception:
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {error_json_path}", exc_info=True)
+
+    def start_static_file_listener(self, state_dir: Path):
+        static_file_thread_flag = False
+
+        for t in threading.enumerate():
+            if t.name == self.static_file_thread_name:
+                static_file_thread_flag = True
+
+        if not static_file_thread_flag:
+            t = threading.Thread(
+                target=DefaultMod.__handle_unprocessed_files,
+                args=(
+                    self._api_client,
+                    self.file_state_handler,
+                    state_dir,
+                ),
+                name=self.static_file_thread_name,
+                daemon=True,
+            )
+            t.start()
+            _log.info("Thread start static file listener")
+        else:
+            _log.info("Thread already start static file listener, skip!")
+
 
     def start_log_listener(self, state_dir: Path):
         log_thread_flag = False
