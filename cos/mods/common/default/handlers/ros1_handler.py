@@ -54,7 +54,8 @@ class Ros1Handler(BaseModel, HandlerInterface):
 
     def msg_iterator(self, file_path: Path):
         with AnyReader([file_path]) as reader:
-            for connection, timestamp, rawdata in reader.messages():
+            connections = [conn for conn in reader.connections if conn.topic == "/error_report"]
+            for connection, timestamp, rawdata in reader.messages(connections=connections):
                 try:
                     msg = reader.deserialize(rawdata, connection.msgtype)
                     yield RuleDataItem(
