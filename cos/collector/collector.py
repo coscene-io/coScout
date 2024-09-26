@@ -238,7 +238,7 @@ class Collector:
                         rec_cache.delete_cache_dir()
 
     # noinspection PyBroadException
-    def run(self, network_queue: Queue):
+    def run(self, network_queue: Queue, error_queue: Queue):
         _log.info(f"==> Search for new record in {RECORD_DIR_PATH}")
         total_records = 0
         for record in RecordCache.find_all():
@@ -248,9 +248,10 @@ class Collector:
             except Unauthorized as e:
                 _log.error(f"==> Unauthorized when handling: {record.key}", exc_info=True)
                 raise Unauthorized(e)
-            except Exception:
+            except Exception as e:
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {record.key}", exc_info=True)
+                error_queue.put({"code": type(e).__name__, "error_msg": str(e)})
 
             # 不管上述结果如何，超过一定时间后，删除 record 文件夹
             _log.debug(f"==> Record previously uploaded: {record.key}")

@@ -32,11 +32,12 @@ class HeartbeatConfig(BaseModel):
 
 
 class Heartbeat:
-    def __init__(self, api_conf: ApiClientConfig, conf: HeartbeatConfig, network_queue: Queue):
+    def __init__(self, api_conf: ApiClientConfig, conf: HeartbeatConfig, network_queue: Queue, error_queue: Queue):
         self.conf = conf
         self.api_conf = api_conf
         self.api_client = get_client(api_conf)
         self._network_queue = network_queue
+        self._error_queue = error_queue
 
     def heartbeat(self):
         def signal_handler(sig, _):
@@ -68,6 +69,16 @@ class Heartbeat:
                     request_hook.increase_upload_bytes(usage.get("upload", 0))
                     request_hook.increase_download_bytes(usage.get("download", 0))
 
+                error_info = {}
+                if self._error_queue.empty():
+                    error_info["code"] = "SUCCEEDED"
+
+                if self._error_queue.qsize() > 10:
+                    while not self._error_queue.empty():
+                        _error = self._error_queue.get()
+                        error_info["code"] = _error.get("code", "unknown")
+                        error_info["error_msg"] = _error.get("error_msg", "")
+
                 self.api_client.send_heartbeat(
                     device_name=device["name"],
                     cos_version=current_version,
@@ -75,6 +86,7 @@ class Heartbeat:
                         "upload_bytes": request_hook.get_network_upload_usage(),
                         "download_bytes": request_hook.get_network_download_usage(),
                     },
+                    extra_info=error_info,
                 )
                 request_hook.reset_network_usage()
             except Exception:
