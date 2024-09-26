@@ -298,7 +298,7 @@ class DefaultMod(Mod):
         state_dir.mkdir(parents=True, exist_ok=True)
         temp_dir = DEFAULT_MOD_TEMP_DIR
         temp_dir.mkdir(parents=True, exist_ok=True)
-        self.start_log_listener(state_dir)
+        # self.start_log_listener(state_dir)
         self.start_static_file_listener(state_dir)
 
         # handle error json files
