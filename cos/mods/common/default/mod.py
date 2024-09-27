@@ -226,6 +226,7 @@ class DefaultMod(Mod):
         project_name,
         trigger_ts,
         rule,
+        white_list,
         after=0,
     ):
         assert before >= 0 or after >= 0, "before or after must be greater than 0"
