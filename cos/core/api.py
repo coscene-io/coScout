@@ -571,8 +571,6 @@ class ApiClient(metaclass=ABCMeta):
                     exc_info=True,
                 )
                 all_completed = False
-        if all_completed:
-            _log.info("==> All files uploaded")
         return all_completed
 
     # endregion
