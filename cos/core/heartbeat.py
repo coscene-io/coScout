@@ -35,7 +35,6 @@ class Heartbeat:
     def __init__(self, api_conf: ApiClientConfig, conf: HeartbeatConfig, network_queue: Queue, error_queue: Queue):
         self.conf = conf
         self.api_conf = api_conf
-        self.api_client = get_client(api_conf)
         self._network_queue = network_queue
         self._error_queue = error_queue
 
@@ -53,7 +52,8 @@ class Heartbeat:
                     time.sleep(self.conf.interval_in_secs)
                     continue
 
-                api_state = self.api_client.state.load_state()
+                api_client = get_client(self.api_conf)
+                api_state = api_client.state.load_state()
                 device = api_state.device
                 if not device or not device.get("name"):
                     _log.warning("device name not found, skipping")
@@ -79,7 +79,7 @@ class Heartbeat:
                         error_info["code"] = _error.get("code", "unknown")
                         error_info["error_msg"] = _error.get("error_msg", "")
 
-                self.api_client.send_heartbeat(
+                api_client.send_heartbeat(
                     device_name=device["name"],
                     cos_version=current_version,
                     network_usage={
