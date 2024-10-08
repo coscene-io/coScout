@@ -675,6 +675,31 @@ class RestApiClient(ApiClient):
         except RequestException as e:
             six.raise_from(CosException("Request security token failed"), e)
 
+    def clone_file(self, record_name: str, file_name: str, sha256: str):
+        _log.info("==> Check clone file")
+
+        url = "{api_base}/dataplatform/v1alpha3/{record_name}/files:clone".format(
+            api_base=self.api_base, record_name=record_name
+        )
+        payload = {"sha256": sha256, "file": file_name}
+        try:
+            response = requests.post(
+                url=url,
+                json=payload,
+                headers=self.request_headers,
+                auth=self.basic_auth,
+                timeout=10,
+            )
+            if response.status_code == 401:
+                raise Unauthorized("Unauthorized")
+
+            response.raise_for_status()
+            result = response.json()
+            _log.info("==> Clone file succeed, skip upload!")
+            return result
+        except RequestException as e:
+            six.raise_from(CosException("Clone file failed"), e)
+
     # endregion
 
     # region label
