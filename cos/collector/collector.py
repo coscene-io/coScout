@@ -17,6 +17,8 @@ import json
 import logging.config
 import textwrap
 from datetime import datetime
+from typing import List
+from multiprocessing import Queue
 
 from pydantic import BaseModel
 
@@ -27,7 +29,6 @@ from cos.utils import hardlink, is_image
 from .codes import EventCodeManager
 from ..core import request_hook
 from ..core.exceptions import Unauthorized
-from ..version import get_version
 
 _log = logging.getLogger(__name__)
 
@@ -202,19 +203,37 @@ class Collector:
                 rec_cache.save_state()
                 self.code_mgr.hit(rec_cache.event_code)
 
+                task_name = rec_cache.task.get("name", "")
+                if task_name:
+                    self.api.put_task_tags(task_name, {"recordName": rec_cache.record.get("name", "")})
+
             # 找齐文件后，如果还没有 uploaded (上传完毕).
             if not rec_cache.uploaded:
                 # 5. 上传文件传输完毕后更新
                 filepaths = rec_cache.list_files()
                 rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath) in filepaths]
-                all_completed = self.api.resumable_upload_files(
-                    record_name=rec_cache.record["name"],
-                    file_infos=rec_cache.file_infos,
-                    remove_after=True,
-                )
+
+                file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
+                sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
+
+                all_completed = True
+                for file_info in sorted_files:
+                    if rec_cache.state_path.absolute().exists():
+                        _rc = RecordCache.load_state_from_disk(rec_cache.state_path.absolute())
+                        if _rc.skipped:
+                            return
+
+                    _completed = self.api.resumable_upload_files(
+                        record_name=rec_cache.record["name"],
+                        file_infos=[file_info],
+                        remove_after=True,
+                    )
+                    all_completed = all_completed and _completed
 
                 # 6. 完成记录。如果需要，删除 record 文件夹
                 if all_completed:
+                    _log.info("==> All files uploaded")
+
                     if not self._upload_finish_flag_file(rec_cache.record["name"], rec_cache):
                         _log.error(f"==> Failed to upload finish flag file: {rec_cache.key}")
                         return
@@ -238,7 +257,7 @@ class Collector:
                         rec_cache.delete_cache_dir()
 
     # noinspection PyBroadException
-    def run(self):
+    def run(self, network_queue: Queue, error_queue: Queue):
         _log.info(f"==> Search for new record in {RECORD_DIR_PATH}")
         total_records = 0
         for record in RecordCache.find_all():
@@ -248,27 +267,19 @@ class Collector:
             except Unauthorized as e:
                 _log.error(f"==> Unauthorized when handling: {record.key}", exc_info=True)
                 raise Unauthorized(e)
-            except Exception:
+            except Exception as e:
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {record.key}", exc_info=True)
+                error_queue.put({"code": type(e).__name__, "error_msg": str(e)})
 
             # 不管上述结果如何，超过一定时间后，删除 record 文件夹
             _log.debug(f"==> Record previously uploaded: {record.key}")
             record.delete_cache_dir(self.conf.delete_after_interval_in_hours)
 
-        if self.device and "name" in self.device:
-            current_version = get_version()
-            if current_version is None:
-                current_version = ""
-            self.api.send_heartbeat(
-                device_name=self.device["name"],
-                cos_version=current_version,
-                network_usage={
-                    "upload_bytes": request_hook.get_network_upload_usage(),
-                    "download_bytes": request_hook.get_network_download_usage(),
-                },
-            )
-            request_hook.reset_network_usage()
-
-        self.api.counter("coscout_collector_run_successful_total")
-        self.api.gauge("coscout_collector_record_cache_count", total_records)
+            try:
+                network_queue.put(
+                    {"upload": request_hook.get_network_upload_usage(), "download": request_hook.get_network_download_usage()}
+                )
+                request_hook.reset_network_usage()
+            except Exception:
+                _log.error("update network usage error", exc_info=True)
