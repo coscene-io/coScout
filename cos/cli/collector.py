@@ -80,7 +80,13 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
                 convert_code=mod.convert_code,
                 api_client=api_client,
             )
-            start_collector_listener(conf=conf.collector, api_client=api_client, code_manager=code_manager)
+            start_collector_listener(
+                conf=conf.collector,
+                api_client=api_client,
+                code_manager=code_manager,
+                network_queue=network_queue,
+                error_queue=error_queue,
+            )
         except DeviceNotFound:
             _log.warning("No device found, check if robot.yaml is present waiting for next scan.")
             error_queue.put({"code": "DeviceNotFound"})
@@ -99,7 +105,9 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
         time.sleep(conf.collector.scan_interval_in_secs)
 
 
-def start_collector_listener(conf: CollectorConfig, api_client: ApiClient, code_manager: EventCodeManager):
+def start_collector_listener(
+    conf: CollectorConfig, api_client: ApiClient, code_manager: EventCodeManager, network_queue: Queue, error_queue: Queue
+):
     thread_name = "cos-collector-thread"
     collector_thread_flag = False
 
@@ -111,7 +119,7 @@ def start_collector_listener(conf: CollectorConfig, api_client: ApiClient, code_
         _collector = Collector(conf=conf, api_client=api_client, code_manager=code_manager)
         t = threading.Thread(
             target=_collector.run,
-            args=(),
+            args=(network_queue, error_queue),
             name=thread_name,
             daemon=True,
         )
