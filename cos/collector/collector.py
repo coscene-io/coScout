@@ -17,6 +17,7 @@ import json
 import logging.config
 import textwrap
 from datetime import datetime
+from typing import List
 from multiprocessing import Queue
 
 from pydantic import BaseModel
@@ -202,19 +203,37 @@ class Collector:
                 rec_cache.save_state()
                 self.code_mgr.hit(rec_cache.event_code)
 
+                task_name = rec_cache.task.get("name", "")
+                if task_name:
+                    self.api.put_task_tags(task_name, {"recordName": rec_cache.record.get("name", "")})
+
             # 找齐文件后，如果还没有 uploaded (上传完毕).
             if not rec_cache.uploaded:
                 # 5. 上传文件传输完毕后更新
                 filepaths = rec_cache.list_files()
                 rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath) in filepaths]
-                all_completed = self.api.resumable_upload_files(
-                    record_name=rec_cache.record["name"],
-                    file_infos=rec_cache.file_infos,
-                    remove_after=True,
-                )
+
+                file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
+                sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
+
+                all_completed = True
+                for file_info in sorted_files:
+                    if rec_cache.state_path.absolute().exists():
+                        _rc = RecordCache.load_state_from_disk(rec_cache.state_path.absolute())
+                        if _rc.skipped:
+                            return
+
+                    _completed = self.api.resumable_upload_files(
+                        record_name=rec_cache.record["name"],
+                        file_infos=[file_info],
+                        remove_after=True,
+                    )
+                    all_completed = all_completed and _completed
 
                 # 6. 完成记录。如果需要，删除 record 文件夹
                 if all_completed:
+                    _log.info("==> All files uploaded")
+
                     if not self._upload_finish_flag_file(rec_cache.record["name"], rec_cache):
                         _log.error(f"==> Failed to upload finish flag file: {rec_cache.key}")
                         return

@@ -17,6 +17,7 @@ import logging.config
 import shutil
 import signal
 import sys
+import threading
 import time
 from multiprocessing import Process, Queue
 
@@ -25,7 +26,7 @@ import psutil
 from kebab import KebabSource
 
 from cos.cli.context import Context
-from cos.collector import Collector, EventCodeManager
+from cos.collector import Collector, EventCodeManager, CollectorConfig
 from cos.collector.mod import Mod
 from cos.collector.openers import CosHandler
 from cos.config import AppConfig
@@ -79,7 +80,7 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
                 convert_code=mod.convert_code,
                 api_client=api_client,
             )
-            Collector(conf=conf.collector, api_client=api_client, code_manager=code_manager).run(network_queue, error_queue)
+            start_collector_listener(conf=conf.collector, api_client=api_client, code_manager=code_manager)
         except DeviceNotFound:
             _log.warning("No device found, check if robot.yaml is present waiting for next scan.")
             error_queue.put({"code": "DeviceNotFound"})
@@ -96,6 +97,28 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
             _log.error("An error occurred when running collector", exc_info=True)
             error_queue.put({"code": type(e).__name__, "error_msg": str(e)})
         time.sleep(conf.collector.scan_interval_in_secs)
+
+
+def start_collector_listener(conf: CollectorConfig, api_client: ApiClient, code_manager: EventCodeManager):
+    thread_name = "cos-collector-thread"
+    collector_thread_flag = False
+
+    for t in threading.enumerate():
+        if t.name == thread_name:
+            collector_thread_flag = True
+
+    if not collector_thread_flag:
+        _collector = Collector(conf=conf, api_client=api_client, code_manager=code_manager)
+        t = threading.Thread(
+            target=_collector.run,
+            args=(),
+            name=thread_name,
+            daemon=True,
+        )
+        t.start()
+        _log.info("Thread start run collector")
+    else:
+        _log.info("Thread already start run collector, skip!")
 
 
 def load_mod(api_client: ApiClient | None, conf: AppConfig):
