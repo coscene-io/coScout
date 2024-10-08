@@ -19,6 +19,7 @@ import signal
 import sys
 import threading
 import time
+from multiprocessing import Process, Queue
 
 import click
 import psutil
@@ -32,6 +33,7 @@ from cos.config import AppConfig
 from cos.constant import COS_ONEFILE_PATH
 from cos.core.api import ApiClient, ApiClientState, get_client
 from cos.core.exceptions import DeviceNotFound, Unauthorized
+from cos.core.heartbeat import Heartbeat, HeartbeatConfig
 from cos.core.register import Register
 from cos.install.updater import Updater
 from cos.mods import ModLoader
@@ -41,7 +43,7 @@ _log = logging.getLogger(__name__)
 
 
 # noinspection PyBroadException
-def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandler):
+def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandler, network_queue: Queue, error_queue: Queue):
     def signal_handler(sig, _):
         print(f"\nProgram exiting gracefully by {sig}")
         sys.exit(0)
@@ -49,6 +51,7 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
     signal.signal(signal.SIGINT, signal_handler)
 
     cos_url_handler.set_api_client(None)
+    source.disable_reload()
     load_mod(None, conf)
     is_first_run = True
     while True:
@@ -80,6 +83,7 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
             start_collector_listener(conf=conf.collector, api_client=api_client, code_manager=code_manager)
         except DeviceNotFound:
             _log.warning("No device found, check if robot.yaml is present waiting for next scan.")
+            error_queue.put({"code": "DeviceNotFound"})
         except Unauthorized:
             _log.error(
                 "Unauthorized, please check your device authorization status.",
@@ -88,9 +92,10 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
             state = ApiClientState().load_state()
             state.authorized_device(0, "")
             state.save_state()
-        except Exception:
+        except Exception as e:
             # 打印错误，但保证循环不被打断
             _log.error("An error occurred when running collector", exc_info=True)
+            error_queue.put({"code": type(e).__name__, "error_msg": str(e)})
         time.sleep(conf.collector.scan_interval_in_secs)
 
 
@@ -133,7 +138,18 @@ def load_mod(api_client: ApiClient | None, conf: AppConfig):
 def daemon(ctx: Context):
     clean_old_binary()
     _log.info(f"Starting collector daemon with {get_version()}")
-    run_forever(source=ctx.source, conf=ctx.conf, cos_url_handler=ctx.cos_url_handler)
+
+    network_queue = Queue()
+    error_queue = Queue()
+    handle = Process(target=run_forever, args=(ctx.source, ctx.conf, ctx.cos_url_handler, network_queue, error_queue))
+
+    heart = Heartbeat(api_conf=ctx.conf.api, conf=HeartbeatConfig(), network_queue=network_queue, error_queue=error_queue)
+    monitor = Process(target=heart.heartbeat, args=())
+
+    monitor.start()
+    handle.start()
+    handle.join()
+    monitor.join()
 
 
 def clean_old_binary():
