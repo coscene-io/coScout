@@ -427,12 +427,13 @@ class ApiClient(metaclass=ABCMeta):
         return is_authorized
 
     @abstractmethod
-    def send_heartbeat(self, device_name: str, cos_version: str, network_usage: dict):
+    def send_heartbeat(self, device_name: str, cos_version: str, network_usage: dict, extra_info: dict):
         """
         send device heartbeat
         :param device_name: device resource name, e.g. "devices/xxx"
         :param cos_version: cos version
         :param network_usage: network usage
+        :param extra_info: extra info
         :return: empty
         """
         pass
