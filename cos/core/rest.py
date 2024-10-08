@@ -548,11 +548,13 @@ class RestApiClient(ApiClient):
         except RequestException as e:
             six.raise_from(CosException("Check the device status failed"), e)
 
-    def send_heartbeat(self, device_name: str, cos_version: str, network_usage: dict):
+    def send_heartbeat(self, device_name: str, cos_version: str, network_usage: dict, extra_info: dict):
         """
         send device heartbeat
         :param device_name: device resource name, e.g. "devices/xxx"
         :param cos_version: cos version
+        :param network_usage: network usage
+        :param extra_info: extra info
         :return: empty
         """
 
@@ -568,6 +570,7 @@ class RestApiClient(ApiClient):
                 "download_bytes": network_usage.get("download_bytes", 0),
                 "upload_bytes": network_usage.get("upload_bytes", 0),
             },
+            "extra_info": extra_info,
         }
 
         try:
