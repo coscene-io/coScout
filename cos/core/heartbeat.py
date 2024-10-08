@@ -51,14 +51,14 @@ class Heartbeat:
                 if not ApiClientState().load_state().is_authed():
                     _log.info("device is not authed, skip heartbeat.")
                     time.sleep(self.conf.interval_in_secs)
-                    return
+                    continue
 
                 api_state = self.api_client.state.load_state()
                 device = api_state.device
                 if not device or not device.get("name"):
                     _log.warning("device name not found, skipping")
                     time.sleep(self.conf.interval_in_secs)
-                    return
+                    continue
 
                 current_version = get_version()
                 if current_version is None:
