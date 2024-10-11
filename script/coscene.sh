@@ -382,7 +382,7 @@ Description=coLink Client Daemon
 
 [Service]
 WorkingDirectory=/etc
-ExecStart=/usr/local/bin/colink --endpoint ${COLINK_ENDPOINT}/api --network ${COLINK_NETWORK} --allow-ssh
+ExecStart=/usr/local/bin/colink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
 Restart=always
 RestartSec=30
 
