@@ -63,6 +63,7 @@ class DefaultMod(Mod):
         self.conf = _conf
         self.log_thread_name = "cos-log-listener"
         self.task_thread_name = "cos-task-handler"
+        self.static_file_thread_name = "cos-static-file-listener"
         self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs, self.conf.scan_history)
 
         super().__init__()
@@ -116,9 +117,14 @@ class DefaultMod(Mod):
             rc.record = {
                 "title": error_json.get("record", {}).get("title", "Device Auto Upload - " + str(rc.timestamp)),
                 "description": error_json.get("record", {}).get("description", "Device Auto Upload"),
+                "rules": error_json.get("record", {}).get("rules", []),
             }
             rc.labels = error_json.get("record", {}).get("labels", [])
             rc.paths_to_delete = error_json.get("paths_to_delete", [])
+
+            # update diagnosis task
+            rc.diagnosis_task = error_json.get("diagnosis_task", {})
+
             rc.save_state()
             _log.info(f"==> Converted error log to record state: {rc.state_path}")
 
@@ -219,6 +225,8 @@ class DefaultMod(Mod):
         state_dir: Path,
         project_name,
         trigger_ts,
+        rule,
+        white_list,
         after=0,
     ):
         assert before >= 0 or after >= 0, "before or after must be greater than 0"
@@ -234,6 +242,7 @@ class DefaultMod(Mod):
             "flag": False,
             "projectName": project_name,
             "record": {},
+            "diagnosis_task": {},
             "cut": {
                 "extraFiles": extra_files,
                 "start": start_time,
@@ -246,14 +255,22 @@ class DefaultMod(Mod):
             upload_data["record"]["description"] = description
         if labels:
             upload_data["record"]["labels"] = labels
+        if rule:
+            upload_data["record"]["rules"] = [{"id": rule.get("id", "")}]
+            upload_data["diagnosis_task"]["rule_id"] = rule.get("id", "")
+            upload_data["diagnosis_task"]["rule_name"] = rule.get("name", "")
+        upload_data["diagnosis_task"]["trigger_time"] = trigger_ts
+        upload_data["diagnosis_task"]["start_time"] = start_time
+        upload_data["diagnosis_task"]["end_time"] = end_time
 
         DefaultMod.__update_error_json(upload_data, json_path)
 
-    def __handle_unprocessed_files(self, state_dir: Path):
-        _log.info(f"==> Search for files in {self.file_state_handler.src_dirs}")
-        for file in self.file_state_handler.get_files():
-            self.file_state_handler.static_file_diagnosis(
-                self._api_client,
+    @staticmethod
+    def __handle_unprocessed_files(api_client: ApiClient, file_state_handler: FileStateHandler, state_dir: Path):
+        _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
+        for file in file_state_handler.get_files():
+            file_state_handler.static_file_diagnosis(
+                api_client,
                 Path(file),
                 partial(DefaultMod.__dump_upload_json, state_dir=state_dir),
             )
@@ -264,12 +281,13 @@ class DefaultMod(Mod):
             return
 
         self.start_task_handler(self._api_client, self.conf.upload_files)
-        if (not self.conf.base_dirs or len(self.conf.base_dirs) == 0) and not self.conf.base_dir:
+        base_dirs = self.conf.base_dirs if self.conf.base_dirs else []
+        if len(base_dirs) == 0 and not self.conf.base_dir:
             _log.info("Default Mod base dirs/dir is empty, skip!")
             return
 
         base_dirs_set: set[Path] = set()
-        for base_dir_str in self.conf.base_dirs:
+        for base_dir_str in base_dirs:
             base_dir = Path(base_dir_str).absolute()
             base_dirs_set.add(base_dir)
         if self.conf.base_dir:
@@ -282,9 +300,8 @@ class DefaultMod(Mod):
         temp_dir = DEFAULT_MOD_TEMP_DIR
         temp_dir.mkdir(parents=True, exist_ok=True)
         self.start_log_listener(state_dir)
+        self.start_static_file_listener(state_dir)
 
-        # handle waiting to upload files
-        self.__handle_unprocessed_files(state_dir)
         # handle error json files
         _log.info(f"==> Search for new error json {str(state_dir)}")
 
@@ -322,6 +339,29 @@ class DefaultMod(Mod):
             _log.info("Thread start log listener")
         else:
             _log.info("Thread already start log listener, skip!")
+
+    def start_static_file_listener(self, state_dir: Path):
+        static_file_thread_flag = False
+
+        for t in threading.enumerate():
+            if t.name == self.static_file_thread_name:
+                static_file_thread_flag = True
+
+        if not static_file_thread_flag:
+            t = threading.Thread(
+                target=DefaultMod.__handle_unprocessed_files,
+                args=(
+                    self._api_client,
+                    self.file_state_handler,
+                    state_dir,
+                ),
+                name=self.static_file_thread_name,
+                daemon=True,
+            )
+            t.start()
+            _log.info("Thread start static file listener")
+        else:
+            _log.info("Thread already start static file listener, skip!")
 
     def start_task_handler(self, api_client: ApiClient, upload_files: list[str]):
         if upload_files is None:

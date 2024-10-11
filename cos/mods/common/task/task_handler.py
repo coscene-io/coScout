@@ -16,6 +16,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import List
 
 from cos.core.api import ApiClient
 from cos.core.models import FileInfo, RecordCache
@@ -41,6 +42,27 @@ class TaskHandler:
         for task in tasks:
             self._handle_upload_task(task)
         _log.info("==> Task mod check upload tasks done.")
+
+        cancelling_tasks = self._api.list_device_tasks(device.get("name"), "CANCELLING")
+        self._handle_cancel_tasks(cancelling_tasks)
+        _log.info("==> Task mod check cancelling tasks done.")
+
+    def _handle_cancel_tasks(self, tasks: List[dict]):
+        task_names = [task.get("name", "") for task in tasks]
+        for rc in RecordCache.find_all():
+            try:
+                task_name = rc.task.get("name", "")
+                if not task_name:
+                    continue
+                if task_name not in task_names:
+                    continue
+
+                rc.skipped = True
+                rc.save_state()
+
+                self._api.update_task_state(task_name, "CANCELLED")
+            except Exception:
+                _log.error("handle cancel tasks error", exc_info=True)
 
     def _handle_upload_task(self, task):
         start_time = self._parse_timestr(task.get("uploadTaskDetail", {}).get("startTime", ""))

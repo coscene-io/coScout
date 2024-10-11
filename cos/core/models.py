@@ -93,7 +93,7 @@ class FileInfo(BaseModel):
         # refill sha256
         sha256 = self.sha256
         if not skip_sha256 and (not sha256 or force_rehash):
-            _log.debug(f"==> Calculating file sha256 for {self.filepath}")
+            _log.info(f"==> Calculating file sha256 for {self.filepath}")
             sha256 = sha256_file(self.filepath, size, block_size)
 
         if inplace:
@@ -176,6 +176,8 @@ class RecordCache(BaseState):
 
     # upload task
     task: dict = {}
+    # diagnosis task
+    diagnosis_task: dict = {}
 
     # the original files (might be copied from file_infos)
     files: List[str] = []

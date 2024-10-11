@@ -48,19 +48,42 @@ jobs:
             os: linux
             label: ubuntu-latest
             file: cos
+            container: coscene/nuitka:ubuntu-16.04
+            cache: true
           - arch: arm64
             os: linux
             label: [ linux-arm-64-8c-32g-300gb ]
             file: cos
+            container: coscene/nuitka:ubuntu-16.04
+            cache: true
+          - arch: arm
+            os: linux
+            label: [ linux-arm-64-8c-32g-300gb ]
+            file: cos
+            container: coscene/nuitka:ubuntu-16.04-32bit-arm
+            cache: false
+#          - arch: 386
+#            os: linux
+#            label: ubuntu-latest
+#            file: cos
+#            container: coscene/nuitka:ubuntu-16.04-32bit-x86
+#            cache: false
     runs-on: ${{ matrix.label }}
     needs: [check, lint-n-test]
-    container: coscene/nuitka:ubuntu-16.04
+    container: ${{ matrix.container }}
     permissions:
       contents: write
     env:
       ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
     steps:
+      - name: Check-out repo
+        uses: actions/checkout@v1
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+          token: ${{ secrets.GH_TOKEN }}
+
       - name: Setup Environment Variables
         shell: bash
         run: |
@@ -72,18 +95,36 @@ jobs:
         run: |
           apt update
           apt install -y software-properties-common
-          add-apt-repository -y ppa:git-core/ppa
-          apt update
-          apt install -y git patchelf ccache
 
-      - name: Check-out repo
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          submodules: 'true'
-          token: ${{ secrets.GH_TOKEN }}
+          # Add repositories one at a time
+          add-apt-repository -y ppa:git-core/ppa
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+          apt update
+          apt install -y git patchelf ccache curl gcc-9 g++-9 unzip
+
+          # Set GCC 9 as the default
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 60 --slave /usr/bin/g++ g++ /usr/bin/g++-9
+          update-alternatives --set gcc /usr/bin/gcc-9
+#
+#      - name: Download and compile CMake
+#        run: |
+#          wget https://github.com/Kitware/CMake/releases/download/v3.21.0/cmake-3.21.0.tar.gz
+#          tar xzf cmake-3.21.0.tar.gz
+#          cd cmake-3.21.0
+#          mkdir build && cd build
+#          ../bootstrap --prefix=$HOME/cmake
+#          make -j$(nproc)
+#          make install
+#
+#      - name: Add CMake to PATH
+#        run: echo "$HOME/cmake/bin" >> $GITHUB_PATH
+#
+#      - name: Verify CMake installation
+#        run: cmake --version
 
       - uses: actions/cache@v3
+        if: ${{ matrix.cache }}
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-${{ matrix.arch }}-pip
@@ -94,11 +135,15 @@ jobs:
         env:
           version: ${{ needs.check.outputs.version }}
         run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          . "$HOME/.cargo/env"
+
           python3 -m pip install -r requirements.txt --extra-index-url https://buf.build/gen/python
           mkdir -p dist
           bash .github/scripts/update_version.sh $version
 
       - name: Cache Nuitka cache directory
+        if: ${{ matrix.cache }}
         uses: actions/cache@v3
         with:
           path: ${{ env.NUITKA_CACHE_DIR }}
@@ -107,6 +152,14 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-
             ${{ runner.os }}-${{ runner.arch }}-python-
             ${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Setup build environment
+        if: ${{ matrix.arch == 'arm' }}
+        shell: bash
+        run: |
+          echo "CFLAGS=${CFLAGS} -marm" >> $GITHUB_ENV
+          python3 -m nuitka --version
+          python3 -c 'import struct;print( 8 * struct.calcsize("P"))'
 
       - name: Build cos binary
         shell: bash
@@ -121,45 +174,33 @@ jobs:
         env:
           version: ${{ needs.check.outputs.version }}
         run: |
+          mkdir -p dist
           echo $version > dist/version
           sha256sum dist/${{ matrix.file }} | cut -f 1 -d " " > dist/cos.sha256
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: cos_${{matrix.os}}_${{matrix.arch}}
-          path: |
-            dist/${{ matrix.file }}
-            dist/cos.sha256
-            dist/version
+      - name: Install and Configure ossutil
+        shell: bash
+        run: |
+          curl https://gosspublic.alicdn.com/ossutil/install.sh | bash
+          ossutil config -e oss-cn-hangzhou.aliyuncs.com -i ${{ secrets.ACCESS_KEY_ID }} -k ${{ secrets.ACCESS_KEY_SECRET }}
 
-      - name: Upload beta version to oss
-        uses: tvrcgo/oss-action@d805009d52698055a35b19c14d190a02d04a4f43
-        with:
-          key-id: ${{ secrets.ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
-          region: oss-cn-hangzhou
-          bucket: coscene-download
-          assets: |
-            dist/${{ matrix.file }}:/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
-            dist/${{ matrix.file }}:/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/${{ matrix.file }}
-            dist/version:/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
-            dist/version:/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/version
-            dist/cos.sha256:/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
-            dist/cos.sha256:/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/cos.sha256
+      - name: Upload beta files to oss
+        shell: bash
+        run: |
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/${{ matrix.file }}
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/version
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/beta/cos.sha256
 
-      - name: Upload latest version to oss
-        uses: tvrcgo/oss-action@d805009d52698055a35b19c14d190a02d04a4f43
+      - name: Upload latest files to oss
         if: github.event_name == 'release'
-        with:
-          key-id: ${{ secrets.ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACCESS_KEY_SECRET }}
-          region: oss-cn-hangzhou
-          bucket: coscene-download
-          assets: |
-            dist/${{ matrix.file }}:/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
-            dist/${{ matrix.file }}:/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/${{ matrix.file }}
-            dist/version:/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
-            dist/version:/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/version
-            dist/cos.sha256:/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
-            dist/cos.sha256:/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/cos.sha256
+        shell: bash
+        run: |
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/${{ matrix.file }}
+          ossutil cp -f dist/${{ matrix.file }} oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/${{ matrix.file }}
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/version
+          ossutil cp -f dist/version oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/version
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/${{ needs.check.outputs.version }}/cos.sha256
+          ossutil cp -f dist/cos.sha256 oss://coscene-download/coscout/${{ matrix.os }}/${{ matrix.arch }}/latest/cos.sha256

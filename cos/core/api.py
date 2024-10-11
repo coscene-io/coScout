@@ -215,6 +215,7 @@ class ApiClient(metaclass=ABCMeta):
         description="",
         labels=None,
         device_name=None,
+        rules=None,
     ):
         """
         :param file_infos: 文件信息，是用make_file_info函数生成
@@ -222,6 +223,7 @@ class ApiClient(metaclass=ABCMeta):
         :param description: 记录的描述
         :param labels: 每个记录的显示名称
         :param device_name: 关联的设备
+        :param rules: 关联的规则
         :return: 创建的新记录，以json形式呈现
         """
         pass
@@ -254,6 +256,7 @@ class ApiClient(metaclass=ABCMeta):
         device_name=None,
         record_name=None,
         reserve_file_infos=False,
+        rules=None,
     ):
         """
         :param title: 记录的标题
@@ -263,20 +266,19 @@ class ApiClient(metaclass=ABCMeta):
         :param device_name: 关联的设备
         :param record_name: 记录的名称，如果不指定则自动生成
         :param reserve_file_infos: 是否使用已有的文件清单
+        :param rules
         :return: 创建的记录
         """
+        if rules is None:
+            rules = []
         _log.info("==> Start creating records for Project {project_name}".format(project_name=self.project_name))
-        # 1. 计算sha256，生成文件清单
-        file_infos = [f.complete(inplace=True) for f in file_infos]
+        # 1. 生成文件清单
+        file_infos = [f.complete(inplace=True, skip_sha256=True) for f in file_infos]
 
         # 2. 为即将上传的文件创建记录
         if not record_name or str(record_name) == "True":
             record = self.create_record(
-                file_infos,
-                title,
-                description=description,
-                labels=labels,
-                device_name=device_name,
+                file_infos, title, description=description, labels=labels, device_name=device_name, rules=rules
             )
         else:
             record = self.get_record(record_name)
@@ -425,12 +427,13 @@ class ApiClient(metaclass=ABCMeta):
         return is_authorized
 
     @abstractmethod
-    def send_heartbeat(self, device_name: str, cos_version: str, network_usage: dict):
+    def send_heartbeat(self, device_name: str, cos_version: str, network_usage: dict, extra_info: dict):
         """
         send device heartbeat
         :param device_name: device resource name, e.g. "devices/xxx"
         :param cos_version: cos version
         :param network_usage: network usage
+        :param extra_info: extra info
         :return: empty
         """
         pass
@@ -526,6 +529,27 @@ class ApiClient(metaclass=ABCMeta):
         """
         pass
 
+    @abstractmethod
+    def clone_file(self, record_name: str, file_name: str, sha256: str):
+        """
+        @param file_name: full file name
+        @param record_name: record name
+        @param sha256: file sha256
+        :return: file info
+        """
+        pass
+
+    def check_clone_file(self, record_name: str, file_info: FileInfo) -> bool:
+        rc = RecordName.from_str(record_name)
+        file_info.complete(inplace=True, skip_sha256=False)
+
+        file_name = rc.name + "/files/" + file_info.filename
+        try:
+            self.clone_file(rc.name, file_name, file_info.sha256)
+            return True
+        except Exception:
+            return False
+
     def resumable_upload_files(self, record_name, file_infos, remove_after=False):
         """
         :param record_name: 记录的 resource_name
@@ -557,9 +581,11 @@ class ApiClient(metaclass=ABCMeta):
         sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
         for f in sorted_files:
             try:
-                key = rc.simple_record_name() + "/files/" + f.filename
-                uploader = S3MultipartUploader(s3_client, bucket="default", file_path=str(f.filepath.absolute()), key=key)
-                uploader.upload()
+                has_clone = self.check_clone_file(record_name=record_name, file_info=f)
+                if not has_clone:
+                    key = rc.simple_record_name() + "/files/" + f.filename
+                    uploader = S3MultipartUploader(s3_client, bucket="default", file_path=str(f.filepath.absolute()), key=key)
+                    uploader.upload()
                 if remove_after:
                     f.filepath.unlink()
                     _log.info(f"==> Deleted after upload: {f.filepath}")
@@ -569,8 +595,6 @@ class ApiClient(metaclass=ABCMeta):
                     exc_info=True,
                 )
                 all_completed = False
-        if all_completed:
-            _log.info("==> All files uploaded")
         return all_completed
 
     # endregion
@@ -685,6 +709,30 @@ class ApiClient(metaclass=ABCMeta):
         pass
 
     @abstractmethod
+    def create_diagnosis_task(
+        self,
+        title: str,
+        description: str,
+        device: str,
+        rule_id: str,
+        rule_name: str,
+        trigger_time: int,
+        start_time: int,
+        end_time: int,
+    ):
+        """
+        :param title: 任务的标题
+        :param description: 任务的描述
+        :param device: 设备的resource name
+        :param rule_id: 规则的id
+        :param rule_name: 规则的名称
+        :param trigger_time: 触发时间
+        :param start_time: 采集目标起始时间
+        :param end_time: 采集目标结束时间
+        """
+        pass
+
+    @abstractmethod
     def list_device_tasks(self, device_name: str, filter_state: str = None) -> List[Dict]:
         """
         :param filter_state: 任务的状态
@@ -727,9 +775,5 @@ def get_client(api_conf: ApiClientConfig) -> ApiClient:
         from cos.core.rest import RestApiClient
 
         return RestApiClient(api_conf)
-    elif api_conf.type == "grpc":
-        from cos.core.grpc import GrpcClient
-
-        return GrpcClient(api_conf)
     else:
         raise ValueError(f"Unsupported api client type: {api_conf.type}")

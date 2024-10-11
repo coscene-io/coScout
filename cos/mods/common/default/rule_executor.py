@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from functools import partial
 
 from ruleengine.dsl.base_actions import noop_create_moment
-from ruleengine.dsl.validation.config_validator import validate_config
+from ruleengine.dsl.validation.config_validator import validate_config_wrapped
 from ruleengine.engine import Engine
 
 from cos.core.api import ApiClient
@@ -38,9 +38,12 @@ def build_engine_from_config(configs, upload_fn=None, api_client: ApiClient = No
         for rule_set_spec in project_rule_set_spec["rules"]:
             if not rule_set_spec.get("enabled", False):
                 continue
-            validation_result, rules = validate_config(
+            validation_result, rules = validate_config_wrapped(
                 rule_set_spec,
-                {"upload": partial(upload_fn, project_name=project_name), "create_moment": noop_create_moment},
+                {
+                    "upload": lambda rule: partial(upload_fn, project_name=project_name, rule=rule),
+                    "create_moment": lambda _: noop_create_moment,
+                },
                 project_name,
             )
             if not validation_result["success"]:

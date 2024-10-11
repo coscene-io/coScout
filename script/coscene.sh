@@ -44,6 +44,9 @@ arm64 | aarch64)
   ARCH="arm64"
   MESH_ARCH="aarch64"
   ;;
+armv7l)
+  ARCH="arm"
+  ;;
 *)
   echo "Unsupported architecture: $ARCH. Only x86_64 and arm64 are supported." >&2
   exit 1
@@ -72,6 +75,8 @@ MOD="default"
 SN_FILE=""
 SN_FIELD=""
 COLINK_NETWORK=""
+USE_32BIT=0
+
 COLINK_ENDPOINT=""
 
 COLINK_VERSION=1.0.0
@@ -90,12 +95,13 @@ usage: $0 [OPTIONS]
     --beta                  Use beta version for cos
     --use_local             Use local binary file zip path e.g. /xx/path/xx.zip
     --disable_service       Disable systemd or upstart service installation
-    --mod                   Select the mod to install - gs, agi, task, default (default is 'default')
+    --mod                   Select the mod to install - task, default or other custom mod (default is 'default')
     --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
     --remove_config         Remove all config files, current device will be treated as a new device
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
+    --use_32bit             Use 32-bit version for cos
 EOF
 }
 
@@ -131,7 +137,7 @@ download_file() {
   if [[ "$verify_cert" -eq 0 ]]; then
     curl -SLko "$dest" "$url" || error_exit "Failed to download $url without verifying the certificate"
   else
-    curl -SLo "$dest" "$url" || error_exit "Failed to download $url"
+    curl -SLko "$dest" "$url" || error_exit "Failed to download $url"
   fi
 }
 
@@ -169,11 +175,12 @@ while test $# -gt 0; do
   --mod=*)
     mod_value="${1#*=}"
     shift
-    if [[ "$mod_value" == "gs" ]] || [[ "$mod_value" == "agi" ]] || [[ "$mod_value" == "task" ]] || [[ "$mod_value" == "default" ]]; then
-      MOD="$mod_value"
-    else
-      echo "Invalid value for --mod. Allowed values are 'gs', 'agi', 'task', 'default'."
+    # Check if the mod value is not empty
+    if [[ -z $mod_value ]]; then
+      echo "ERROR: --mod value cannot be empty. Exiting."
       exit 1
+    else
+      MOD="$mod_value"
     fi
     ;;
   --coLink_endpoint=*)
@@ -196,6 +203,10 @@ while test $# -gt 0; do
     COLINK_NETWORK="${1#*=}"
     shift
     ;;
+  --use_32bit)
+    USE_32BIT=1
+    shift # past argument
+    ;;
   *)
     echo "unknown option: $1"
     help
@@ -203,6 +214,14 @@ while test $# -gt 0; do
     ;;
   esac
 done
+
+if [[ $USE_32BIT -eq 1 ]]; then
+  if [[ $ARCH != "arm64" ]] && [[  $ARCH != "arm" ]]; then
+    echo "32-bit version is only supported on arm64 and arm architecture."
+    exit 1
+  fi
+  ARCH="arm"
+fi
 
 CUR_USER=${SUDO_USER:-${USER:-$(whoami)}}
 if [ -z "$CUR_USER" ]; then
@@ -308,8 +327,9 @@ if [ -e /usr/local/bin/colink ]; then
   /usr/local/bin/colink -V
 fi
 
-if [[ -z $COLINK_ENDPOINT ]]; then
-  echo "coLink endpoint is empty, skip coLink installation."
+# check coLink endpoint or mesh arch
+if [[ -z $COLINK_ENDPOINT ]] || [[ -z $MESH_ARCH ]]; then
+  echo "coLink endpoint and mesh arch are empty, skip coLink installation."
 else
   VERSION_ID=$(format "$(awk -F= '$1=="VERSION_ID" { print $2 ;}' /etc/os-release)")
   SYSTEM_NAME=$(format "$(awk -F= '$1=="NAME" { print $2 ;}' /etc/os-release)")
@@ -541,7 +561,7 @@ else
   TMP_FILE="$TEMP_DIR/cos_binaries/cos/$ARCH/cos"
   download_file "$TMP_FILE" "$DEFAULT_BINARY_URL"
   # check cos sha256sum
-  REMOTE_SHA256=$(curl -sSfL "$DEFAULT_BINARY_URL.sha256")
+  REMOTE_SHA256=$(curl -sSfLk "$DEFAULT_BINARY_URL.sha256")
 fi
 
 LOCAL_SHA256=$(sha256sum "$TMP_FILE" | awk '{print $1}')

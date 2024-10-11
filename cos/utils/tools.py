@@ -24,8 +24,8 @@ def size_fmt(size):
     units = ["B", "KB", "MB", "GB"]
     i = 0
 
-    while size >= 1024 and i < len(units) - 1:
-        size /= 1024
+    while size >= 1000 and i < len(units) - 1:
+        size /= 1000
         i += 1
 
     return f"{size:.2f}{units[i]}"

@@ -13,17 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import os
-import json
+import threading
 from pathlib import Path
+from typing import List
 
 import boto3
-import threading
-from typing import List
-from botocore.exceptions import EndpointConnectionError
+from botocore.exceptions import ClientError
 
 from cos.core import request_hook
+from cos.core.exceptions import CosException
 from cos.utils import tools
 
 _log = logging.getLogger(__name__)
@@ -92,11 +93,22 @@ class S3MultipartUploader:
             )
 
             res_length = result.get("ResponseMetadata", {}).get("HTTPHeaders", {}).get("content-length", 0)
-            req_length = len(json.dumps(parts))
+            req_length = len(json.dumps(parts).encode("utf-8"))
             request_hook.increase_upload_bytes(req_length)
             request_hook.increase_download_bytes(int(res_length))
-        except EndpointConnectionError as e:
-            raise ConnectionError(f"Cannot complete the upload due to connectivity problem - {str(e)}")
+        except Exception as e:
+            if isinstance(e, ClientError):
+                error_message = e.response.get("Error", {}).get("Message", "Unknown")
+                if "Invalid upload id".lower() in error_message.lower():
+                    _log.error(f"Error while complete multipart - {str(e)}")
+                    _info_file = Path(self.multipart_info_file_path)
+                    if _info_file.exists():
+                        _info_file.unlink()
+
+                    raise CosException("Invalid upload id, will try to create new upload")
+            if isinstance(e, ConnectionError):
+                raise ConnectionError(f"Connection problem while complete multipart - {str(e)}")
+            raise CosException(f"Error while complete multipart - {str(e)}")
 
         # os.remove(self.multipart_info_file_path)
         self.stop_event.set()
@@ -119,8 +131,14 @@ class S3MultipartUploader:
         self.stop_event.clear()
 
         with open(self.multipart_info_file_path, "r+", encoding="utf8") as multipart_info_file:
-            # get current part number
-            multipart_info = json.load(multipart_info_file)
+            try:
+                # get current part number
+                multipart_info = json.load(multipart_info_file)
+            except Exception:
+                Path(self.multipart_info_file_path).unlink(missing_ok=True)
+                _log.error(f"handle multipart file {self.multipart_info_file_path} error", exc_info=True)
+                raise CosException("handle multipart file error")
+
             starting_part_num = multipart_info["current_part_number"]
             uploaded_bytes = multipart_info["uploaded_bytes"]
             parts = multipart_info["parts"]
@@ -153,14 +171,25 @@ class S3MultipartUploader:
                             UploadId=multipart_id,
                             PartNumber=curr_part_num,
                         )
-                    except EndpointConnectionError as e:
-                        raise ConnectionError(f"Connection problem while uploading part {curr_part_num} - {str(e)}")
+                    except Exception as e:
+                        if isinstance(e, ClientError):
+                            error_message = e.response.get("Error", {}).get("Message", "Unknown")
+                            if "Invalid upload id".lower() in error_message.lower():
+                                _log.error(f"Error while uploading part {curr_part_num} - {str(e)}")
+                                _info_file = Path(self.multipart_info_file_path)
+                                if _info_file.exists():
+                                    _info_file.unlink()
+
+                                raise CosException("Invalid upload id, will try to create new upload")
+                        if isinstance(e, ConnectionError):
+                            raise ConnectionError(f"Connection problem while uploading part {curr_part_num} - {str(e)}")
+                        raise CosException(f"Error while uploading part {curr_part_num} - {str(e)}")
 
                     parts.append({"PartNumber": curr_part_num, "ETag": part["ETag"]})
                     uploaded_bytes += len(data)
 
                     res_length = part.get("ResponseMetadata", {}).get("HTTPHeaders", {}).get("content-length", 0)
-                    request_hook.increase_upload_bytes(uploaded_bytes)
+                    request_hook.increase_upload_bytes(len(data))
                     request_hook.increase_download_bytes(int(res_length))
 
                     # update info file
