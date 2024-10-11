@@ -272,8 +272,8 @@ class ApiClient(metaclass=ABCMeta):
         if rules is None:
             rules = []
         _log.info("==> Start creating records for Project {project_name}".format(project_name=self.project_name))
-        # 1. 计算sha256，生成文件清单
-        file_infos = [f.complete(inplace=True) for f in file_infos]
+        # 1. 生成文件清单
+        file_infos = [f.complete(inplace=True, skip_sha256=True) for f in file_infos]
 
         # 2. 为即将上传的文件创建记录
         if not record_name or str(record_name) == "True":
