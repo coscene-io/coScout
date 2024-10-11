@@ -69,7 +69,7 @@ class Collector:
         file_info = FileInfo(
             filepath=str(_finish_file.absolute()),
             filename=_finish_file.name,
-        ).complete(inplace=True)
+        ).complete(inplace=True, skip_sha256=True)
         return self.api.resumable_upload_files(
             record_name=record_name,
             file_infos=[file_info],
@@ -192,7 +192,7 @@ class Collector:
                     FileInfo(
                         filepath=hardlink(f.filepath.resolve().absolute(), rec_cache.base_dir_path / f.filename),
                         filename=f.filename,
-                    ).complete(inplace=True)
+                    ).complete(inplace=True, skip_sha256=True)
                     for f in rec_cache.file_infos
                     if f.filepath.is_file() and f.filename != "finish.flag"
                 ]
@@ -218,10 +218,12 @@ class Collector:
 
                 all_completed = True
                 for file_info in sorted_files:
-                    if rec_cache.state_path.absolute().exists():
-                        _rc = RecordCache.load_state_from_disk(rec_cache.state_path.absolute())
-                        if _rc.skipped:
-                            return
+                    if not rec_cache.state_path.absolute().exists():
+                        return
+
+                    _rc = RecordCache.load_state_from_disk(rec_cache.state_path.absolute())
+                    if _rc.skipped:
+                        return
 
                     _completed = self.api.resumable_upload_files(
                         record_name=rec_cache.record["name"],

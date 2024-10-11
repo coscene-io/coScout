@@ -93,7 +93,7 @@ class FileInfo(BaseModel):
         # refill sha256
         sha256 = self.sha256
         if not skip_sha256 and (not sha256 or force_rehash):
-            _log.debug(f"==> Calculating file sha256 for {self.filepath}")
+            _log.info(f"==> Calculating file sha256 for {self.filepath}")
             sha256 = sha256_file(self.filepath, size, block_size)
 
         if inplace:
