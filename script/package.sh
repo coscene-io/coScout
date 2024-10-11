@@ -24,7 +24,7 @@ if [ ! -e "$TEMP_DIR" ]; then
   exit 1
 fi
 
-MESH_VERSION="v0.2.9"
+COLINK_VERSION="1.0.0"
 COS_VERSION="latest"
 TRZSZ_VERSION="1.1.6"
 
@@ -36,16 +36,17 @@ COS_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com/coscout
 
 # for range support mesh arch
 for arch in "${SUPPORT_MESH_ARCH[@]}"; do
-  mesh_folder="${TEMP_DIR}/virmesh"
+  mesh_folder="${TEMP_DIR}/colink"
   mkdir -p "${mesh_folder}"
 
   trzsz_folder="${TEMP_DIR}/trzsz_tar"
   mkdir -p "${trzsz_folder}"
 
-  mesh_download_url=${MESH_BASE_URL}/virmesh/${MESH_VERSION}/virmesh-${arch}
+  mesh_download_url=${MESH_BASE_URL}/colink/v${COLINK_VERSION}/colink-${arch}
   trzsz_download_url=${MESH_BASE_URL}/trzsz/v${TRZSZ_VERSION}/trzsz_${TRZSZ_VERSION}_linux_${arch}.tar.gz
 
-  curl -L -o "${mesh_folder}/virmesh-${arch}" "${mesh_download_url}"
+  echo "Downloading ${mesh_download_url}"
+  curl -L -o "${mesh_folder}/colink-${arch}" "${mesh_download_url}"
   curl -L -o "${trzsz_folder}/trzsz_${TRZSZ_VERSION}_linux_${arch}.tar.gz" "${trzsz_download_url}"
 done
 
@@ -58,6 +59,7 @@ for arch in "${SUPPORT_COS_ARCH[@]}"; do
   cos_sha256_url=${COS_BASE_URL}/linux/${arch}/${COS_VERSION}/cos.sha256
   cos_version_url=${COS_BASE_URL}/linux/${arch}/${COS_VERSION}/version
 
+  echo "Downloading ${cos_download_url}"
   curl -L -o "${cos_folder}/cos" "${cos_download_url}"
   curl -L -o "${cos_folder}/cos.sha256" "${cos_sha256_url}"
   curl -L -o "${cos_folder}/version" "${cos_version_url}"
