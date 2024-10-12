@@ -266,7 +266,7 @@ class Collector:
             try:
                 self.handle_record(record)
                 total_records += 1
-            except Unauthorized as e:
+            except Unauthorized:
                 _log.error(f"==> Unauthorized when handling: {record.key}", exc_info=True)
                 state = ApiClientState().load_state()
                 state.authorized_device(0, "")

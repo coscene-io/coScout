@@ -90,8 +90,8 @@ class Heartbeat:
                     extra_info=error_info,
                 )
                 request_hook.reset_network_usage()
-            except Unauthorized as e:
-                _log.error(f"==> Unauthorized when send device heartbeat", exc_info=True)
+            except Unauthorized:
+                _log.error("==> Unauthorized when send device heartbeat", exc_info=True)
                 state = ApiClientState().load_state()
                 state.authorized_device(0, "")
                 state.save_state()
