@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from cos.core import request_hook
 from cos.core.api import ApiClientConfig, get_client, ApiClientState
+from cos.core.exceptions import Unauthorized
 from cos.version import get_version
 
 _log = logging.getLogger(__name__)
@@ -89,6 +90,11 @@ class Heartbeat:
                     extra_info=error_info,
                 )
                 request_hook.reset_network_usage()
+            except Unauthorized as e:
+                _log.error(f"==> Unauthorized when send device heartbeat", exc_info=True)
+                state = ApiClientState().load_state()
+                state.authorized_device(0, "")
+                state.save_state()
             except Exception:
                 _log.error("send device heartbeat error", exc_info=True)
 

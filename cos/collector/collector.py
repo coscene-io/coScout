@@ -23,7 +23,7 @@ from multiprocessing import Queue
 from pydantic import BaseModel
 
 from cos.constant import RECORD_DIR_PATH
-from cos.core.api import ApiClient
+from cos.core.api import ApiClient, ApiClientState
 from cos.core.models import FileInfo, RecordCache
 from cos.utils import hardlink, is_image
 from .codes import EventCodeManager
@@ -268,7 +268,9 @@ class Collector:
                 total_records += 1
             except Unauthorized as e:
                 _log.error(f"==> Unauthorized when handling: {record.key}", exc_info=True)
-                raise Unauthorized(e)
+                state = ApiClientState().load_state()
+                state.authorized_device(0, "")
+                state.save_state()
             except Exception as e:
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {record.key}", exc_info=True)
