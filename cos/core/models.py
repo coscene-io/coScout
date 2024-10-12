@@ -27,6 +27,7 @@ from pydantic_core import ValidationError
 
 from cos.constant import RAW_DEVICE_STATE_PATH, RECORD_DIR_PATH, RECORD_STATE_RELATIVE_PATH
 from cos.utils import sha256_file
+from cos.utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
 
@@ -238,7 +239,11 @@ class RecordCache(BaseState):
                     _log.error(f"==> Error when deleting source path: {path_str}", exc_info=True)
 
     def list_files(self):
-        return [str(f) for f in self.base_dir_path.glob("**/*") if f.is_file() and ".cos" not in f.parts]
+        return [
+            str(f)
+            for f in self.base_dir_path.glob("**/*")
+            if f.is_file() and ".cos" not in f.parts and can_read_path(str(f.absolute()))
+        ]
 
     @staticmethod
     def find_all(target_dir_path: Path = RECORD_DIR_PATH):

@@ -29,6 +29,7 @@ from cos.utils import hardlink, is_image
 from .codes import EventCodeManager
 from ..core import request_hook
 from ..core.exceptions import Unauthorized
+from ..utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ class Collector:
                         filename=f.filename,
                     ).complete(inplace=True, skip_sha256=True)
                     for f in rec_cache.file_infos
-                    if f.filepath.is_file() and f.filename != "finish.flag"
+                    if f.filepath.is_file() and f.filename != "finish.flag" and can_read_path(str(f.filepath.absolute()))
                 ]
 
                 # 3. 创建 record 和 event
@@ -211,7 +212,9 @@ class Collector:
             if not rec_cache.uploaded:
                 # 5. 上传文件传输完毕后更新
                 filepaths = rec_cache.list_files()
-                rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath) in filepaths]
+                rec_cache.file_infos = [
+                    f for f in rec_cache.file_infos if str(f.filepath) and can_read_path(str(f.filepath)) in filepaths
+                ]
 
                 file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
                 sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
