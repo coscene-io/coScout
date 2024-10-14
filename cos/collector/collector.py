@@ -212,16 +212,19 @@ class Collector:
             if not rec_cache.uploaded:
                 # 5. 上传文件传输完毕后更新
                 filepaths = rec_cache.list_files()
-                rec_cache.file_infos = [
-                    f for f in rec_cache.file_infos if str(f.filepath) and can_read_path(str(f.filepath)) in filepaths
-                ]
+                rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath.absolute()) in filepaths]
 
                 file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
                 sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
 
                 all_completed = True
                 for file_info in sorted_files:
+                    if not can_read_path(str(file_info.filepath.absolute())):
+                        _log.warning(f"{file_info.filepath} can not access, skip!")
+                        continue
+
                     if not rec_cache.state_path.absolute().exists():
+                        _log.warning(f"{rec_cache.state_path.absolute()} not exist, skip!")
                         return
 
                     _rc = RecordCache.load_state_from_disk(rec_cache.state_path.absolute())
