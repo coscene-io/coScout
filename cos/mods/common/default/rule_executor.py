@@ -30,16 +30,16 @@ _log = logging.getLogger(__name__)
 
 def build_engine_from_config(configs, upload_fn=None, api_client: ApiClient = None):
     rule_list = []
-    for project_rule_set_spec in configs:
-        if not project_rule_set_spec.get("name", "").endswith("/diagnosisRule"):
+    for project_rule_sets in configs:
+        if not project_rule_sets.get("name", "").endswith("/diagnosisRule"):
             _log.warning("==> Found an invalid project rule set, skipping")
             continue
-        project_name = project_rule_set_spec["name"].removesuffix("/diagnosisRule")
-        for rule_set_spec in project_rule_set_spec["rules"]:
-            if not rule_set_spec.get("enabled", False):
+        project_name = project_rule_sets["name"].removesuffix("/diagnosisRule")
+        for project_rule_set in project_rule_sets["rules"]:
+            if not project_rule_set.get("enabled", False):
                 continue
             validation_result, rules = validate_config_wrapped(
-                rule_set_spec,
+                project_rule_set,
                 {
                     "upload": lambda rule: partial(upload_fn, project_name=project_name, rule=rule),
                     "create_moment": lambda _: noop_create_moment,
@@ -48,7 +48,7 @@ def build_engine_from_config(configs, upload_fn=None, api_client: ApiClient = No
             )
             if not validation_result["success"]:
                 _log.error(
-                    f"==> Failed to build rule for {project_name} {json.dumps(rule_set_spec, indent=2, ensure_ascii=False)} "
+                    f"==> Failed to build rule for {project_name} {json.dumps(project_rule_set, indent=2, ensure_ascii=False)} "
                     f"due to {json.dumps(validation_result, indent=2, ensure_ascii=False)}, skipping"
                 )
                 continue

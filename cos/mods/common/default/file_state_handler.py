@@ -188,7 +188,7 @@ class FileStateHandler:
         self.__update_deleted_file_state()
         self.save_state()
 
-    def static_file_diagnosis(self, api_client: ApiClient, file_path: Path, upload_fn):
+    def static_file_diagnosis(self, api_client: ApiClient, file_path: Path, upload_fn, topics: list[str]):
         file_state = self.get_file_state(file_path)
         for handler in self.file_handlers:
             # Skip if the file handler is not static or does not support the file
@@ -202,10 +202,10 @@ class FileStateHandler:
             _log.info(f"Found unprocessed file {file_path}, processing with {handler}")
             self.__update_file_state(file_path, "processed", True)
             self.save_state()
-            handler.diagnose(api_client, file_path, upload_fn)
+            handler.diagnose(api_client, file_path, upload_fn, topics) #todo: add topics
             _log.info(f"Finished processing file {file_path}")
 
-    def get_files(self, *filters: Callable[[dict], bool]):
+    def get_files(self, *filters: Callable[[str, dict], bool]):
         """
         Get a list of supported files that match the given filters.
         :param filters: A list of filters to apply to the file state.
@@ -214,32 +214,32 @@ class FileStateHandler:
         return [
             filename
             for filename, file_state in self.state.items()
-            if not file_state.get("unsupported") and all(filter_func(file_state) for filter_func in filters)
+            if not file_state.get("unsupported") and all(filter_func(filename, file_state) for filter_func in filters)
         ]
 
     @staticmethod
-    def state_unprocessed_filter() -> Callable[[dict], bool]:
+    def state_unprocessed_filter() -> Callable[[str, dict], bool]:
         """
         Create a filter that checks if the file state is unprocessed.
         :return: A filter that checks if the file state is unprocessed.
         """
-        return lambda file_state: not file_state.get("processed")
+        return lambda _, file_state: not file_state.get("processed")
 
     @staticmethod
-    def state_timestamp_filter(start_time: int, end_time: int) -> Callable[[dict], bool]:
+    def state_timestamp_filter(start_time: int, end_time: int) -> Callable[[str, dict], bool]:
         """
         Create a filter that checks if the file state overlaps with the given time range.
         :param start_time: The start time of the time range in seconds.
         :param end_time: The end time of the time range in seconds.
         :return: A filter that checks if the file state overlaps with the given time range.
         """
-        return lambda file_state: file_state.get("start_time") <= end_time and file_state.get("end_time") >= start_time
+        return lambda _, file_state: file_state.get("start_time") <= end_time and file_state.get("end_time") >= start_time
 
     @staticmethod
-    def state_dir_filter(get_dir: bool) -> Callable[[dict], bool]:
+    def state_dir_filter(get_dir: bool) -> Callable[[str, dict], bool]:
         """
         Create a filter that checks if the file state is a directory.
         :param get_dir: Whether to fetch directories.
         :return: A filter that checks if the file state is a directory.
         """
-        return lambda file_state: bool(file_state.get("is_dir")) == get_dir
+        return lambda _, file_state: bool(file_state.get("is_dir")) == get_dir

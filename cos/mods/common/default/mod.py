@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import fnmatch
 import json
 import logging
 import os
@@ -35,6 +35,7 @@ from cos.core.exceptions import DeviceNotFound
 from cos.core.models import FileInfo, RecordCache
 from cos.mods.common.default.file_state_handler import FileStateHandler
 from cos.mods.common.default.handlers import LogHandler
+from cos.mods.common.default.remote_rule import RemoteRule
 from cos.mods.common.task.task_handler import TaskHandler
 from cos.utils import flatten
 
@@ -154,9 +155,17 @@ class DefaultMod(Mod):
         _log.info(
             f"==> Search for files in {self.file_state_handler.src_dirs}, start_time: {start_time}, end_time: {end_time}"
         )
+
+        def upload_whitelist_filter(filename, _file_state):
+            if not error_json["cut"]["whiteList"]:
+                # return True if whiteList is empty or None
+                return True
+            return any(fnmatch.fnmatchcase(filename, pattern) for pattern in error_json["cut"]["whiteList"])
+
         raw_files = self.file_state_handler.get_files(
             FileStateHandler.state_timestamp_filter(start_time, end_time),
             FileStateHandler.state_dir_filter(False),
+            upload_whitelist_filter,
         )
         _log.info(f"==> Found files: {raw_files}")
         raw_files += error_json["cut"]["extraFiles"]
@@ -165,6 +174,7 @@ class DefaultMod(Mod):
         raw_dirs = self.file_state_handler.get_files(
             FileStateHandler.state_timestamp_filter(start_time, end_time),
             FileStateHandler.state_dir_filter(True),
+            upload_whitelist_filter,
         )
         _log.info(f"==> Found dirs: {raw_dirs}")
 
@@ -216,7 +226,7 @@ class DefaultMod(Mod):
             json.dump(error_json, fp, indent=4)
 
     @staticmethod
-    def __dump_upload_json(
+    def __upload_impl(
         before,
         title,
         description,
@@ -247,6 +257,7 @@ class DefaultMod(Mod):
                 "extraFiles": extra_files,
                 "start": start_time,
                 "end": end_time,
+                "whiteList": white_list,
             },
         }
         if title:
@@ -266,13 +277,14 @@ class DefaultMod(Mod):
         DefaultMod.__update_error_json(upload_data, json_path)
 
     @staticmethod
-    def __handle_unprocessed_files(api_client: ApiClient, file_state_handler: FileStateHandler, state_dir: Path):
+    def __handle_unprocessed_files(api_client: ApiClient, file_state_handler: FileStateHandler, state_dir: Path, topics: list[str]):
         _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
         for file in file_state_handler.get_files():
             file_state_handler.static_file_diagnosis(
                 api_client,
                 Path(file),
-                partial(DefaultMod.__dump_upload_json, state_dir=state_dir),
+                partial(DefaultMod.__upload_impl, state_dir=state_dir),
+                topics,
             )
 
     def run(self):
@@ -300,7 +312,7 @@ class DefaultMod(Mod):
         temp_dir = DEFAULT_MOD_TEMP_DIR
         temp_dir.mkdir(parents=True, exist_ok=True)
         self.start_log_listener(state_dir)
-        self.start_static_file_listener(state_dir)
+        self.start_static_file_listener(state_dir, RemoteRule(self._api_client).list_topics_in_rules())
 
         # handle error json files
         _log.info(f"==> Search for new error json {str(state_dir)}")
@@ -328,7 +340,7 @@ class DefaultMod(Mod):
                 args=(
                     self._api_client,
                     partial(
-                        DefaultMod.__dump_upload_json,
+                        DefaultMod.__upload_impl,
                         state_dir=state_dir,
                     ),
                 ),
@@ -340,7 +352,7 @@ class DefaultMod(Mod):
         else:
             _log.info("Thread already start log listener, skip!")
 
-    def start_static_file_listener(self, state_dir: Path):
+    def start_static_file_listener(self, state_dir: Path, topics: list[str] = None):
         static_file_thread_flag = False
 
         for t in threading.enumerate():
@@ -354,6 +366,7 @@ class DefaultMod(Mod):
                     self._api_client,
                     self.file_state_handler,
                     state_dir,
+                    topics,
                 ),
                 name=self.static_file_thread_name,
                 daemon=True,

@@ -61,7 +61,7 @@ class LogHandler(BaseModel, HandlerInterface):
             "end_time": end_time,
         }
 
-    def msg_iterator(self, file_path: Path):
+    def msg_iterator(self, file_path: Path, topics: list[str]):
         _log.warning("==> This method is not supported for log handler")
         return
 
