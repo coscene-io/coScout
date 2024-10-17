@@ -70,7 +70,10 @@ class LogHandler(BaseModel, HandlerInterface):
         from cos.mods.common.default.file_state_handler import FileStateHandler
 
         file_state_handler = FileStateHandler.get_instance()
-        all_files = file_state_handler.get_files(FileStateHandler.state_unprocessed_filter())
+        all_files = file_state_handler.get_files(
+            FileStateHandler.state_is_listening_filter(),
+            FileStateHandler.state_unprocessed_filter(),
+        )
         return {Path(filename) for filename in all_files if LogHandler.check_file_path(Path(filename))}
 
     def get_log_input_stream(self):
