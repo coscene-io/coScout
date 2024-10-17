@@ -85,6 +85,7 @@ class FileStateHandler:
                     self.update_lock = threading.Lock()
                     self.__register_file_handlers(ros2_msg_dirs)
                     self.src_dirs = set()
+                    self.listen_dirs = set()
                     self.scan_history = scan_history
                     self.load_state()
 
@@ -180,7 +181,8 @@ class FileStateHandler:
                         # Case where file not being listened
                         file_state["processed"] = True
                     elif not file_state["is_listening"]:
-                        # Case where file is newly added to listen_dirs, mark it as processed if scan_history is False
+                        # Case where the dir of file is changed from collect to listen, i.e., a newly added listen dir
+                        # mark it as processed if scan_history is False
                         file_state["processed"] = not self.scan_history
                     else:
                         # Case where file is already being listened and still being listened
@@ -195,6 +197,14 @@ class FileStateHandler:
                     state_to_set = handler.compute_path_state(entry)
                     state_to_set["is_listening"] = src_dir in listen_dirs
                     state_to_set["is_collecting"] = src_dir in collect_dirs
+                    if src_dir in listen_dirs & self.listen_dirs:
+                        # Case when file is added to one of the old listen dirs which is still being listened
+                        state_to_set["processed"] = False
+                    elif src_dir in listen_dirs - self.listen_dirs:
+                        # Case when file is added to a new listen dir
+                        state_to_set["processed"] = not self.scan_history
+                    else:
+                        state_to_set["processed"] = True
                     state_to_set["processed"] = not state_to_set["is_listening"] or not self.scan_history
                     self.__set_file_state(entry, state_to_set)
                 except Exception as e:
@@ -207,6 +217,7 @@ class FileStateHandler:
                         },
                     )
         self.src_dirs = listen_dirs | collect_dirs
+        self.listen_dirs = listen_dirs
         self.__update_deleted_file_state()
         self.save_state()
 
