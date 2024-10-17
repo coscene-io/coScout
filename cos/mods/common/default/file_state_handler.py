@@ -205,7 +205,6 @@ class FileStateHandler:
                         state_to_set["processed"] = not self.scan_history
                     else:
                         state_to_set["processed"] = True
-                    state_to_set["processed"] = not state_to_set["is_listening"] or not self.scan_history
                     self.__set_file_state(entry, state_to_set)
                 except Exception as e:
                     _log.error(f"Failed to update file state for {entry}, error: {e}")
