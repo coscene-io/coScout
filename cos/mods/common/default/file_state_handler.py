@@ -176,7 +176,7 @@ class FileStateHandler:
 
                 if file_state and file_state.get("size") == handler.get_file_size(entry):
                     # File state is already up-to-date, only need to update processed state
-                    if not src_dir in listen_dirs:
+                    if src_dir not in listen_dirs:
                         # Case where file not being listened
                         file_state["processed"] = True
                     elif not file_state["is_listening"]:

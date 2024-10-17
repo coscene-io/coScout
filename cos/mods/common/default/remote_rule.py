@@ -71,7 +71,8 @@ class RemoteRule:
                 for rule_spec in project_rule_set.get("rules"):
                     if not rule_spec.get("topics", []):
                         _log.warning(
-                            f"no topics found in rule {rule_spec.get('id', '')} of {project_rule_sets.get('name')}, will diagnose all topics"
+                            f"no topics found in rule {rule_spec.get('id', '')} of "
+                            + f"{project_rule_sets.get('name')}, will diagnose all topics"
                         )
                         return []
                     topics += rule_spec.get("topics")

@@ -48,7 +48,8 @@ def build_engine_from_config(configs, upload_fn=None, api_client: ApiClient = No
             )
             if not validation_result["success"]:
                 _log.error(
-                    f"==> Failed to build rule for {project_name} {json.dumps(project_rule_set, indent=2, ensure_ascii=False)} "
+                    f"==> Failed to build rule for {project_name} "
+                    f"{json.dumps(project_rule_set, indent=2, ensure_ascii=False)} "
                     f"due to {json.dumps(validation_result, indent=2, ensure_ascii=False)}, skipping"
                 )
                 continue
