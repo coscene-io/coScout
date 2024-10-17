@@ -48,6 +48,7 @@ class DefaultModConfig(BaseModel):
     base_dir: str = ""  # Deprecated
     listen_dirs: list[str] = []
     collect_dirs: list[str] = []
+    topics: list[str] = []
     sn_file: str | None = ""
     sn_field: str | None = ""
     ros2_customized_msgs_dirs: list[str] = []
@@ -370,6 +371,9 @@ class DefaultMod(Mod):
             if t.name == self.static_file_thread_name:
                 static_file_thread_flag = True
 
+        # Compute topics in both rules and config
+        topics = [topic for topic in RemoteRule(self._api_client).list_topics_in_rules() if topic in self.conf.topics]
+
         if not static_file_thread_flag:
             t = threading.Thread(
                 target=DefaultMod.__handle_unprocessed_files,
@@ -377,7 +381,7 @@ class DefaultMod(Mod):
                     self._api_client,
                     self.file_state_handler,
                     partial(DefaultMod.__upload_impl, state_dir=self.state_dir),
-                    RemoteRule(self._api_client).list_topics_in_rules(),
+                    topics,
                 ),
                 name=self.static_file_thread_name,
                 daemon=True,
