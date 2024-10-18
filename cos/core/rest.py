@@ -954,7 +954,7 @@ class RestApiClient(ApiClient):
         :param record_name: 关联的 record
         :return:
         """
-        url = "{api_base}/dataplatform/v1alpha2/{parent}/tasks".format(
+        url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
             api_base=self.api_base,
             parent=self.project_name,
         )
@@ -962,7 +962,13 @@ class RestApiClient(ApiClient):
         try:
             response = requests.post(
                 url=url,
-                json={"title": title, "description": description, "assignee": assignee, "record": record_name},
+                json={
+                    "title": title,
+                    "description": description,
+                    "assignee": assignee,
+                    "category": "COMMON",
+                    "commonTaskDetail": {"record": record_name},
+                },
                 headers=self.request_headers,
                 auth=self.basic_auth,
                 timeout=10,
@@ -1126,7 +1132,7 @@ class RestApiClient(ApiClient):
             six.raise_from(CosException("Add the task tag failed"), e)
 
     def sync_task(self, task_name: str) -> None:
-        url = "{api_base}/dataplatform/v1alpha2/{task_name}:sync".format(
+        url = "{api_base}/dataplatform/v1alpha3/{task_name}:sync".format(
             api_base=self.api_base,
             task_name=task_name,
         )
