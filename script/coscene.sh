@@ -48,7 +48,7 @@ armv7l)
   ARCH="arm"
   ;;
 *)
-  echo "Unsupported architecture: $ARCH. Only x86_64 and arm64 are supported." >&2
+  echo "Unsupported architecture: $ARCH. Only x86_64, arm64, arm are supported." >&2
   exit 1
   ;;
 esac
@@ -75,6 +75,7 @@ MOD="default"
 SN_FILE=""
 SN_FIELD=""
 USE_32BIT=0
+SKIP_VERIFY_CERT=0
 
 COLINK_ENDPOINT=""
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
@@ -98,6 +99,7 @@ usage: $0 [OPTIONS]
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
     --remove_config         Remove all config files, current device will be treated as a new device.
     --use_32bit             Use 32-bit version for cos
+    --skip_verify_cert      Skip verify certificate when download files
 EOF
 }
 
@@ -128,12 +130,13 @@ trap handle_error ERR
 download_file() {
   local dest=$1
   local url=$2
-  local verify_cert=${3:-1} # Default to verifying the cert if not provided
+  local skip_verify_cert=${3:-1} # Default to verifying the cert if not provided
 
-  if [[ "$verify_cert" -eq 0 ]]; then
+  if [[ "$skip_verify_cert" -eq 1 ]]; then
+    echo "Skip verify certificate when download file"
     curl -SLko "$dest" "$url" || error_exit "Failed to download $url without verifying the certificate"
   else
-    curl -SLko "$dest" "$url" || error_exit "Failed to download $url"
+    curl -SLo "$dest" "$url" || error_exit "Failed to download $url"
   fi
 }
 
@@ -197,6 +200,10 @@ while test $# -gt 0; do
     ;;
   --use_32bit)
     USE_32BIT=1
+    shift # past argument
+    ;;
+  --skip_verify_cert)
+    SKIP_VERIFY_CERT=1
     shift # past argument
     ;;
   *)
@@ -313,24 +320,12 @@ fi
 if [[ -z $COLINK_ENDPOINT ]] || [[ -z $MESH_ARCH ]]; then
   echo "coLink endpoint and mesh arch are empty, skip coLink installation."
 else
-  VERSION_ID=$(format "$(awk -F= '$1=="VERSION_ID" { print $2 ;}' /etc/os-release)")
-  SYSTEM_NAME=$(format "$(awk -F= '$1=="NAME" { print $2 ;}' /etc/os-release)")
-  VERIFY_CERT=1
   echo "Downloading new coLink binary..."
-  if [[ -z $USE_LOCAL && $SYSTEM_NAME = "Ubuntu" && $VERSION_ID -le 1606 ]]; then
-    read -r -p "Your system version is outdated and does not have the latest root certificate. You may need to bypass the certificate verification process. Do you want to proceed? 你的操作系统版本太低，没有最新的根证书，需要忽略证书验证吗？ [Y/N]" anwser
-    case $anwser in
-    Y | y)
-      VERIFY_CERT=0
-      ;;
-    *) ;;
-    esac
-  fi
 
   if [[ -n $USE_LOCAL ]]; then
     mv -f "$TEMP_DIR/cos_binaries/virmesh/virmesh-${MESH_ARCH}" "$TEMP_DIR"/coLink
   else
-    download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $VERIFY_CERT
+    download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
   fi
 
   chmod +x "$TEMP_DIR"/coLink
@@ -343,7 +338,7 @@ else
   if [[ -n $USE_LOCAL ]]; then
     cp "$TEMP_DIR/cos_binaries/trzsz_tar/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz" "$TEMP_DIR"/trzsz.tar.gz
   else
-    download_file "$TEMP_DIR"/trzsz.tar.gz $TRZSZ_DOWNLOAD_URL $VERIFY_CERT
+    download_file "$TEMP_DIR"/trzsz.tar.gz $TRZSZ_DOWNLOAD_URL $SKIP_VERIFY_CERT
   fi
 
   echo "unzip trzsz..."
@@ -537,7 +532,7 @@ if [[ -n $USE_LOCAL ]]; then
 else
   mkdir -p "$TEMP_DIR/cos_binaries/cos/$ARCH"
   TMP_FILE="$TEMP_DIR/cos_binaries/cos/$ARCH/cos"
-  download_file "$TMP_FILE" "$DEFAULT_BINARY_URL"
+  download_file "$TMP_FILE" "$DEFAULT_BINARY_URL" $SKIP_VERIFY_CERT
   # check cos sha256sum
   REMOTE_SHA256=$(curl -sSfLk "$DEFAULT_BINARY_URL.sha256")
 fi
