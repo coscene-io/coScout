@@ -52,6 +52,17 @@ class FileStateHandler:
             "unsupported": true
         },
     }
+
+    Key definitions:
+    - size: The size of the file in bytes.
+    - start_time: The start time of the file in seconds since epoch.
+    - end_time: The end time of the file in seconds since epoch.
+    - unsupported: Whether the file is unsupported by the diagnosis engine.
+    - is_dir: Whether the file entry is a directory.
+    - is_listening: Whether the file entry is being listened to.
+    - processed: Whether the file has been processed by the diagnosis engine.
+                 Note that this is only used if is_listening is True.
+    - is_collecting: Whether the file entry is being collected.
     """
 
     @property
@@ -74,8 +85,15 @@ class FileStateHandler:
                     self.update_lock = threading.Lock()
                     self.__register_file_handlers(ros2_msg_dirs)
                     self.src_dirs = set()
+                    self.listen_dirs = set()
                     self.scan_history = scan_history
                     self.load_state()
+
+    def get_file_handler(self, file_path: Path):
+        for handler in self.file_handlers:
+            if handler.check_file_path(file_path):
+                return handler
+        return None
 
     @classmethod
     def get_instance(cls, ros2_msg_dirs=None, scan_history: bool = False):
@@ -125,47 +143,29 @@ class FileStateHandler:
             if not file_path.exists():
                 self.__del_file_state(file_path)
 
-    def update_dirs(self, new_src_dirs_set: set[Path] = None):
-        """Update the source directories to scan for files."""
-        if new_src_dirs_set is None:
-            new_src_dirs_set = self.src_dirs
+    def update_dirs(self, listen_dirs: set[Path], collect_dirs: set[Path]):
+        # Skip directories that user have no read access or do not exist
+        listen_dirs = {src_dir for src_dir in listen_dirs if can_read_path(str(src_dir))}
+        collect_dirs = {collect_dir for collect_dir in collect_dirs if can_read_path(str(collect_dir))}
 
-        # Delete the state of files in the directories that are no longer scanned
-        for src_dir in self.src_dirs - new_src_dirs_set:
+        # Delete the state of files in the directories that are no longer scanned or collected
+        for src_dir in self.src_dirs - listen_dirs - collect_dirs:
             for filename in list(self.state.keys()):
                 if Path(filename).parent == src_dir:
                     self.__del_file_state(Path(filename))
 
-        # Skip directories that user have no read access or do not exist
-        new_src_dirs_set = {src_dir for src_dir in new_src_dirs_set if can_read_path(str(src_dir))}
-
-        # Update the state of files in the new directories
-        for src_dir in new_src_dirs_set:
+        # Iterate over the new directories and update the state of files
+        for src_dir in listen_dirs | collect_dirs:
             if not src_dir.is_dir():
                 _log.warning(f"{str(src_dir.absolute())} is not dir, skip handle.")
                 continue
 
             for entry in src_dir.iterdir():
-                for handler in self.file_handlers:
-                    # Skip if the file handler does not support entry
-                    if not handler.check_file_path(entry):
-                        continue
-
-                    # Skip if file state is already up-to-date
-                    file_state = self.get_file_state(entry)
-                    if file_state and file_state.get("size") == handler.get_file_size(entry):
-                        if not self.scan_history and src_dir in new_src_dirs_set - self.src_dirs:
-                            self.__update_file_state(entry, "processed", True)
-                        continue
-
-                    try:
-                        state_to_set = handler.compute_path_state(entry)
-                        # If the file is in a newly added directory, mark it as processed
-                        if not self.scan_history and src_dir in new_src_dirs_set - self.src_dirs:
-                            state_to_set["processed"] = True
-                        self.__set_file_state(entry, state_to_set)
-                    except Exception as e:
-                        _log.error(f"Failed to update file state for {entry}, error: {e}")
+                handler = self.get_file_handler(entry)
+                file_state = self.get_file_state(entry)
+                if not handler:
+                    # File is not supported by any handler, mark it as unsupported if not already and skip
+                    if not file_state or not file_state.get("unsupported"):
                         self.__set_file_state(
                             entry,
                             {
@@ -173,9 +173,43 @@ class FileStateHandler:
                                 "unsupported": True,
                             },
                         )
+                    continue
 
-                # For files that are not supported by any handler, mark them as unsupported
-                if not self.get_file_state(entry):
+                if file_state and file_state.get("size") == handler.get_file_size(entry):
+                    # File state is already up-to-date, only need to update processed state
+                    if not self.listen_dirs:
+                        file_state["processed"] = not self.scan_history or file_state.get("processed", False)
+                    elif src_dir not in listen_dirs:
+                        # Case where file not being listened
+                        file_state["processed"] = True
+                    elif not file_state["is_listening"]:
+                        # Case where the dir of file is changed from collect to listen, i.e., a newly added listen dir
+                        # mark it as processed if scan_history is False
+                        file_state["processed"] = not self.scan_history
+                    else:
+                        # Case where file is already being listened and still being listened
+                        file_state["processed"] = file_state.get("processed", False)
+                    file_state["is_listening"] = src_dir in listen_dirs
+                    file_state["is_collecting"] = src_dir in collect_dirs
+                    self.__set_file_state(entry, file_state)
+                    continue
+
+                # In this case, the file is newly added (changed file is treated as newly added)
+                try:
+                    state_to_set = handler.compute_path_state(entry)
+                    state_to_set["is_listening"] = src_dir in listen_dirs
+                    state_to_set["is_collecting"] = src_dir in collect_dirs
+                    if src_dir in listen_dirs & self.listen_dirs:
+                        # Case when file is added to one of the old listen dirs which is still being listened
+                        state_to_set["processed"] = False
+                    elif src_dir in listen_dirs - self.listen_dirs:
+                        # Case when file is added to a new listen dir
+                        state_to_set["processed"] = not self.scan_history
+                    else:
+                        state_to_set["processed"] = True
+                    self.__set_file_state(entry, state_to_set)
+                except Exception as e:
+                    _log.error(f"Failed to update file state for {entry}, error: {e}")
                     self.__set_file_state(
                         entry,
                         {
@@ -183,29 +217,30 @@ class FileStateHandler:
                             "unsupported": True,
                         },
                     )
-
-        self.src_dirs = new_src_dirs_set
+        self.src_dirs = listen_dirs | collect_dirs
+        self.listen_dirs = listen_dirs
         self.__update_deleted_file_state()
         self.save_state()
 
-    def static_file_diagnosis(self, api_client: ApiClient, file_path: Path, upload_fn):
+    def static_file_diagnosis(self, api_client: ApiClient, file_path: Path, upload_fn, topics: list[str]):
         file_state = self.get_file_state(file_path)
-        for handler in self.file_handlers:
-            # Skip if the file handler is not static or does not support the file
-            if not handler.supports_static() or not handler.check_file_path(file_path):
-                continue
+        handler = self.get_file_handler(file_path)
+        if not handler:
+            return
 
-            # Skip if file is already processed and size unchanged
-            if file_state.get("processed") and handler.get_file_size(file_path) == file_state.get("size"):
-                return
+        if not handler.supports_static():
+            return
 
-            _log.info(f"Found unprocessed file {file_path}, processing with {handler}")
-            self.__update_file_state(file_path, "processed", True)
-            self.save_state()
-            handler.diagnose(api_client, file_path, upload_fn)
-            _log.info(f"Finished processing file {file_path}")
+        if file_state.get("processed") and handler.get_file_size(file_path) == file_state.get("size"):
+            return
 
-    def get_files(self, *filters: Callable[[dict], bool]):
+        _log.info(f"Found unprocessed file {file_path}, processing with {handler}")
+        self.__update_file_state(file_path, "processed", True)
+        self.save_state()
+        handler.diagnose(api_client, file_path, upload_fn, topics)
+        _log.info(f"Finished processing file {file_path}")
+
+    def get_files(self, *filters: Callable[[str, dict], bool]):
         """
         Get a list of supported files that match the given filters.
         :param filters: A list of filters to apply to the file state.
@@ -214,32 +249,48 @@ class FileStateHandler:
         return [
             filename
             for filename, file_state in self.state.items()
-            if not file_state.get("unsupported") and all(filter_func(file_state) for filter_func in filters)
+            if not file_state.get("unsupported") and all(filter_func(filename, file_state) for filter_func in filters)
         ]
 
     @staticmethod
-    def state_unprocessed_filter() -> Callable[[dict], bool]:
+    def state_unprocessed_filter() -> Callable[[str, dict], bool]:
         """
         Create a filter that checks if the file state is unprocessed.
         :return: A filter that checks if the file state is unprocessed.
         """
-        return lambda file_state: not file_state.get("processed")
+        return lambda _, file_state: not file_state.get("processed")
 
     @staticmethod
-    def state_timestamp_filter(start_time: int, end_time: int) -> Callable[[dict], bool]:
+    def state_timestamp_filter(start_time: int, end_time: int) -> Callable[[str, dict], bool]:
         """
         Create a filter that checks if the file state overlaps with the given time range.
         :param start_time: The start time of the time range in seconds.
         :param end_time: The end time of the time range in seconds.
         :return: A filter that checks if the file state overlaps with the given time range.
         """
-        return lambda file_state: file_state.get("start_time") <= end_time and file_state.get("end_time") >= start_time
+        return lambda _, file_state: file_state.get("start_time") <= end_time and file_state.get("end_time") >= start_time
 
     @staticmethod
-    def state_dir_filter(get_dir: bool) -> Callable[[dict], bool]:
+    def state_dir_filter(get_dir: bool) -> Callable[[str, dict], bool]:
         """
         Create a filter that checks if the file state is a directory.
         :param get_dir: Whether to fetch directories.
         :return: A filter that checks if the file state is a directory.
         """
-        return lambda file_state: bool(file_state.get("is_dir")) == get_dir
+        return lambda _, file_state: bool(file_state.get("is_dir")) == get_dir
+
+    @staticmethod
+    def state_is_listening_filter() -> Callable[[str, dict], bool]:
+        """
+        Create a filter that checks if the file state is being listened to.
+        :return: A filter that checks if the file state is being listened to.
+        """
+        return lambda _, file_state: bool(file_state.get("is_listening"))
+
+    @staticmethod
+    def state_is_collecting_filter() -> Callable[[str, dict], bool]:
+        """
+        Create a filter that checks if the file state is being collected.
+        :return: A filter that checks if the file state is being collected.
+        """
+        return lambda _, file_state: bool(file_state.get("is_collecting"))
