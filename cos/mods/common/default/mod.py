@@ -65,9 +65,9 @@ class DefaultMod(Mod):
 
         self._api_client = api_client
         self.conf = _conf
-        self.log_thread_name = "cos-log-listener"
-        self.task_thread_name = "cos-task-handler"
-        self.static_file_thread_name = "cos-static-file-listener"
+        self.log_thread_name = "cos-mod-default-log-listener"
+        self.task_thread_name = "cos-mod-task-collector-handler"
+        self.static_file_thread_name = "cos-mod-default-static-file-listener"
         self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs, self.conf.scan_history)
 
         self.state_dir = DEFAULT_MOD_STATE_DIR

@@ -23,13 +23,12 @@ from multiprocessing import Process, Queue
 
 import click
 import psutil
-from kebab import KebabSource
 
 from cos.cli.context import Context
 from cos.collector import Collector, EventCodeManager, CollectorConfig
 from cos.collector.mod import Mod
 from cos.collector.openers import CosHandler
-from cos.config import AppConfig
+from cos.config import AppConfig, load_kebab_source
 from cos.constant import COS_ONEFILE_PATH
 from cos.core.api import ApiClient, ApiClientState, get_client
 from cos.core.exceptions import DeviceNotFound, Unauthorized
@@ -43,16 +42,12 @@ _log = logging.getLogger(__name__)
 
 
 # noinspection PyBroadException
-def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandler, network_queue: Queue, error_queue: Queue):
+def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, network_queue: Queue, error_queue: Queue):
     def signal_handler(sig, _):
         print(f"\nProgram exiting gracefully by {sig}")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
-
-    cos_url_handler.set_api_client(None)
-    source.disable_reload()
-    load_mod(None, conf)
     is_first_run = True
     while True:
         try:
@@ -66,10 +61,12 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
             api_client = get_client(conf.api)
             cos_url_handler.set_api_client(api_client=api_client)
             if is_first_run:
+                source = load_kebab_source(config_file, extra_url_handler=cos_url_handler)
                 source.reload(
                     reload_interval_in_secs=conf.collector.scan_interval_in_secs,
                     skip_first=False,
                 )
+                conf = source.get(expected_type=AppConfig, update_after_reload=True)
                 is_first_run = False
 
             mod = load_mod(api_client, conf)
@@ -108,7 +105,7 @@ def run_forever(source: KebabSource, conf: AppConfig, cos_url_handler: CosHandle
 def start_collector_listener(
     conf: CollectorConfig, api_client: ApiClient, code_manager: EventCodeManager, network_queue: Queue, error_queue: Queue
 ):
-    thread_name = "cos-collector-thread"
+    thread_name = "cos-main-collector-thread"
     collector_thread_flag = False
 
     for t in threading.enumerate():
@@ -144,12 +141,13 @@ def load_mod(api_client: ApiClient | None, conf: AppConfig):
 @click.command
 @click.pass_obj
 def daemon(ctx: Context):
+    ctx.source.disable_reload()
     clean_old_binary()
     _log.info(f"Starting collector daemon with {get_version()}")
 
     network_queue = Queue()
     error_queue = Queue()
-    handle = Process(target=run_forever, args=(ctx.source, ctx.conf, ctx.cos_url_handler, network_queue, error_queue))
+    handle = Process(target=run_forever, args=(ctx.config_file, ctx.conf, ctx.cos_url_handler, network_queue, error_queue))
 
     heart = Heartbeat(api_conf=ctx.conf.api, conf=HeartbeatConfig(), network_queue=network_queue, error_queue=error_queue)
     monitor = Process(target=heart.heartbeat, args=())
