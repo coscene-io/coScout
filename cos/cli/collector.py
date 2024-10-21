@@ -49,6 +49,9 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
 
     signal.signal(signal.SIGINT, signal_handler)
     is_first_run = True
+
+    cos_url_handler.set_api_client(None)
+    load_mod(None, conf)
     while True:
         try:
             if conf.logging:
