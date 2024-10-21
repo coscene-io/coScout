@@ -23,12 +23,13 @@ from multiprocessing import Queue
 from pydantic import BaseModel
 
 from cos.constant import RECORD_DIR_PATH
-from cos.core.api import ApiClient
+from cos.core.api import ApiClient, ApiClientState
 from cos.core.models import FileInfo, RecordCache
 from cos.utils import hardlink, is_image
 from .codes import EventCodeManager
 from ..core import request_hook
 from ..core.exceptions import Unauthorized
+from ..utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ class Collector:
                         filename=f.filename,
                     ).complete(inplace=True, skip_sha256=True)
                     for f in rec_cache.file_infos
-                    if f.filepath.is_file() and f.filename != "finish.flag"
+                    if f.filepath.is_file() and f.filename != "finish.flag" and can_read_path(str(f.filepath.absolute()))
                 ]
 
                 # 3. 创建 record 和 event
@@ -211,14 +212,19 @@ class Collector:
             if not rec_cache.uploaded:
                 # 5. 上传文件传输完毕后更新
                 filepaths = rec_cache.list_files()
-                rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath) in filepaths]
+                rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath.absolute()) in filepaths]
 
                 file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
                 sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
 
                 all_completed = True
                 for file_info in sorted_files:
+                    if not can_read_path(str(file_info.filepath.absolute())):
+                        _log.warning(f"{file_info.filepath} can not access, skip!")
+                        continue
+
                     if not rec_cache.state_path.absolute().exists():
+                        _log.warning(f"{rec_cache.state_path.absolute()} not exist, skip!")
                         return
 
                     _rc = RecordCache.load_state_from_disk(rec_cache.state_path.absolute())
@@ -266,9 +272,11 @@ class Collector:
             try:
                 self.handle_record(record)
                 total_records += 1
-            except Unauthorized as e:
+            except Unauthorized:
                 _log.error(f"==> Unauthorized when handling: {record.key}", exc_info=True)
-                raise Unauthorized(e)
+                state = ApiClientState().load_state()
+                state.authorized_device(0, "")
+                state.save_state()
             except Exception as e:
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {record.key}", exc_info=True)

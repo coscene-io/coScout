@@ -64,7 +64,7 @@ def cli(ctx, config_file, verbose):
     except ValidationError:
         _log.error("配置文件错误, server_url, project_slug 为必填项", exc_info=True)
         sys.exit(1)
-    ctx.obj = Context(source=source, conf=conf, api=api, cos_url_handler=cos_url_handler)
+    ctx.obj = Context(config_file=config_file, source=source, conf=conf, api=api, cos_url_handler=cos_url_handler)
 
 
 cli.add_command(collector.daemon)
