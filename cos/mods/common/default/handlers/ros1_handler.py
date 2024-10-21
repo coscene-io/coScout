@@ -52,9 +52,9 @@ class Ros1Handler(BaseModel, HandlerInterface):
         """Normalize the message type from a/msg/b to a/b"""
         return "/".join(msgtype.split("/msg/"))
 
-    def msg_iterator(self, file_path: Path, topics: list[str]):
+    def msg_iterator(self, file_path: Path, active_topics: set[str]):
         with AnyReader([file_path]) as reader:
-            connections = [conn for conn in reader.connections if conn.topic in topics]
+            connections = [conn for conn in reader.connections if conn.topic in active_topics]
             for connection, timestamp, rawdata in reader.messages(connections=connections):
                 try:
                     msg = reader.deserialize(rawdata, connection.msgtype)

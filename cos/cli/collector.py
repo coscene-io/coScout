@@ -135,7 +135,7 @@ def load_mod(api_client: ApiClient | None, conf: AppConfig):
         mod_name = "gs"
 
     _log.info(f"Use mod {mod_name} for collector.")
-    return Mod.get_mod(mod_name)(api_client=api_client, conf=mod_conf.conf)
+    return Mod.get_mod(mod_name)(api_client=api_client, conf={**mod_conf.conf, "topics": conf.topics})
 
 
 @click.command

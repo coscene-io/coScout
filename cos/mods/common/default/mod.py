@@ -53,7 +53,6 @@ class DefaultModConfig(BaseModel):
     sn_field: str | None = ""
     ros2_customized_msgs_dirs: list[str] = []
     upload_files: list[str] = []
-    scan_history: bool = False
 
 
 class DefaultMod(Mod):
@@ -68,13 +67,12 @@ class DefaultMod(Mod):
         self.log_thread_name = "cos-mod-default-log-listener"
         self.task_thread_name = "cos-mod-task-collector-handler"
         self.static_file_thread_name = "cos-mod-default-static-file-listener"
-        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs, self.conf.scan_history)
+        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs)
 
         self.state_dir = DEFAULT_MOD_STATE_DIR
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.temp_dir = DEFAULT_MOD_TEMP_DIR
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-
         super().__init__()
 
     @staticmethod
@@ -288,7 +286,9 @@ class DefaultMod(Mod):
 
     @staticmethod
     def __handle_unprocessed_files(
-        api_client: ApiClient, file_state_handler: FileStateHandler, upload_fn: partial, topics: list[str]
+        api_client: ApiClient,
+        file_state_handler: FileStateHandler,
+        upload_fn: partial,
     ):
         _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
         for file in file_state_handler.get_files(FileStateHandler.state_is_listening_filter()):
@@ -296,7 +296,7 @@ class DefaultMod(Mod):
                 api_client,
                 Path(file),
                 upload_fn,
-                topics,
+                file_state_handler.active_topics,
             )
 
     def run(self):
@@ -323,6 +323,14 @@ class DefaultMod(Mod):
 
         self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
 
+        # Compute topics in both rules and config
+        self.file_state_handler.active_topics = {
+            topic
+            for topic in RemoteRule(self._api_client).list_topics_in_rules()
+            if topic in [*self.conf.topics, "/external_log"]
+        }
+
+        # start log listener and static file listener
         self.start_log_listener()
         self.start_static_file_listener()
 
@@ -371,9 +379,6 @@ class DefaultMod(Mod):
             if t.name == self.static_file_thread_name:
                 static_file_thread_flag = True
 
-        # Compute topics in both rules and config
-        topics = [topic for topic in RemoteRule(self._api_client).list_topics_in_rules() if topic in self.conf.topics]
-
         if not static_file_thread_flag:
             t = threading.Thread(
                 target=DefaultMod.__handle_unprocessed_files,
@@ -381,7 +386,6 @@ class DefaultMod(Mod):
                     self._api_client,
                     self.file_state_handler,
                     partial(DefaultMod.__upload_impl, state_dir=self.state_dir),
-                    topics,
                 ),
                 name=self.static_file_thread_name,
                 daemon=True,

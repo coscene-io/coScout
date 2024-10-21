@@ -39,6 +39,7 @@ class AppConfig(BaseModel):
     updater: UpdaterConfig = UpdaterConfig()
     device_register: RegisterConfig = RegisterConfig()
     mod: ModConfig = ModConfig()
+    topics: list[str] = []
 
     def write_as_yaml(self, file_path: Path = None, exclude_defaults: bool = False):
         if file_path is None:
