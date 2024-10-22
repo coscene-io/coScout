@@ -987,6 +987,7 @@ class RestApiClient(ApiClient):
         trigger_time: int,
         start_time: int,
         end_time: int,
+        record_name: str,
     ):
         """
         :param title: task 标题
@@ -997,6 +998,7 @@ class RestApiClient(ApiClient):
         :param trigger_time: 触发时间
         :param start_time: 开始时间
         :param end_time: 结束时间
+        :param record_name: 关联的 record
         """
         url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
             api_base=self.api_base,
@@ -1011,6 +1013,7 @@ class RestApiClient(ApiClient):
                     "description": description,
                     "category": "DIAGNOSIS",
                     "state": "PROCESSING",
+                    "tags": {"recordName": record_name},
                     "diagnosisTaskDetail": {
                         "device": device,
                         "startTime": {

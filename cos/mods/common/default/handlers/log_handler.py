@@ -61,7 +61,7 @@ class LogHandler(BaseModel, HandlerInterface):
             "end_time": end_time,
         }
 
-    def msg_iterator(self, file_path: Path):
+    def msg_iterator(self, file_path: Path, active_topics: set[str]):
         _log.warning("==> This method is not supported for log handler")
         return
 
@@ -70,7 +70,10 @@ class LogHandler(BaseModel, HandlerInterface):
         from cos.mods.common.default.file_state_handler import FileStateHandler
 
         file_state_handler = FileStateHandler.get_instance()
-        all_files = file_state_handler.get_files(FileStateHandler.state_unprocessed_filter())
+        all_files = file_state_handler.get_files(
+            FileStateHandler.state_is_listening_filter(),
+            FileStateHandler.state_unprocessed_filter(),
+        )
         return {Path(filename) for filename in all_files if LogHandler.check_file_path(Path(filename))}
 
     def get_log_input_stream(self):
@@ -113,6 +116,17 @@ class LogHandler(BaseModel, HandlerInterface):
                     break
 
     def scan_dirs_and_diagnose(self, api_client: ApiClient, upload_fn: partial):
+        from cos.mods.common.default.file_state_handler import FileStateHandler
+
+        file_state_handler = FileStateHandler.get_instance()
+        if file_state_handler.active_topics and "/external_log" not in file_state_handler.active_topics:
+            for filename in file_state_handler.get_files(
+                FileStateHandler.state_is_listening_filter(),
+                FileStateHandler.state_unprocessed_filter(),
+                lambda file_path, __state: LogHandler.check_file_path(Path(file_path)),
+            ):
+                file_state_handler.update_file_state(Path(filename), "processed", True)
+            return
         executor_name = "Log Scan Rule Executor"
         rule_executor = RuleExecutor(executor_name, api_client, self.get_log_input_stream(), upload_fn)
         rule_executor.execute()

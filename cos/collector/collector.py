@@ -157,6 +157,7 @@ class Collector:
                 trigger_time=rec_cache.diagnosis_task.get("trigger_time"),
                 start_time=rec_cache.diagnosis_task.get("start_time"),
                 end_time=rec_cache.diagnosis_task.get("end_time"),
+                record_name=record.get("name"),
             )
             rec_cache.diagnosis_task["name"] = created_diagnosis_task.get("name")
         return record
