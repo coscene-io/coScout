@@ -23,7 +23,7 @@ from requests.exceptions import RequestException
 
 from cos.core import request_hook
 from cos.core.api import ApiClient, ApiClientConfig
-from cos.core.exceptions import CosException, Unauthorized
+from cos.core.exceptions import CosException, Unauthorized, RecordNotFound
 
 _log = logging.getLogger(__name__)
 
@@ -303,6 +303,8 @@ class RestApiClient(ApiClient):
             )
             if response.status_code == 401:
                 raise Unauthorized("Unauthorized")
+            if response.status_code == 404:
+                raise RecordNotFound("RecordNotFound")
 
             result = response.json()
             if not result or "name" not in result:
