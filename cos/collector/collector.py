@@ -28,7 +28,7 @@ from cos.core.models import FileInfo, RecordCache
 from cos.utils import hardlink, is_image
 from .codes import EventCodeManager
 from ..core import request_hook
-from ..core.exceptions import Unauthorized
+from ..core.exceptions import Unauthorized, RecordNotFound
 from ..utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
@@ -278,6 +278,9 @@ class Collector:
                 state = ApiClientState().load_state()
                 state.authorized_device(0, "")
                 state.save_state()
+            except RecordNotFound:
+                _log.error(f"==> Record already been deleted: {record.key}, skip handle!")
+                record.delete_cache_dir(delay_in_hours=0)
             except Exception as e:
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {record.key}", exc_info=True)
