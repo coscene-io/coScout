@@ -84,15 +84,15 @@ class Register:
             _log.warning("device name not found, skipping")
             return
 
-        tags = api_state.device.get("tags", {})
-        virmesh_tag = tags.get("virmesh_pubkey", None)
-        if virmesh_tag:
-            _log.info("coLink pubkey already exists, skipping")
-            return
-
         pubkey = self._get_virmesh_key()
         if not pubkey:
             _log.warning("coLink pubkey not found, skipping")
+            return
+
+        tags = api_state.device.get("tags", {})
+        virmesh_tag = tags.get("virmesh_pubkey", None)
+        if virmesh_tag and (virmesh_tag == pubkey):
+            _log.info("coLink pubkey already exists, skipping")
             return
 
         new_tags = tags.copy()
