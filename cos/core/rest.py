@@ -23,7 +23,7 @@ from requests.exceptions import RequestException
 
 from cos.core import request_hook
 from cos.core.api import ApiClient, ApiClientConfig
-from cos.core.exceptions import CosException, Unauthorized
+from cos.core.exceptions import CosException, Unauthorized, RecordNotFound
 
 _log = logging.getLogger(__name__)
 
@@ -303,6 +303,8 @@ class RestApiClient(ApiClient):
             )
             if response.status_code == 401:
                 raise Unauthorized("Unauthorized")
+            if response.status_code == 404:
+                raise RecordNotFound("RecordNotFound")
 
             result = response.json()
             if not result or "name" not in result:
@@ -993,6 +995,7 @@ class RestApiClient(ApiClient):
         trigger_time: int,
         start_time: int,
         end_time: int,
+        record_name: str,
     ):
         """
         :param title: task 标题
@@ -1003,6 +1006,7 @@ class RestApiClient(ApiClient):
         :param trigger_time: 触发时间
         :param start_time: 开始时间
         :param end_time: 结束时间
+        :param record_name: 关联的 record
         """
         url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
             api_base=self.api_base,
@@ -1017,6 +1021,7 @@ class RestApiClient(ApiClient):
                     "description": description,
                     "category": "DIAGNOSIS",
                     "state": "PROCESSING",
+                    "tags": {"recordName": record_name},
                     "diagnosisTaskDetail": {
                         "device": device,
                         "startTime": {

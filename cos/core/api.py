@@ -719,6 +719,7 @@ class ApiClient(metaclass=ABCMeta):
         trigger_time: int,
         start_time: int,
         end_time: int,
+        record_name: str,
     ):
         """
         :param title: 任务的标题
@@ -729,6 +730,7 @@ class ApiClient(metaclass=ABCMeta):
         :param trigger_time: 触发时间
         :param start_time: 采集目标起始时间
         :param end_time: 采集目标结束时间
+        :param record_name: 关联记录的resource name
         """
         pass
 

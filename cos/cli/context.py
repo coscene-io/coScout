@@ -23,6 +23,7 @@ from cos.core.api import ApiClient
 
 @dataclass
 class Context:
+    config_file: str
     source: KebabSource
     conf: AppConfig
     api: ApiClient
