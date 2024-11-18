@@ -211,6 +211,8 @@ class Collector:
 
             # 找齐文件后，如果还没有 uploaded (上传完毕).
             if not rec_cache.uploaded:
+                _uploaded_files = rec_cache.uploaded_files
+
                 # 5. 上传文件传输完毕后更新
                 filepaths = rec_cache.list_files()
                 rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath.absolute()) in filepaths]
@@ -239,6 +241,14 @@ class Collector:
                     )
                     all_completed = all_completed and _completed
 
+                    _uploaded_files += 1
+                    rec_cache.uploaded_files = _uploaded_files
+                    rec_cache.save_state()
+
+                    task_name = rec_cache.task.get("name", "")
+                    if task_name:
+                        self.api.put_task_tags(task_name, {"uploadedFiles": str(_uploaded_files)})
+
                 # 6. 完成记录。如果需要，删除 record 文件夹
                 if all_completed:
                     _log.info("==> All files uploaded")
@@ -253,7 +263,9 @@ class Collector:
                     )
                     task_name = rec_cache.task.get("name", "")
                     if task_name:
-                        self.api.put_task_tags(task_name, {"recordName": rec_cache.record.get("name")})
+                        self.api.put_task_tags(
+                            task_name, {"recordName": rec_cache.record.get("name"), "totalFiles": str(rec_cache.total_files)}
+                        )
                         self.api.update_task_state(task_name, "SUCCEEDED")
                     if rec_cache.diagnosis_task.get("name", ""):
                         self.api.update_task_state(rec_cache.diagnosis_task.get("name"), "SUCCEEDED")

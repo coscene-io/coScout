@@ -109,7 +109,10 @@ class TaskHandler:
             },
         ).load_state()
         rc.file_infos = files
+        rc.total_files = len(files)
         rc.save_state()
+
+        self._api.put_task_tags(task_name, {"totalFiles": str(len(files))})
         _log.info(f"==> Converted error log to record state: {rc.state_path}")
 
     def _parse_timestr(self, time_str: str) -> float:

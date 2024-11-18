@@ -187,6 +187,11 @@ class RecordCache(BaseState):
     # the source paths to be deleted along with the record, usually the original file directory
     paths_to_delete: List[str] = []
 
+    # total wait for uploading files
+    total_files: int = 0
+    # already uploaded files num
+    uploaded_files: int = 0
+
     def __init__(self, **data: Any):
         super().__init__(**data)
 
