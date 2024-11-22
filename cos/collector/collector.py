@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from cos.constant import RECORD_DIR_PATH
 from cos.core.api import ApiClient, ApiClientState
 from cos.core.models import FileInfo, RecordCache
-from cos.utils import hardlink, is_image
+from cos.utils import is_image
 from .codes import EventCodeManager
 from ..core import request_hook
 from ..core.exceptions import Unauthorized, RecordNotFound
@@ -36,7 +36,7 @@ _log = logging.getLogger(__name__)
 
 class CollectorConfig(BaseModel):
     delete_after_upload: bool = True
-    delete_after_interval_in_hours: int = -1
+    delete_after_interval_in_hours: int = 48
     scan_interval_in_secs: int = 60
 
 
@@ -72,9 +72,7 @@ class Collector:
             filename=_finish_file.name,
         ).complete(inplace=True, skip_sha256=True)
         return self.api.resumable_upload_files(
-            record_name=record_name,
-            file_infos=[file_info],
-            remove_after=True,
+            record_name=record_name, file_infos=[file_info], part_state_path=str(rec_cache.base_dir_path.absolute())
         )
 
     def __get_record_title(self, rec_cache: RecordCache):
@@ -189,10 +187,10 @@ class Collector:
         else:
             # 如果没有被 collected (文件未找齐).
             if not rec_cache.record.get("name"):
-                # 2. 收集文件，生成 hardlink, 替换FileInfo里filepath为 hardlink 的目标文件（RecordCache.files依然指向原始文件）
+                # 2. 收集文件
                 rec_cache.file_infos = [
                     FileInfo(
-                        filepath=hardlink(f.filepath.resolve().absolute(), rec_cache.base_dir_path / f.filename),
+                        filepath=f.filepath.resolve().absolute(),
                         filename=f.filename,
                     ).complete(inplace=True, skip_sha256=True)
                     for f in rec_cache.file_infos
@@ -211,19 +209,22 @@ class Collector:
 
             # 找齐文件后，如果还没有 uploaded (上传完毕).
             if not rec_cache.uploaded:
-                _uploaded_files = rec_cache.uploaded_files
+                _uploaded_files = rec_cache.uploaded_filepaths
 
-                # 5. 上传文件传输完毕后更新
-                filepaths = rec_cache.list_files()
-                rec_cache.file_infos = [f for f in rec_cache.file_infos if str(f.filepath.absolute()) in filepaths]
-
+                # 5. 等待上传文件清单
                 file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
                 sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
 
                 all_completed = True
                 for file_info in sorted_files:
-                    if not can_read_path(str(file_info.filepath.absolute())):
+                    _abs_path = str(file_info.filepath.absolute())
+
+                    if not can_read_path(_abs_path):
                         _log.warning(f"{file_info.filepath} can not access, skip!")
+                        continue
+
+                    if _abs_path in _uploaded_files:
+                        _log.debug(f"{file_info.filepath} already uploaded, skip!")
                         continue
 
                     if not rec_cache.state_path.absolute().exists():
@@ -237,17 +238,17 @@ class Collector:
                     _completed = self.api.resumable_upload_files(
                         record_name=rec_cache.record["name"],
                         file_infos=[file_info],
-                        remove_after=True,
+                        part_state_path=str(rec_cache.base_dir_path.absolute()),
                     )
                     all_completed = all_completed and _completed
 
-                    _uploaded_files += 1
-                    rec_cache.uploaded_files = _uploaded_files
+                    _uploaded_files.append(_abs_path)
+                    rec_cache.uploaded_filepaths = _uploaded_files
                     rec_cache.save_state()
 
                     task_name = rec_cache.task.get("name", "")
                     if task_name:
-                        self.api.put_task_tags(task_name, {"uploadedFiles": str(_uploaded_files)})
+                        self.api.put_task_tags(task_name, {"uploadedFiles": str(len(_uploaded_files))})
 
                 # 6. 完成记录。如果需要，删除 record 文件夹
                 if all_completed:
@@ -275,7 +276,7 @@ class Collector:
                     _log.info(f"==> Handled record: {rec_cache.key}")
 
                     if self.conf.delete_after_upload:
-                        rec_cache.delete_cache_dir()
+                        rec_cache.delete_cache_dir(delay_in_hours=0)
 
     # noinspection PyBroadException
     def run(self, network_queue: Queue, error_queue: Queue):

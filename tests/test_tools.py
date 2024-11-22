@@ -20,6 +20,7 @@ import pytest
 import requests_mock
 
 from cos.utils import LimitedFileReader, download_if_modified, hardlink_recursively, sha256_file, size_fmt
+from cos.utils.files import is_hidden_file
 
 url = "http://fake.address/"
 
@@ -109,3 +110,14 @@ def test_size_fmt():
     assert size_fmt(1000**2) == "1.00MB"
     assert size_fmt(1000**3) == "1.00GB"
     assert size_fmt(1000**4) == "1000.00GB"
+
+
+def test_is_hidden_file():
+    assert is_hidden_file(".hidden")
+    assert is_hidden_file(".hidden.txt")
+    assert not is_hidden_file("not_hidden")
+    assert not is_hidden_file("not_hidden.txt")
+    assert not is_hidden_file("not.hidden")
+    assert is_hidden_file("/path/to/.hidden")
+    assert is_hidden_file("/path/.to/hidden")
+    assert not is_hidden_file("/path/to/not_hidden")

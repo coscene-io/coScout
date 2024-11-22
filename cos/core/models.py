@@ -190,7 +190,10 @@ class RecordCache(BaseState):
     # total wait for uploading files
     total_files: int = 0
     # already uploaded files num
+    # deprecated
     uploaded_files: int = 0
+    # already uploaded files
+    uploaded_filepaths: List[str] = []
 
     def __init__(self, **data: Any):
         super().__init__(**data)
