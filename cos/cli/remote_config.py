@@ -37,7 +37,7 @@ def rules(ctx: Context):
     # rules_version = {}
     device_rules = {}
 
-    cache_file = COS_CACHE_PATH / 'rules' / 'rules.json'
+    cache_file = COS_CACHE_PATH / "rules" / "rules.json"
     if not cache_file.parent.exists():
         os.makedirs(cache_file.parent)
 
@@ -52,8 +52,8 @@ def rules(ctx: Context):
         if os.path.exists(cache_file):
             with open(cache_file, "r", encoding="utf-8") as file:
                 device_rules = json.load(file)
-    except:
-        _log.warning("illegal cache file, ignore it")
+    except Exception as e:
+        _log.warning(f"illegal cache file, ignore it {e}")
 
     projects = ctx.api.list_device_projects(device_name=device_name)
     project_names = [p.get("name") for p in projects]
@@ -63,7 +63,7 @@ def rules(ctx: Context):
         try:
             ver = ctx.api.get_diagnosis_rules_metadata(project_name).get("currentVersion", -1)
             if project_name not in device_rules or device_rules[project_name]["version"] != ver:
-                device_rules[project_name] = {"version" : ver}
+                device_rules[project_name] = {"version": ver}
                 need_update.extend(project_names)
         except Exception:
             continue
@@ -83,20 +83,20 @@ def rules(ctx: Context):
 
 
 @remote_config.command
-@click.option('--project', type=str, help='rules\r project name')
-@click.option('--hit', type=str, help='rules\'s hit')
-@click.option('--device', default=None, type=str, help='device')
+@click.option("--project", type=str, help="rules\r project name")
+@click.option("--hit", type=str, help="rules's hit")
+@click.option("--device", default=None, type=str, help="device")
 @click.pass_obj
-def trigger_count(ctx: Context, project: str, hit: str, device : str):
+def trigger_count(ctx: Context, project: str, hit: str, device: str):
     count = ctx.api.count_diagnosis_rules_hit(project, hit, device)
     click.echo(json.dumps(count))
 
 
 @remote_config.command
-@click.option('--project', type=str, help='rules\r project name')
-@click.option('--hit', type=str, help='rules\'s hit')
-@click.option('--triggered', type=bool, help='rules triggered')
-@click.option('--device', default=None, type=str, help='device')
+@click.option("--project", type=str, help="rules\r project name")
+@click.option("--hit", type=str, help="rules's hit")
+@click.option("--triggered", type=bool, help="rules triggered")
+@click.option("--device", default=None, type=str, help="device")
 @click.pass_obj
-def trigger_rules(ctx: Context, project: str, hit: str, triggered: bool, device : str):
+def trigger_rules(ctx: Context, project: str, hit: str, triggered: bool, device: str):
     ctx.api.hit_diagnosis_rule(project, hit, device, triggered)
