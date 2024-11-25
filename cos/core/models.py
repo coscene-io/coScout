@@ -15,14 +15,13 @@
 import datetime
 import json
 import logging
-import os
 import shutil
 import time
 from abc import ABCMeta, abstractmethod
 from pathlib import Path, PosixPath
 from typing import Any, Dict, List
 
-from pydantic import BaseModel, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 from pydantic_core import ValidationError
 
 from cos.constant import RAW_DEVICE_STATE_PATH, RECORD_DIR_PATH, RECORD_STATE_RELATIVE_PATH
@@ -152,7 +151,7 @@ class Moment(BaseModel):
     timestamp: int
     # milliseconds
     duration: int = 0
-    metadata: Dict[str, str] = {}
+    metadata: Dict[str, str] = Field(default_factory=dict)
     task: Task = Task()
 
 
@@ -171,21 +170,19 @@ class RecordCache(BaseState):
 
     # milliseconds since epoch
     timestamp: int
-    labels: List[str] = []
-    record: dict = {}
-    moments: List[Moment] = []
+    labels: List[str] = Field()
+    record: dict = Field(default_factory=dict)
+    moments: List[Moment] = Field(default_factory=list)
 
     # upload task
-    task: dict = {}
+    task: dict = Field(default_factory=dict)
     # diagnosis task
-    diagnosis_task: dict = {}
+    diagnosis_task: dict = Field(default_factory=dict)
 
     # the original files (might be copied from file_infos)
-    files: List[str] = []
+    files: List[str] = Field(default_factory=list)
     # the files with extra info such as size and sha256 (might be hardlink files)
-    file_infos: List[FileInfo] = []
-    # the source paths to be deleted along with the record, usually the original file directory
-    paths_to_delete: List[str] = []
+    file_infos: List[FileInfo] = Field(default_factory=list)
 
     # total wait for uploading files
     total_files: int = 0
@@ -193,7 +190,7 @@ class RecordCache(BaseState):
     # deprecated
     uploaded_files: int = 0
     # already uploaded files
-    uploaded_filepaths: List[str] = []
+    uploaded_filepaths: List[str] = Field(default_factory=list)
 
     def __init__(self, **data: Any):
         super().__init__(**data)
@@ -233,19 +230,6 @@ class RecordCache(BaseState):
                 shutil.rmtree(str(self.base_dir_path.absolute()))
             _log.info(f"==> State file and folder expired and deleted: {self.key}")
 
-            for path_str in self.paths_to_delete:
-                p = Path(path_str).absolute()
-                if not p.exists():
-                    _log.warning(f"==> Source path not found: {path_str}")
-                    continue
-                try:
-                    if p.is_dir():
-                        shutil.rmtree(str(p))
-                    else:
-                        os.remove(str(p))
-                except Exception:
-                    _log.error(f"==> Error when deleting source path: {path_str}", exc_info=True)
-
     def list_files(self):
         return [
             str(f)
@@ -279,14 +263,14 @@ class Label(BaseModel):
 
     display_name: str
     description: str = None
-    labels: List[dict] = []
+    labels: List[dict] = Field(default_factory=list)
 
 
 class RawDeviceCache(BaseState):
     display_name: str = None
     serial_number: str = None
     description: str = None
-    labels: List[dict] = []
+    labels: List[dict] = Field(default_factory=list)
 
     @property
     def state_path(self):
