@@ -49,13 +49,13 @@ jobs:
             label: ubuntu-latest
             file: cos
             container: coscene/nuitka:ubuntu-16.04
-            cache: true
+            cache: false
           - arch: arm64
             os: linux
             label: [ linux-arm-64-8c-32g-300gb ]
             file: cos
             container: coscene/nuitka:ubuntu-16.04
-            cache: true
+            cache: false
           - arch: arm
             os: linux
             label: [ linux-arm-64-8c-32g-300gb ]
