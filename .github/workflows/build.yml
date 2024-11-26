@@ -122,9 +122,10 @@ jobs:
 #
 #      - name: Verify CMake installation
 #        run: cmake --version
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 16
+      - name: Install GLIBC
+        run: |
+          apt-get update
+          apt-get install -y libc6=2.27-3ubuntu1.5
 
       - uses: actions/cache@v4
         if: ${{ matrix.cache }}
