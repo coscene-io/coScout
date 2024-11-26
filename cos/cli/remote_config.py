@@ -83,20 +83,25 @@ def rules(ctx: Context):
 
 
 @remote_config.command
-@click.option("--project", type=str, help="rules\r project name")
+@click.option("--project", type=str, help="project name")
 @click.option("--hit", type=str, help="rules's hit")
 @click.option("--device", default=None, type=str, help="device")
 @click.pass_obj
 def trigger_count(ctx: Context, project: str, hit: str, device: str):
-    count = ctx.api.count_diagnosis_rules_hit(project, hit, device)
+    hit_dict = json.loads(hit)
+    device_name = ctx.api.state.load_state().device.get("name", "") if device is None else device
+    count = ctx.api.count_diagnosis_rules_hit(project, hit_dict, device_name)
     click.echo(json.dumps(count))
 
 
 @remote_config.command
-@click.option("--project", type=str, help="rules\r project name")
+@click.option("--rule", type=str, help="rules spec")
 @click.option("--hit", type=str, help="rules's hit")
 @click.option("--triggered", type=bool, help="rules triggered")
 @click.option("--device", default=None, type=str, help="device")
 @click.pass_obj
-def trigger_rules(ctx: Context, project: str, hit: str, triggered: bool, device: str):
-    ctx.api.hit_diagnosis_rule(project, hit, device, triggered)
+def trigger_rules(ctx: Context, rule: str, hit: str, triggered: bool, device: str):
+    rules_dict = json.loads(rule)
+    hit_dict = json.loads(hit)
+    device_name = ctx.api.state.load_state().device.get("name", "") if device is None else device
+    ctx.api.hit_diagnosis_rule(rules_dict, hit_dict, device_name, triggered)
