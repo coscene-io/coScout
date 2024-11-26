@@ -134,8 +134,6 @@ def load_mod(api_client: ApiClient | None, conf: AppConfig):
 
     mod_conf = conf.mod
     mod_name = mod_conf.name.lower()
-    if "gaussian" in conf.api.server_url or "gs" == mod_name.lower():
-        mod_name = "gs"
 
     _log.info(f"Use mod {mod_name} for collector.")
     return Mod.get_mod(mod_name)(api_client=api_client, conf={**mod_conf.conf, "topics": conf.topics})
@@ -145,7 +143,7 @@ def load_mod(api_client: ApiClient | None, conf: AppConfig):
 @click.pass_obj
 def daemon(ctx: Context):
     ctx.source.disable_reload()
-    clean_old_binary()
+    # clean_old_binary()
     _log.info(f"Starting collector daemon with {get_version()}")
 
     network_queue = Queue()
