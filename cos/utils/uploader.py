@@ -39,18 +39,20 @@ class S3MultipartUploader:
     # AWS throws EntityTooSmall error for parts smaller than 5 MB
     PART_MINIMUM = int(5e6)
 
-    def __init__(self, s3_client: boto3.client, bucket: str, key: str, file_path: str, part_size_bytes=int(6e6)):
+    def __init__(
+        self, s3_client: boto3.client, bucket: str, key: str, file_path: str, part_state_path: str, part_size_bytes=int(6e6)
+    ):
         self.bucket = bucket
         self.key = key
         self.file_path = file_path
         self.file_name = key.split("/files/")[-1]
-        _base_filename = os.path.basename(self.file_name)
-        self.file_dir = os.path.dirname(os.path.realpath(self.file_path))
-        self.multipart_info_file_path = f"{self.file_dir}/.{_base_filename}_multipart.json"
         self.part_size_bytes = part_size_bytes
         self.s3 = s3_client
         self.enabled = True
         self.stop_event = threading.Event()
+
+        self.multipart_info_file_path = Path(part_state_path) / "multipart_info" / f"{self.file_name}" / "multipart_info.json"
+        self.multipart_info_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         assert part_size_bytes >= self.PART_MINIMUM, "part_size is less the minimum part size which is 5MB"
 

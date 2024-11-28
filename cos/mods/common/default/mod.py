@@ -25,11 +25,11 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from strictyaml import load
 
 from cos.collector import Mod
-from cos.constant import COS_DEFAULT_CONFIG_PATH, DEFAULT_MOD_STATE_DIR, DEFAULT_MOD_TEMP_DIR
+from cos.constant import COS_DEFAULT_CONFIG_PATH, DEFAULT_MOD_STATE_DIR
 from cos.core.api import ApiClient
 from cos.core.exceptions import DeviceNotFound
 from cos.core.models import FileInfo, RecordCache
@@ -44,15 +44,15 @@ _log = logging.getLogger(__name__)
 
 class DefaultModConfig(BaseModel):
     enabled: bool = False
-    base_dirs: list[str] = []  # Deprecated
+    base_dirs: list[str] = Field(default_factory=list)  # Deprecated
     base_dir: str = ""  # Deprecated
-    listen_dirs: list[str] = []
-    collect_dirs: list[str] = []
-    topics: list[str] = []
+    listen_dirs: list[str] = Field(default_factory=list)
+    collect_dirs: list[str] = Field(default_factory=list)
+    topics: list[str] = Field(default_factory=list)
     sn_file: str | None = ""
     sn_field: str | None = ""
-    ros2_customized_msgs_dirs: list[str] = []
-    upload_files: list[str] = []
+    ros2_customized_msgs_dirs: list[str] = Field(default_factory=list)
+    upload_files: list[str] = Field(default_factory=list)
 
 
 class DefaultMod(Mod):
@@ -71,8 +71,6 @@ class DefaultMod(Mod):
 
         self.state_dir = DEFAULT_MOD_STATE_DIR
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self.temp_dir = DEFAULT_MOD_TEMP_DIR
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
         super().__init__()
 
     @staticmethod
@@ -110,10 +108,6 @@ class DefaultMod(Mod):
                 for filepath in error_json.get(key, []):
                     filename = key + "/" + Path(filepath).name
                     files[filename] = FileInfo(filepath=filepath, filename=filename)
-            for key in ["zips"]:
-                for filepath in error_json.get(key, []):
-                    filename = Path(filepath).name
-                    files[filename] = FileInfo(filepath=filepath, filename=filename)
             for dir_base_path in error_json.get("dirs", []):
                 for filepath in Path(dir_base_path).glob("**/*"):
                     if filepath.is_file():
@@ -127,7 +121,6 @@ class DefaultMod(Mod):
                 "rules": error_json.get("record", {}).get("rules", []),
             }
             rc.labels = error_json.get("record", {}).get("labels", [])
-            rc.paths_to_delete = error_json.get("paths_to_delete", [])
 
             # update diagnosis task
             rc.diagnosis_task = error_json.get("diagnosis_task", {})
@@ -155,8 +148,6 @@ class DefaultMod(Mod):
         start_time = error_json["cut"]["start"]
         end_time = error_json["cut"]["end"]
         error_json_id, _ = os.path.splitext(os.path.basename(error_json_path))
-        temp_files_dir = self.temp_dir / error_json_id
-        temp_files_dir.mkdir(parents=True, exist_ok=True)
 
         _log.info(
             f"==> Search for files in {self.file_state_handler.src_dirs}, start_time: {start_time}, end_time: {end_time}"
@@ -178,46 +169,29 @@ class DefaultMod(Mod):
         raw_files += error_json["cut"]["extraFiles"]
 
         _log.info(f"==> Search for dirs in {self.file_state_handler.src_dirs}, start_time: {start_time}, end_time: {end_time}")
-        raw_dirs = self.file_state_handler.get_files(
+        dirs = self.file_state_handler.get_files(
             FileStateHandler.state_is_collecting_filter(),
             FileStateHandler.state_timestamp_filter(start_time, end_time),
             FileStateHandler.state_dir_filter(True),
             upload_whitelist_filter,
         )
-        _log.info(f"==> Found dirs: {raw_dirs}")
+        _log.info(f"==> Found dirs: {dirs}")
 
         bag_files = []
         log_files = []
         other_files = []
-        dirs = []
-        zips = []
-        for dir_name in raw_dirs:
-            dir_path = Path(dir_name)
-            cur_dir = temp_files_dir / dir_path.name
-            shutil.copytree(dir_path, cur_dir)
-            dirs.append(str(cur_dir))
         for file in raw_files:
             # todo: use handlers to handle different file types
             try:
                 if Path(file).is_file():
                     if file.endswith(".bag"):
-                        dst_path = shutil.copy(file, temp_files_dir)
-                        bag_files.append(dst_path)
+                        bag_files.append(file)
                     elif file.endswith(".log"):
-                        dst_path = LogHandler.prepare_cut(Path(file), temp_files_dir, start_time, end_time)
-                        log_files.append(dst_path)
+                        log_files.append(file)
                     else:
-                        dst_path = shutil.copy(file, temp_files_dir)
-                        other_files.append(dst_path)
+                        other_files.append(file)
                 elif Path(file).is_dir():
-                    dst_path = (temp_files_dir / Path(file).name).with_suffix(".zip")
-                    shutil.make_archive(
-                        str(dst_path.with_suffix("")),
-                        "zip",
-                        Path(file).parent,
-                        Path(file).name,
-                    )
-                    zips.append(str(dst_path))
+                    dirs.append(file)
             except Exception:
                 _log.error(f"==> Cut file failed: {file}", exc_info=True)
 
@@ -225,10 +199,8 @@ class DefaultMod(Mod):
         error_json["log"] = log_files
         error_json["files"] = other_files
         error_json["dirs"] = dirs
-        error_json["zips"] = zips
         error_json["flag"] = True
         error_json["startTime"] = int(time.time() * 1000) + random.randint(1, 1000)
-        error_json["paths_to_delete"] = [str(temp_files_dir)]
 
         with open(error_json_path, "w", encoding="utf8") as fp:
             json.dump(error_json, fp, indent=4)
