@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import hashlib
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -118,6 +119,6 @@ def test_is_hidden_file():
     assert not is_hidden_file("not_hidden")
     assert not is_hidden_file("not_hidden.txt")
     assert not is_hidden_file("not.hidden")
-    assert is_hidden_file("/path/to/.hidden")
-    assert is_hidden_file("/path/.to/hidden")
-    assert not is_hidden_file("/path/to/not_hidden")
+    assert is_hidden_file(os.sep.join(["path", ".hidden"]))
+    assert is_hidden_file(os.sep.join(["path", ".to", "hello"]))
+    assert not is_hidden_file(os.sep.join(["path", "to", "hello"]))
