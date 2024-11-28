@@ -170,7 +170,7 @@ class RecordCache(BaseState):
 
     # milliseconds since epoch
     timestamp: int
-    labels: List[str] = Field()
+    labels: List[str] = Field(default_factory=list)
     record: dict = Field(default_factory=dict)
     moments: List[Moment] = Field(default_factory=list)
 
