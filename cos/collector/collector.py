@@ -122,30 +122,32 @@ class Collector:
         self._upload_record_thumbnail(record.get("name"), rec_cache)
 
         for moment in rec_cache.moments:
-            _ = self.api.create_event(
+            obtain_event_res = self.api.obtain_event(
                 record_name=record.get("name"),
                 display_name=moment.title if moment.title else record_title,
                 description=moment.description if moment.description else record_title,
                 customized_fields=moment.metadata,
-                trigger_time=moment.timestamp / 1000,
-                duration=moment.duration / 1000,
+                trigger_time=moment.timestamp,
+                duration=moment.duration,
                 device_name=self.device["name"],
             )
 
-            if moment.task:
-                created_task = self.api.create_task(
-                    record_name=record.get("name"),
-                    title=moment.title if moment.title else record_title,
-                    description=moment.description if moment.description else record_title,
-                    assignee=moment.task.assignee,
-                )
-                if moment.task.sync_task and created_task.get("name"):
-                    try:
-                        _log.info(f"==> Sync task: {created_task.get('name')}")
-                        self.api.sync_task(created_task.get("name"))
-                        _log.info(f"==> Sync task done: {created_task.get('name')}")
-                    except Exception:
-                        _log.error(f"Failed to sync task: {created_task.get('name')}", exc_info=True)
+            if not obtain_event_res.get("isNew"):
+                continue
+
+            if not moment.task:
+                continue
+
+            upserted_task = self.api.upsert_task(
+                record_name=record.get("name"),
+                event_name=obtain_event_res.get("event").get("name"),
+                title=moment.title if moment.title else record_title,
+                description=moment.description if moment.description else record_title,
+                assignee=moment.task.assignee,
+            )
+
+            if upserted_task.get("name") and moment.task.sync_task:
+                self.api.sync_task(upserted_task.get("name"))
 
         if rec_cache.diagnosis_task:
             created_diagnosis_task = self.api.create_diagnosis_task(

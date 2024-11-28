@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import json
 import logging
 from typing import Dict, List
 
@@ -589,11 +589,11 @@ class RestApiClient(ApiClient):
     # endregion
 
     # region event
-    def create_event(
+    def obtain_event(
         self,
         record_name,
         display_name: str,
-        trigger_time: int,
+        trigger_time: float,
         description: str = None,
         customized_fields: dict = None,
         device_name: str = None,
@@ -613,24 +613,29 @@ class RestApiClient(ApiClient):
         """
         if not record_name or not display_name:
             return None
-        url = "{api_base}/dataplatform/v1alpha2/{project}/events".format(api_base=self.api_base, project=self.project_name)
+        url = "{api_base}/dataplatform/v1alpha2/{project}/events:obtain".format(
+            api_base=self.api_base, project=self.project_name
+        )
         try:
             response = requests.post(
                 url=url,
-                params={"record": record_name},
                 json={
-                    "displayName": display_name,
-                    "triggerTime": {
-                        "seconds": int(trigger_time),
-                        "nanos": int(trigger_time % 1 * 1e9),
+                    "parent": self.project_name,
+                    "event": {
+                        "displayName": display_name,
+                        "triggerTime": {
+                            "seconds": int(trigger_time),
+                            "nanos": int(trigger_time * 1e9) - int(trigger_time) * 1_000_000_000,
+                        },
+                        "duration": {
+                            "seconds": int(duration),
+                            "nanos": int(duration * 1e9) - int(duration) * 1_000_000_000,
+                        },
+                        "description": description,
+                        "customizedFields": customized_fields or {},
+                        "device": {"name": device_name},
+                        "record": record_name,
                     },
-                    "duration": {
-                        "seconds": int(duration),
-                        "nanos": int(duration % 1 * 1e9),
-                    },
-                    "description": description,
-                    "customizedFields": customized_fields or {},
-                    "device": {"name": device_name},
                 },
                 headers=self.request_headers,
                 auth=self.basic_auth,
@@ -948,28 +953,63 @@ class RestApiClient(ApiClient):
 
     # region task
 
-    def create_task(self, record_name: str, title: str, description: str, assignee: str):
+    def upsert_task(self, record_name: str, event_name: str, title: str, description: str, assignee: str):
         """
         :param assignee: task 负责人
         :param description: task 描述
         :param title: task 标题
         :param record_name: 关联的 record
+        :param event_name: 关联的 event
         :return:
         """
-        url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
+        url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks/-:upsert".format(
             api_base=self.api_base,
             parent=self.project_name,
+        )
+
+        task_description = json.dumps(
+            {
+                "root": {
+                    "children": [
+                        {
+                            "children": [{"mode": "normal", "text": description, "type": "text", "version": 1}],
+                            "indent": 0,
+                            "direction": "ltr",
+                            "format": "",
+                            "type": "paragraph",
+                            "version": 1,
+                        },
+                        {
+                            "children": [{"sourceName": event_name, "sourceType": "moment", "type": "source", "version": 1}],
+                            "direction": None,
+                            "format": "",
+                            "indent": 0,
+                            "type": "paragraph",
+                            "version": 1,
+                        },
+                    ],
+                    "direction": None,
+                    "indent": 0,
+                    "format": "",
+                    "type": "root",
+                    "version": 1,
+                }
+            }
         )
 
         try:
             response = requests.post(
                 url=url,
                 json={
-                    "title": title,
-                    "description": description,
-                    "assignee": assignee,
-                    "category": "COMMON",
-                    "commonTaskDetail": {"record": record_name},
+                    "parent": self.project_name,
+                    "task": {
+                        "title": title,
+                        "description": task_description,
+                        "assignee": assignee,
+                        "category": "COMMON",
+                        "state": "PROCESSING",  # todo: 任务状态
+                        "commonTaskDetail": {"event": event_name},
+                    },
                 },
                 headers=self.request_headers,
                 auth=self.basic_auth,
