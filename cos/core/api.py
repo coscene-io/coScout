@@ -550,11 +550,11 @@ class ApiClient(metaclass=ABCMeta):
         except Exception:
             return False
 
-    def resumable_upload_files(self, record_name, file_infos, remove_after=False):
+    def resumable_upload_files(self, record_name, file_infos, part_state_path: str):
         """
         :param record_name: 记录的 resource_name
         :param file_infos:
-        :param remove_after: 上传完成后是否删除本地文件
+        :param part_state_path: 分片信息的存储路径
         :return: 创建的记录
         """
         rc = RecordName.from_str(record_name)
@@ -584,11 +584,14 @@ class ApiClient(metaclass=ABCMeta):
                 has_clone = self.check_clone_file(record_name=record_name, file_info=f)
                 if not has_clone:
                     key = rc.simple_record_name() + "/files/" + f.filename
-                    uploader = S3MultipartUploader(s3_client, bucket="default", file_path=str(f.filepath.absolute()), key=key)
+                    uploader = S3MultipartUploader(
+                        s3_client,
+                        bucket="default",
+                        file_path=str(f.filepath.absolute()),
+                        key=key,
+                        part_state_path=part_state_path,
+                    )
                     uploader.upload()
-                if remove_after:
-                    f.filepath.unlink()
-                    _log.info(f"==> Deleted after upload: {f.filepath}")
             except CosException:
                 _log.error(
                     f"==> Failed to upload {f.filepath}, will retry later",
