@@ -58,28 +58,23 @@ def rules(ctx: Context):
     projects = ctx.api.list_device_projects(device_name=device_name)
     project_names = [p.get("name") for p in projects]
 
-    need_update = []
+    new_rules = {}
     for project_name in project_names:
         try:
             ver = ctx.api.get_diagnosis_rules_metadata(project_name).get("currentVersion", -1)
             if project_name not in device_rules or device_rules[project_name]["version"] != ver:
-                device_rules[project_name] = {"version": ver}
-                need_update.extend(project_names)
+                project_rules = ctx.api.get_diagnosis_rule(project_name)
+                new_rules[project_name] = project_rules
+                new_rules[project_name]["version"] = ver
+            else:
+                new_rules[project_name] = device_rules[project_name]
         except Exception:
             continue
 
-    if len(need_update) > 0:
-        for update_project in need_update:
-            try:
-                project_rules = ctx.api.get_diagnosis_rule(update_project)
-            except Exception:
-                continue
-            device_rules[update_project]["rules"] = project_rules["rules"]
+    with open(cache_file, "w", encoding="utf-8") as f:
+        json.dump(new_rules, f, ensure_ascii=False, indent=4)
 
-        with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump(device_rules, f, ensure_ascii=False, indent=4)
-
-    click.echo(json.dumps(device_rules))
+    click.echo(json.dumps(new_rules))
 
 
 @remote_config.command
