@@ -442,7 +442,7 @@ class ApiClient(metaclass=ABCMeta):
 
     # region event
     @abstractmethod
-    def create_event(
+    def obtain_event(
         self,
         record_name,
         display_name,
@@ -701,9 +701,10 @@ class ApiClient(metaclass=ABCMeta):
 
     # region task
     @abstractmethod
-    def create_task(self, record_name: str, title: str, description: str, assignee: str | None):
+    def upsert_task(self, record_name: str, event_name: str, title: str, description: str, assignee: str | None):
         """
         :param assignee:  任务的执行者
+        :param event_name: 任务的event name
         :param record_name: 记录的resource name
         :param title: 任务的标题
         :param description: 任务的描述

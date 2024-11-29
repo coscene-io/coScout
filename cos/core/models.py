@@ -147,10 +147,10 @@ class Moment(BaseModel):
 
     title: str = ""
     description: str = ""
-    # milliseconds since epoch
-    timestamp: int
-    # milliseconds
-    duration: int = 0
+    # seconds since epoch
+    timestamp: float
+    # seconds
+    duration: float = 0.0
     metadata: Dict[str, str] = Field(default_factory=dict)
     task: Task = Task()
 

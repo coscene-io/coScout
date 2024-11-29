@@ -32,7 +32,7 @@ from cos.collector import Mod
 from cos.constant import COS_DEFAULT_CONFIG_PATH, DEFAULT_MOD_STATE_DIR
 from cos.core.api import ApiClient
 from cos.core.exceptions import DeviceNotFound
-from cos.core.models import FileInfo, RecordCache
+from cos.core.models import FileInfo, Moment, RecordCache, Task
 from cos.mods.common.default.file_state_handler import FileStateHandler
 from cos.mods.common.default.handlers import LogHandler
 from cos.mods.common.default.remote_rule import RemoteRule
@@ -125,12 +125,29 @@ class DefaultMod(Mod):
             # update diagnosis task
             rc.diagnosis_task = error_json.get("diagnosis_task", {})
 
+            # update moment
+            rc.moments = []
+            for moment in error_json.get("moments", []):
+                moment_to_create = Moment(
+                    title=moment.get("title"),
+                    description=moment.get("description"),
+                    timestamp=moment.get("timestamp"),
+                    duration=moment.get("timestamp") - moment.get("start_time"),
+                )
+                if moment.get("create_task", True):
+                    moment_to_create.task = Task(
+                        title=moment.get("title"),
+                        description=moment.get("description"),
+                        assignee=moment.get("assign_to"),  # todo: assignee
+                        sync_task=moment.get("sync_task", False),
+                    )
+                rc.moments.append(moment_to_create)
+
             rc.save_state()
             _log.info(f"==> Converted error log to record state: {rc.state_path}")
 
-            # 把上传状态写回json
-            error_json["uploaded"] = True
-            self.__update_error_json(error_json, error_json_path)
+            # 把 json 删除
+            os.remove(error_json_path)
             _log.info(f"==> Handle err file done: {error_json_path}")
         else:
             _log.debug(f"==> Skip handle err file: {error_json_path}")
