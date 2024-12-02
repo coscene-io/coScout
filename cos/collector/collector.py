@@ -127,6 +127,7 @@ class Collector:
                 customized_fields=moment.metadata,
                 trigger_time=moment.timestamp,
                 duration=moment.duration,
+                rule_id=moment.rule_id,
                 device_name=self.device["name"],
             )
 

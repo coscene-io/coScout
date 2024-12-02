@@ -152,6 +152,7 @@ class Moment(BaseModel):
     # seconds
     duration: float = 0.0
     metadata: Dict[str, str] = Field(default_factory=dict)
+    rule_id: str
     task: Task = Task()
 
 

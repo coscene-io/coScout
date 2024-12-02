@@ -451,6 +451,7 @@ class ApiClient(metaclass=ABCMeta):
         customized_fields,
         device_name,
         duration,
+        rule_id,
     ):
         """
         创建event
@@ -462,6 +463,7 @@ class ApiClient(metaclass=ABCMeta):
         :param customized_fields:
         :param device_name:
         :param duration:
+        :param rule_id:
         :return: created event
         """
         pass
