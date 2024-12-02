@@ -24,6 +24,7 @@ from requests.exceptions import RequestException
 from cos.core import request_hook
 from cos.core.api import ApiClient, ApiClientConfig
 from cos.core.exceptions import CosException, Unauthorized, RecordNotFound
+from cos.core.models import Moment
 
 _log = logging.getLogger(__name__)
 
@@ -649,6 +650,62 @@ class RestApiClient(ApiClient):
             return result
         except RequestException as e:
             six.raise_from(CosException("Create Event failed"), e)
+
+    def trigger_device_event(
+        self,
+        moment: Moment,
+        event_code: str,
+        record_name: str,
+        rule_id: str,
+        device_name: str,
+        device_extra_info: Dict[str, any],
+    ):
+        """
+        触发设备事件
+        :param moment: 事件的时间
+        :param event_code: 事件的code
+        :param record_name: 记录的名称
+        :param rule_id: 规则的ID
+        :param device_name: 设备的名称
+        :param device_extra_info: 设备的额外信息
+        :return:
+        """
+        url = "{api_base}/analysis/v1alpha1/{project}/deviceEvents:trigger".format(
+            api_base=self.api_base, project=self.project_name
+        )
+        payload = {
+            "code": event_code,
+            "parameters": moment.metadata,
+            "trigger_time": {
+                "seconds": int(moment.timestamp),
+                "nanos": int(moment.timestamp * 1e9) - int(moment.timestamp) * 1_000_000_000,
+            },
+            "duration": {
+                "seconds": int(moment.duration),
+                "nanos": int(moment.duration * 1e9) - int(moment.duration) * 1_000_000_000,
+            },
+            "event_source": "DEVICE",
+            "device": device_name,
+            "diagnosis_rule_id": rule_id,
+            "device_context": device_extra_info,
+            "record": record_name,
+            "moment": moment.name,
+        }
+        try:
+            response = requests.post(
+                url=url,
+                json=payload,
+                headers=self.request_headers,
+                auth=self.basic_auth,
+                timeout=10,
+            )
+            if response.status_code == 401:
+                raise Unauthorized("Unauthorized")
+
+            response.raise_for_status()
+            _log.info("==> Triggered device event")
+        except RequestException as e:
+            six.raise_from(CosException("Trigger device event failed"), e)
 
     # endregion
 
