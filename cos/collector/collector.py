@@ -179,11 +179,12 @@ class Collector:
                         record_name=record_name,
                         device_name=self.device.get("name"),
                         device_extra_info=device_extra_infos,
-                        event_code=rec_cache.event_code,
-                        rule_id=rec_cache.diagnosis_task.get("rule_id"),
+                        event_code=moment.code,
+                        rule_id=moment.rule_id,
                     )
                     moment.event["sent"] = True
                     rec_cache.save_state()
+                    _log.info(f"==> Triggered event: {moment.name}")
 
             if not moment.is_new:
                 continue

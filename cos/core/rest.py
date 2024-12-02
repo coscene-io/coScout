@@ -676,22 +676,24 @@ class RestApiClient(ApiClient):
             api_base=self.api_base, project=self.project_name
         )
         payload = {
-            "code": event_code,
-            "parameters": moment.metadata,
-            "trigger_time": {
-                "seconds": int(moment.timestamp),
-                "nanos": int(moment.timestamp * 1e9) - int(moment.timestamp) * 1_000_000_000,
-            },
-            "duration": {
-                "seconds": int(moment.duration),
-                "nanos": int(moment.duration * 1e9) - int(moment.duration) * 1_000_000_000,
-            },
-            "event_source": "DEVICE",
-            "device": device_name,
-            "diagnosis_rule_id": rule_id,
-            "device_context": device_extra_info,
-            "record": record_name,
-            "moment": moment.name,
+            "parent": self.project_name,
+            "device_events": [
+                {
+                    "code": event_code,
+                    "parameters": moment.metadata,
+                    "trigger_time": {
+                        "seconds": int(moment.timestamp),
+                        "nanos": int(moment.timestamp * 1e9) - int(moment.timestamp) * 1_000_000_000,
+                    },
+                    "duration": str(moment.duration) + "s",
+                    "event_source": "DEVICE",
+                    "device": device_name,
+                    "diagnosis_rule_id": rule_id,
+                    "device_context": device_extra_info,
+                    "record": record_name,
+                    "moment": moment.name,
+                }
+            ],
         }
         try:
             response = requests.post(

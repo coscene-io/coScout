@@ -157,8 +157,8 @@ class Moment(BaseModel):
     metadata: Dict[str, str] = Field(default_factory=dict)
     task: Task = Task()
     event: Dict[str, Any] = Field(default_factory=dict)
-    rule_id: str
-    code: str
+    rule_id: str = ""
+    code: str = ""
 
 
 class RecordCache(BaseState):
