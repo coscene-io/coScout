@@ -599,6 +599,7 @@ class RestApiClient(ApiClient):
         customized_fields: dict = None,
         device_name: str = None,
         duration: float = 0.0,
+        rule_id: str = "",
     ):
         """
         创建event
@@ -636,6 +637,7 @@ class RestApiClient(ApiClient):
                         "customizedFields": customized_fields or {},
                         "device": {"name": device_name},
                         "record": record_name,
+                        "rule": {"id": rule_id},
                     },
                 },
                 headers=self.request_headers,

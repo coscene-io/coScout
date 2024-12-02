@@ -103,7 +103,7 @@ class DefaultMod(Mod):
                 shutil.copy(source_file, target_file)
                 _log.info(f"==> Copy error json file to record folder: {target_file}")
 
-            files = {str(target_file): FileInfo(filepath=str(target_file), filename=target_file.name)}
+            files = {str(target_file): FileInfo(filepath=target_file, filename=target_file.name)}
             for key in ["bag", "log", "files"]:
                 for filepath in error_json.get(key, []):
                     filename = key + "/" + Path(filepath).name
@@ -133,6 +133,8 @@ class DefaultMod(Mod):
                     description=moment.get("description"),
                     timestamp=moment.get("timestamp"),
                     duration=moment.get("timestamp") - moment.get("start_time"),
+                    rule_id=moment.get("rule_id"),
+                    code=moment.get("code"),
                 )
                 if moment.get("create_task", True):
                     moment_to_create.task = Task(
