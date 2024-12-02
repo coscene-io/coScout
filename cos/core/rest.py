@@ -598,7 +598,7 @@ class RestApiClient(ApiClient):
         customized_fields: dict = None,
         device_name: str = None,
         duration: float = 0.0,
-        rule_id: str = ""
+        rule_id: str = "",
     ):
         """
         创建event
