@@ -82,6 +82,11 @@ ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.
 COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz
 
+# cgroup path
+GROUP_NAME="cos_cpu_limited"
+CPU_PERCENT=10
+CGROUP_PATH="/sys/fs/cgroup/cpu"
+
 help() {
   cat <<EOF
 usage: $0 [OPTIONS]
@@ -137,6 +142,51 @@ download_file() {
     curl -SLko "$dest" "$url" || error_exit "Failed to download $url without verifying the certificate"
   else
     curl -SLo "$dest" "$url" || error_exit "Failed to download $url"
+  fi
+}
+
+setup_cgroup() {
+  if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
+    echo "Cgroup '$GROUP_NAME' already exists"
+
+    period=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_period_us)
+    quota=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_quota_us)
+
+    echo "Current CPU limit settings:"
+    echo "Period: $period microseconds"
+    echo "Quota: $quota microseconds"
+    echo "Effective CPU limit: $((quota * 100 / period))%"
+    return 0
+  fi
+
+  echo "Creating new cgroup '$GROUP_NAME'..."
+  cgcreate -g cpu:/$GROUP_NAME
+  if [ $? -ne 0 ]; then
+    echo "Failed to create cgroup"
+    exit 1
+  fi
+
+  echo "Setting CPU limit to $CPU_PERCENT%..."
+  cgset -r cpu.cfs_period_us=100000 $GROUP_NAME
+  cgset -r cpu.cfs_quota_us=$((CPU_PERCENT * 1000)) $GROUP_NAME
+
+  # 验证设置
+  period=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_period_us)
+  quota=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_quota_us)
+
+  echo "CPU limit settings:"
+  echo "Period: $period microseconds"
+  echo "Quota: $quota microseconds"
+  echo "Effective CPU limit: $((quota * 100 / period))%"
+}
+
+check_cgroup_tools() {
+  if ! command -v cgcreate &>/dev/null; then
+    echo "Cannot install cgroup-tools automatically. Please install it manually 'apt-get install -y cgroup-tools'."
+    return 0
+  else
+    echo "cgroup-tools is installed."
+    return 1
   fi
 }
 
@@ -215,7 +265,7 @@ while test $# -gt 0; do
 done
 
 if [[ $USE_32BIT -eq 1 ]]; then
-  if [[ $ARCH != "arm64" ]] && [[  $ARCH != "arm" ]]; then
+  if [[ $ARCH != "arm64" ]] && [[ $ARCH != "arm" ]]; then
     echo "32-bit version is only supported on arm64 and arm architecture."
     exit 1
   fi
@@ -602,12 +652,25 @@ EOL
     echo "Installation completed successfully 🎉, you can use 'journalctl --user-unit=cos -f -n 50' to check the logs."
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
+
+    has_croup=check_cgroup_tools
+    if [[ $has_croup -eq 0 ]]; then
+      setup_cgroup
+    fi
+
+    exec_command="exec $COS_SHELL_BASE/bin/cos daemon"
+    if [[ $has_croup -eq 1 ]]; then
+      exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon"
+    fi
+
     sudo tee /etc/init/cos.conf >/dev/null <<EOF
 description "coScout: Data Collector by coScene"
 author "coScene"
 
 start on started networking
 stop on runlevel [!2345]
+
+nice 19
 
 # Limit the start attempts
 respawn
@@ -619,7 +682,7 @@ end script
 
 script
     cd $CUR_USER_HOME/.local/state/cos
-    exec $COS_SHELL_BASE/bin/cos daemon
+    $exec_command
 end script
 
 post-stop script
