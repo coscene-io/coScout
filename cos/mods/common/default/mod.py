@@ -308,22 +308,21 @@ class DefaultMod(Mod):
         if not collect_dirs:
             collect_dirs = base_dirs
 
-        if not listen_dirs:
+        if listen_dirs and len(listen_dirs) > 0:
+            self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
+
+            # Compute topics in both rules and config
+            self.file_state_handler.active_topics = {
+                topic
+                for topic in RemoteRule(self._api_client).list_topics_in_rules()
+                if topic in [*self.conf.topics, "/external_log"]
+            }
+
+            # start log listener and static file listener
+            self.start_log_listener()
+            self.start_static_file_listener()
+        else:
             _log.info("Default Mod listen_dirs/base_dirs/base_dir is empty, skip!")
-            return
-
-        self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
-
-        # Compute topics in both rules and config
-        self.file_state_handler.active_topics = {
-            topic
-            for topic in RemoteRule(self._api_client).list_topics_in_rules()
-            if topic in [*self.conf.topics, "/external_log"]
-        }
-
-        # start log listener and static file listener
-        self.start_log_listener()
-        self.start_static_file_listener()
 
         # handle error json files
         _log.info(f"==> Search for new error json {str(self.state_dir)}")

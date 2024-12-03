@@ -573,7 +573,7 @@ class ApiClient(metaclass=ABCMeta):
         except Exception:
             return False
 
-    def resumable_upload_files(self, record_name, file_infos, part_state_path: str):
+    def resumable_upload_files(self, record_name, file_infos, part_state_path: str, skip_check_same_file: bool = False):
         """
         :param record_name: 记录的 resource_name
         :param file_infos:
@@ -604,17 +604,20 @@ class ApiClient(metaclass=ABCMeta):
         sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
         for f in sorted_files:
             try:
-                has_clone = self.check_clone_file(record_name=record_name, file_info=f)
-                if not has_clone:
-                    key = rc.simple_record_name() + "/files/" + f.filename
-                    uploader = S3MultipartUploader(
-                        s3_client,
-                        bucket="default",
-                        file_path=str(f.filepath.absolute()),
-                        key=key,
-                        part_state_path=part_state_path,
-                    )
-                    uploader.upload()
+                if not skip_check_same_file:
+                    has_clone = self.check_clone_file(record_name=record_name, file_info=f)
+                    if has_clone:
+                        continue
+
+                key = rc.simple_record_name() + "/files/" + f.filename
+                uploader = S3MultipartUploader(
+                    s3_client,
+                    bucket="default",
+                    file_path=str(f.filepath.absolute()),
+                    key=key,
+                    part_state_path=part_state_path,
+                )
+                uploader.upload()
             except CosException:
                 _log.error(
                     f"==> Failed to upload {f.filepath}, will retry later",

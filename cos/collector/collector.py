@@ -43,6 +43,7 @@ class CollectorConfig(BaseModel):
     delete_after_upload: bool = True
     delete_after_interval_in_hours: int = 48
     scan_interval_in_secs: int = 60
+    skip_check_same_file: bool = False
 
 
 class Collector:
@@ -81,7 +82,10 @@ class Collector:
             filename=_finish_file.name,
         ).complete(inplace=True, skip_sha256=True)
         return self.api.resumable_upload_files(
-            record_name=record_name, file_infos=[file_info], part_state_path=str(rec_cache.base_dir_path.absolute())
+            record_name=record_name,
+            file_infos=[file_info],
+            part_state_path=str(rec_cache.base_dir_path.absolute()),
+            skip_check_same_file=self.conf.skip_check_same_file,
         )
 
     def __get_record_title(self, rec_cache: RecordCache):
@@ -306,6 +310,7 @@ class Collector:
                         record_name=rec_cache.record["name"],
                         file_infos=[file_info],
                         part_state_path=str(rec_cache.base_dir_path.absolute()),
+                        skip_check_same_file=self.conf.skip_check_same_file,
                     )
                     all_completed = all_completed and _completed
 
@@ -342,8 +347,8 @@ class Collector:
                     rec_cache.save_state()
                     _log.info(f"==> Handled record: {rec_cache.key}")
 
-                    # if self.conf.delete_after_upload:
-                    #     rec_cache.delete_cache_dir(delay_in_hours=0)
+                    if self.conf.delete_after_upload:
+                        rec_cache.delete_cache_dir(delay_in_hours=0)
 
     # noinspection PyBroadException
     def run(self, network_queue: Queue, error_queue: Queue):
