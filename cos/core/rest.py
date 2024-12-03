@@ -611,6 +611,7 @@ class RestApiClient(ApiClient):
         :param customized_fields:
         :param device_name:
         :param duration:
+        :param rule_id:
         :return: created event
         """
         if not record_name or not display_name:
@@ -619,26 +620,29 @@ class RestApiClient(ApiClient):
             api_base=self.api_base, project=self.project_name
         )
         try:
+            event = {
+                "displayName": display_name,
+                "triggerTime": {
+                    "seconds": int(trigger_time),
+                    "nanos": int(trigger_time * 1e9) - int(trigger_time) * 1_000_000_000,
+                },
+                "duration": {
+                    "seconds": int(duration),
+                    "nanos": int(duration * 1e9) - int(duration) * 1_000_000_000,
+                },
+                "description": description,
+                "customizedFields": customized_fields or {},
+                "device": {"name": device_name},
+                "record": record_name,
+            }
+            if rule_id:
+                event["rule"] = {"id": rule_id}
+
             response = requests.post(
                 url=url,
                 json={
                     "parent": self.project_name,
-                    "event": {
-                        "displayName": display_name,
-                        "triggerTime": {
-                            "seconds": int(trigger_time),
-                            "nanos": int(trigger_time * 1e9) - int(trigger_time) * 1_000_000_000,
-                        },
-                        "duration": {
-                            "seconds": int(duration),
-                            "nanos": int(duration * 1e9) - int(duration) * 1_000_000_000,
-                        },
-                        "description": description,
-                        "customizedFields": customized_fields or {},
-                        "device": {"name": device_name},
-                        "record": record_name,
-                        "rule": {"id": rule_id},
-                    },
+                    "event": event,
                 },
                 headers=self.request_headers,
                 auth=self.basic_auth,

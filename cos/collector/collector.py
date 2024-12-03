@@ -169,7 +169,7 @@ class Collector:
                     rule_id=moment.rule_id,
                     device_name=self.device["name"],
                 )
-                moment.name = obtain_event_res.get("event").get("name")
+                moment.name = obtain_event_res.get("event", {}).get("name")
                 moment.is_new = obtain_event_res.get("isNew", False)
                 rec_cache.save_state()
 
