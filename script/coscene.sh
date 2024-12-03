@@ -183,10 +183,10 @@ setup_cgroup() {
 check_cgroup_tools() {
   if ! command -v cgcreate &>/dev/null; then
     echo "Cannot install cgroup-tools automatically. Please install it manually 'apt-get install -y cgroup-tools'."
-    return 0
+    return 1
   else
     echo "cgroup-tools is installed."
-    return 1
+    return 0
   fi
 }
 
@@ -653,13 +653,12 @@ EOL
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
 
-    has_croup=check_cgroup_tools
-    if [[ $has_croup -eq 0 ]]; then
+    if check_cgroup_tools; then
       setup_cgroup
     fi
 
     exec_command="exec $COS_SHELL_BASE/bin/cos daemon"
-    if [[ $has_croup -eq 1 ]]; then
+    if check_cgroup_tools; then
       exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon"
     fi
 
