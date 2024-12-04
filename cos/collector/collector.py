@@ -159,6 +159,10 @@ class Collector:
 
         for moment in rec_cache.moments:
             if not moment.name:
+                # 当前部分组件使用的是毫秒级别的时间戳，所以这里需要转换
+                if moment.timestamp > 1_000_000_000_000:
+                    moment.timestamp /= 1000
+
                 obtain_event_res = self.api.obtain_event(
                     record_name=record_name,
                     display_name=moment.title if moment.title else record_title,
@@ -283,7 +287,12 @@ class Collector:
                 _uploaded_files = rec_cache.uploaded_filepaths
 
                 # 5. 等待上传文件清单
-                file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
+                file_infos = []
+                for f in rec_cache.file_infos:
+                    if can_read_path(str(f.filepath.absolute())):
+                        file_infos.append(f)
+                    else:
+                        _log.warning(f"{f.filepath} can not access, skip!")
                 sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
 
                 all_completed = True

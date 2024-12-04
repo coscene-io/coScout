@@ -128,10 +128,15 @@ class DefaultMod(Mod):
             # update moment
             rc.moments = []
             for moment in error_json.get("moments", []):
+                ts = moment.get("timestamp")
+                # 当前部分组件使用的是毫秒级别的时间戳，所以这里需要转换
+                if ts > 1_000_000_000_000:
+                    ts = ts / 1000
+
                 moment_to_create = Moment(
                     title=moment.get("title"),
                     description=moment.get("description"),
-                    timestamp=moment.get("timestamp"),
+                    timestamp=ts,
                     duration=moment.get("timestamp") - moment.get("start_time"),
                     rule_id=moment.get("rule_id"),
                     code=moment.get("code"),
