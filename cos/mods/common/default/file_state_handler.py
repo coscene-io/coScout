@@ -92,7 +92,7 @@ class FileStateHandler:
                     # Update the log file in the listen dirs as processed on startup
                     for filename, file_state in self.state.items():
                         if LogHandler.check_file_path(Path(filename)) and file_state.get("is_listening"):
-                            self.update_file_state(Path(filename), "processed", True)
+                            self.__update_file_state(Path(filename), "processed", True)
                     self.save_state()
 
     def get_file_handler(self, file_path: Path):
@@ -142,12 +142,12 @@ class FileStateHandler:
         with self.update_lock:
             del self.state[filename_abs]
 
-    def get_file_state(self, file_path: Path):
+    def __get_file_state(self, file_path: Path):
         filename_abs = str(file_path.absolute())
         return self.state.get(filename_abs)
 
-    def update_file_state(self, file_path: Path, key: str, value):
-        file_state = self.get_file_state(file_path)
+    def __update_file_state(self, file_path: Path, key: str, value):
+        file_state = self.__get_file_state(file_path)
         if not file_state:
             _log.warning(f"File {file_path.absolute()} not found in state, skip updating.")
             return
@@ -179,7 +179,7 @@ class FileStateHandler:
 
             for entry in src_dir.iterdir():
                 handler = self.get_file_handler(entry)
-                file_state = self.get_file_state(entry)
+                file_state = self.__get_file_state(entry)
                 if not handler:
                     # File is not supported by any handler, mark it as unsupported if not already and skip
                     if not file_state or not file_state.get("unsupported"):
@@ -227,20 +227,25 @@ class FileStateHandler:
         self.__update_deleted_file_state()
         self.save_state()
 
-    def static_file_diagnosis(self, api_client: ApiClient, file_path: Path, upload_fn, active_topics: set[str]):
-        file_state = self.get_file_state(file_path)
+    def diagnose(self, api_client: ApiClient, file_path: Path, upload_fn, active_topics: set[str]):
+        file_state = self.__get_file_state(file_path)
         handler = self.get_file_handler(file_path)
         if not handler:
-            return
-
-        if not handler.supports_static():
             return
 
         if file_state.get("processed") and handler.get_file_size(file_path) == file_state.get("size"):
             return
 
+        # If the file is unprocessed and is not ready to process, mark it as ready to process and return
+        # This is to avoid processing the same changing file multiple times, only process
+        # the changing file once it is stable.
+        if not file_state.get("ready_to_process", False):
+            self.__update_file_state(file_path, "ready_to_process", True)
+            return
+
         _log.info(f"Found unprocessed file {file_path}, processing with {handler}")
-        self.update_file_state(file_path, "processed", True)
+        self.__update_file_state(file_path, "processed", True)
+        self.__update_file_state(file_path, "ready_to_process", False)
         self.save_state()
         handler.diagnose(api_client, file_path, upload_fn, active_topics)
         _log.info(f"Finished processing file {file_path}")

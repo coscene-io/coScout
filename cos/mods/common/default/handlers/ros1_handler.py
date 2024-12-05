@@ -30,10 +30,6 @@ class Ros1Handler(BaseModel, HandlerInterface):
         return "ROS1 Handler"
 
     @staticmethod
-    def supports_static() -> bool:
-        return True
-
-    @staticmethod
     def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and file_path.name.endswith(".bag")
 
