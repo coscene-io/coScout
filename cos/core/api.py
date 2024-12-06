@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 from cos.constant import API_CLIENT_STATE_PATH, INSTALL_STATE_PATH
 from cos.core.exceptions import CosException, Sha256Mismatch
-from cos.core.models import BaseState, FileInfo
+from cos.core.models import BaseState, FileInfo, Moment
 from cos.name.project_name import ProjectName
 from cos.name.record_name import RecordName
 from cos.utils import LimitedFileReader, ProgressLogger, size_fmt
@@ -451,6 +451,7 @@ class ApiClient(metaclass=ABCMeta):
         customized_fields,
         device_name,
         duration,
+        rule_id,
     ):
         """
         创建event
@@ -462,7 +463,29 @@ class ApiClient(metaclass=ABCMeta):
         :param customized_fields:
         :param device_name:
         :param duration:
+        :param rule_id:
         :return: created event
+        """
+        pass
+
+    @abstractmethod
+    def trigger_device_event(
+        self,
+        moment: Moment,
+        event_code: str,
+        record_name: str,
+        rule_id: str,
+        device_name: str,
+        device_extra_info: Dict[str, any],
+    ):
+        """
+        触发设备事件
+        :param moment: 事件的时间
+        :param event_code: 事件的code
+        :param record_name: 记录的 resource_name
+        :param rule_id: 规则的id
+        :param device_name: 设备的resource name
+        :param device_extra_info: 设备的额外信息
         """
         pass
 
@@ -550,7 +573,7 @@ class ApiClient(metaclass=ABCMeta):
         except Exception:
             return False
 
-    def resumable_upload_files(self, record_name, file_infos, part_state_path: str):
+    def resumable_upload_files(self, record_name, file_infos, part_state_path: str, skip_check_same_file: bool = False):
         """
         :param record_name: 记录的 resource_name
         :param file_infos:
@@ -581,17 +604,20 @@ class ApiClient(metaclass=ABCMeta):
         sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
         for f in sorted_files:
             try:
-                has_clone = self.check_clone_file(record_name=record_name, file_info=f)
-                if not has_clone:
-                    key = rc.simple_record_name() + "/files/" + f.filename
-                    uploader = S3MultipartUploader(
-                        s3_client,
-                        bucket="default",
-                        file_path=str(f.filepath.absolute()),
-                        key=key,
-                        part_state_path=part_state_path,
-                    )
-                    uploader.upload()
+                if not skip_check_same_file:
+                    has_clone = self.check_clone_file(record_name=record_name, file_info=f)
+                    if has_clone:
+                        continue
+
+                key = rc.simple_record_name() + "/files/" + f.filename
+                uploader = S3MultipartUploader(
+                    s3_client,
+                    bucket="default",
+                    file_path=str(f.filepath.absolute()),
+                    key=key,
+                    part_state_path=part_state_path,
+                )
+                uploader.upload()
             except CosException:
                 _log.error(
                     f"==> Failed to upload {f.filepath}, will retry later",

@@ -34,7 +34,6 @@ from cos.core.api import ApiClient
 from cos.core.exceptions import DeviceNotFound
 from cos.core.models import FileInfo, Moment, RecordCache, Task
 from cos.mods.common.default.file_state_handler import FileStateHandler
-from cos.mods.common.default.handlers import LogHandler
 from cos.mods.common.default.remote_rule import RemoteRule
 from cos.mods.common.task.task_handler import TaskHandler
 from cos.utils import flatten
@@ -66,7 +65,7 @@ class DefaultMod(Mod):
         self.conf = _conf
         self.log_thread_name = "cos-mod-default-log-listener"
         self.task_thread_name = "cos-mod-task-collector-handler"
-        self.static_file_thread_name = "cos-mod-default-static-file-listener"
+        self.file_listener_thread_name = "cos-mod-default-file-listener"
         self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs)
 
         self.state_dir = DEFAULT_MOD_STATE_DIR
@@ -103,7 +102,7 @@ class DefaultMod(Mod):
                 shutil.copy(source_file, target_file)
                 _log.info(f"==> Copy error json file to record folder: {target_file}")
 
-            files = {str(target_file): FileInfo(filepath=str(target_file), filename=target_file.name)}
+            files = {str(target_file): FileInfo(filepath=target_file, filename=target_file.name)}
             for key in ["bag", "log", "files"]:
                 for filepath in error_json.get(key, []):
                     filename = key + "/" + Path(filepath).name
@@ -128,11 +127,18 @@ class DefaultMod(Mod):
             # update moment
             rc.moments = []
             for moment in error_json.get("moments", []):
+                ts = moment.get("timestamp")
+                # 当前部分组件使用的是毫秒级别的时间戳，所以这里需要转换
+                if ts > 1_000_000_000_000:
+                    ts = ts / 1000
+
                 moment_to_create = Moment(
                     title=moment.get("title"),
                     description=moment.get("description"),
-                    timestamp=moment.get("timestamp"),
+                    timestamp=ts,
                     duration=moment.get("timestamp") - moment.get("start_time"),
+                    rule_id=moment.get("rule_id"),
+                    code=moment.get("code"),
                 )
                 if moment.get("create_task", True):
                     moment_to_create.task = Task(
@@ -281,12 +287,7 @@ class DefaultMod(Mod):
     ):
         _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
         for file in file_state_handler.get_files(FileStateHandler.state_is_listening_filter()):
-            file_state_handler.static_file_diagnosis(
-                api_client,
-                Path(file),
-                upload_fn,
-                file_state_handler.active_topics,
-            )
+            file_state_handler.diagnose(api_client, Path(file), upload_fn, file_state_handler.active_topics)
 
     def run(self):
         if not self.conf.enabled:
@@ -306,22 +307,20 @@ class DefaultMod(Mod):
         if not collect_dirs:
             collect_dirs = base_dirs
 
-        if not listen_dirs:
+        if listen_dirs and len(listen_dirs) > 0:
+            self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
+
+            # Compute topics in both rules and config
+            self.file_state_handler.active_topics = {
+                topic
+                for topic in RemoteRule(self._api_client).list_topics_in_rules()
+                if topic in [*self.conf.topics, "/external_log"]
+            }
+
+            # start file listener
+            self.start_file_listener()
+        else:
             _log.info("Default Mod listen_dirs/base_dirs/base_dir is empty, skip!")
-            return
-
-        self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
-
-        # Compute topics in both rules and config
-        self.file_state_handler.active_topics = {
-            topic
-            for topic in RemoteRule(self._api_client).list_topics_in_rules()
-            if topic in [*self.conf.topics, "/external_log"]
-        }
-
-        # start log listener and static file listener
-        self.start_log_listener()
-        self.start_static_file_listener()
 
         # handle error json files
         _log.info(f"==> Search for new error json {str(self.state_dir)}")
@@ -336,39 +335,14 @@ class DefaultMod(Mod):
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {error_json_path}", exc_info=True)
 
-    def start_log_listener(self):
-        log_thread_flag = False
+    def start_file_listener(self):
+        file_thread_flag = False
 
         for t in threading.enumerate():
-            if t.name == self.log_thread_name:
-                log_thread_flag = True
+            if t.name == self.file_listener_thread_name:
+                file_thread_flag = True
 
-        if not log_thread_flag:
-            t = threading.Thread(
-                target=LogHandler().scan_dirs_and_diagnose,
-                args=(
-                    self._api_client,
-                    partial(
-                        DefaultMod.__upload_impl,
-                        state_dir=self.state_dir,
-                    ),
-                ),
-                name=self.log_thread_name,
-                daemon=True,
-            )
-            t.start()
-            _log.info("Thread start log listener")
-        else:
-            _log.info("Thread already start log listener, skip!")
-
-    def start_static_file_listener(self):
-        static_file_thread_flag = False
-
-        for t in threading.enumerate():
-            if t.name == self.static_file_thread_name:
-                static_file_thread_flag = True
-
-        if not static_file_thread_flag:
+        if not file_thread_flag:
             t = threading.Thread(
                 target=DefaultMod.__handle_unprocessed_files,
                 args=(
@@ -376,13 +350,13 @@ class DefaultMod(Mod):
                     self.file_state_handler,
                     partial(DefaultMod.__upload_impl, state_dir=self.state_dir),
                 ),
-                name=self.static_file_thread_name,
+                name=self.file_listener_thread_name,
                 daemon=True,
             )
             t.start()
-            _log.info("Thread start static file listener")
+            _log.info("Thread start file listener")
         else:
-            _log.info("Thread already start static file listener, skip!")
+            _log.info("Thread already start file listener, skip!")
 
     def start_task_handler(self, api_client: ApiClient, upload_files: list[str]):
         if upload_files is None:

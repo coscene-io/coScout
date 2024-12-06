@@ -20,7 +20,8 @@ from datetime import datetime
 from typing import List
 from multiprocessing import Queue
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from strictyaml import load, YAMLError
 
 from cos.constant import RECORD_DIR_PATH
 from cos.core.api import ApiClient, ApiClientState
@@ -34,25 +35,34 @@ from ..utils.files import can_read_path
 _log = logging.getLogger(__name__)
 
 
+class DeviceConfig(BaseModel):
+    extra_files: List[str] = Field(default_factory=list)
+
+
 class CollectorConfig(BaseModel):
     delete_after_upload: bool = True
     delete_after_interval_in_hours: int = 48
     scan_interval_in_secs: int = 60
+    skip_check_same_file: bool = False
 
 
 class Collector:
     def __init__(
         self,
         conf: CollectorConfig,
+        device_conf: DeviceConfig,
         api_client: ApiClient,
         code_manager: EventCodeManager,
     ):
         self.conf = conf
+        self.device_conf = device_conf
         self.api = api_client
         self.code_mgr = code_manager
         self.device = self.api.state.load_state().device
 
     def _upload_record_thumbnail(self, record_name, rec_cache: RecordCache):
+        if not record_name:
+            return
         for f in rec_cache.file_infos:
             if is_image(f.filename):
                 upload_url = self.api.generate_record_thumbnail_upload_url(record_name)
@@ -72,7 +82,10 @@ class Collector:
             filename=_finish_file.name,
         ).complete(inplace=True, skip_sha256=True)
         return self.api.resumable_upload_files(
-            record_name=record_name, file_infos=[file_info], part_state_path=str(rec_cache.base_dir_path.absolute())
+            record_name=record_name,
+            file_infos=[file_info],
+            part_state_path=str(rec_cache.base_dir_path.absolute()),
+            skip_check_same_file=self.conf.skip_check_same_file,
         )
 
     def __get_record_title(self, rec_cache: RecordCache):
@@ -105,7 +118,26 @@ class Collector:
                 result += "\n" + label.get("displayName", "")
         return result
 
-    def _create_record_and_event(self, rec_cache: RecordCache):
+    def _load_device_extra_infos(self):
+        infos = {}
+
+        for p in self.device_conf.extra_files:
+            if not can_read_path(p):
+                continue
+
+            if not (p.endswith(".yml") or p.endswith(".yaml")):
+                continue
+
+            with open(p, "r", encoding="utf8") as y:
+                try:
+                    robot_yaml = load(y.read()).data
+                except YAMLError as exc:
+                    raise ValueError(f"Failed to load device extra yaml: {exc}")
+            # merge robot yaml into infos dict
+            infos.update(robot_yaml)
+        return infos
+
+    def _create_record(self, rec_cache: RecordCache):
         record_title = self.__get_record_title(rec_cache)
         record = self.api.create_or_get_record(
             file_infos=rec_cache.file_infos,
@@ -117,37 +149,72 @@ class Collector:
             reserve_file_infos=True,
             rules=rec_cache.record.get("rules", []),
         )
-        self._upload_record_thumbnail(record.get("name"), rec_cache)
+        return record
+
+    def _create_record_related_resources(self, rec_cache: RecordCache):
+        record_name = rec_cache.record.get("name", "")
+        record_title = rec_cache.record.get("title", "")
+        if not record_name:
+            return
 
         for moment in rec_cache.moments:
-            obtain_event_res = self.api.obtain_event(
-                record_name=record.get("name"),
-                display_name=moment.title if moment.title else record_title,
-                description=moment.description if moment.description else record_title,
-                customized_fields=moment.metadata,
-                trigger_time=moment.timestamp,
-                duration=moment.duration,
-                device_name=self.device["name"],
-            )
+            if not moment.name:
+                # 当前部分组件使用的是毫秒级别的时间戳，所以这里需要转换
+                if moment.timestamp > 1_000_000_000_000:
+                    moment.timestamp /= 1000
 
-            if not obtain_event_res.get("isNew"):
+                obtain_event_res = self.api.obtain_event(
+                    record_name=record_name,
+                    display_name=moment.title if moment.title else record_title,
+                    description=moment.description if moment.description else record_title,
+                    customized_fields=moment.metadata,
+                    trigger_time=moment.timestamp,
+                    duration=moment.duration,
+                    rule_id=moment.rule_id,
+                    device_name=self.device["name"],
+                )
+                moment.name = obtain_event_res.get("event", {}).get("name")
+                moment.is_new = obtain_event_res.get("isNew", False)
+                rec_cache.save_state()
+
+            if moment.name and not moment.event:
+                has_sent = moment.event.get("sent", False)
+                if not has_sent:
+                    device_extra_infos = self._load_device_extra_infos()
+
+                    self.api.trigger_device_event(
+                        moment=moment,
+                        record_name=record_name,
+                        device_name=self.device.get("name"),
+                        device_extra_info=device_extra_infos,
+                        event_code=moment.code,
+                        rule_id=moment.rule_id,
+                    )
+                    moment.event["sent"] = True
+                    rec_cache.save_state()
+                    _log.info(f"==> Triggered event: {moment.name}")
+
+            if not moment.is_new:
                 continue
 
             if not moment.task:
                 continue
 
-            upserted_task = self.api.upsert_task(
-                record_name=record.get("name"),
-                event_name=obtain_event_res.get("event").get("name"),
-                title=moment.title if moment.title else record_title,
-                description=moment.description if moment.description else record_title,
-                assignee=moment.task.assignee,
-            )
+            if not moment.task.name:
+                upserted_task = self.api.upsert_task(
+                    record_name=record_name,
+                    event_name=moment.name,
+                    title=moment.title if moment.title else record_title,
+                    description=moment.description if moment.description else record_title,
+                    assignee=moment.task.assignee,
+                )
 
-            if upserted_task.get("name") and moment.task.sync_task:
-                self.api.sync_task(upserted_task.get("name"))
+                moment.task.name = upserted_task.get("name")
+                rec_cache.save_state()
+                if upserted_task.get("name") and moment.task.sync_task:
+                    self.api.sync_task(upserted_task.get("name"))
 
-        if rec_cache.diagnosis_task:
+        if rec_cache.diagnosis_task and not rec_cache.diagnosis_task.get("name"):
             created_diagnosis_task = self.api.create_diagnosis_task(
                 title=record_title,
                 description=self.__make_record_description(record_title, rec_cache),
@@ -157,10 +224,10 @@ class Collector:
                 trigger_time=rec_cache.diagnosis_task.get("trigger_time"),
                 start_time=rec_cache.diagnosis_task.get("start_time"),
                 end_time=rec_cache.diagnosis_task.get("end_time"),
-                record_name=record.get("name"),
+                record_name=record_name,
             )
             rec_cache.diagnosis_task["name"] = created_diagnosis_task.get("name")
-        return record
+            rec_cache.save_state()
 
     def handle_record(self, rec_cache: RecordCache):
         _log.debug(f"==> Checking record: {rec_cache.key}")
@@ -200,7 +267,7 @@ class Collector:
                 ]
 
                 # 3. 创建 record 和 event
-                rec_cache.record = self._create_record_and_event(rec_cache)
+                rec_cache.record = self._create_record(rec_cache)
                 # 为防止断连后重新建立记录，需要立即写回json
                 rec_cache.save_state()
                 self.code_mgr.hit(rec_cache.event_code)
@@ -209,12 +276,23 @@ class Collector:
                 if task_name:
                     self.api.put_task_tags(task_name, {"recordName": rec_cache.record.get("name", "")})
 
+                # 4. 上传缩略图
+                self._upload_record_thumbnail(rec_cache.record.get("name"), rec_cache)
+
+            # 检查关联的资源是否已经上传
+            self._create_record_related_resources(rec_cache)
+
             # 找齐文件后，如果还没有 uploaded (上传完毕).
             if not rec_cache.uploaded:
                 _uploaded_files = rec_cache.uploaded_filepaths
 
                 # 5. 等待上传文件清单
-                file_infos = [f.complete(inplace=True, skip_sha256=True) for f in rec_cache.file_infos]
+                file_infos = []
+                for f in rec_cache.file_infos:
+                    if can_read_path(str(f.filepath.absolute())):
+                        file_infos.append(f)
+                    else:
+                        _log.warning(f"{f.filepath} can not access, skip!")
                 sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
 
                 all_completed = True
@@ -241,6 +319,7 @@ class Collector:
                         record_name=rec_cache.record["name"],
                         file_infos=[file_info],
                         part_state_path=str(rec_cache.base_dir_path.absolute()),
+                        skip_check_same_file=self.conf.skip_check_same_file,
                     )
                     all_completed = all_completed and _completed
 

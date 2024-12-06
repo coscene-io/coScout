@@ -18,7 +18,7 @@ from unittest import mock
 import pytest
 
 from cos.collector.codes import EventCodeConfig, EventCodeManager
-from cos.collector.collector import Collector, CollectorConfig
+from cos.collector.collector import Collector, CollectorConfig, DeviceConfig
 from cos.core.models import RecordCache
 
 
@@ -53,9 +53,12 @@ def collector(api, code_json_path):
 
     code_conf = EventCodeConfig(enabled=False, code_json_url=str(code_json_path))
 
+    device_conf = DeviceConfig()
+
     return Collector(
         up_conf,
         api_client=api,
+        device_conf=device_conf,
         code_manager=EventCodeManager(code_conf, api_client=api),
     )
 

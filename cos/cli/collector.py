@@ -26,6 +26,7 @@ import psutil
 
 from cos.cli.context import Context
 from cos.collector import Collector, EventCodeManager, CollectorConfig
+from cos.collector.collector import DeviceConfig
 from cos.collector.mod import Mod
 from cos.collector.openers import CosHandler
 from cos.config import AppConfig, load_kebab_source
@@ -82,6 +83,7 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
             )
             start_collector_listener(
                 conf=conf.collector,
+                device_conf=conf.device,
                 api_client=api_client,
                 code_manager=code_manager,
                 network_queue=network_queue,
@@ -106,7 +108,12 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
 
 
 def start_collector_listener(
-    conf: CollectorConfig, api_client: ApiClient, code_manager: EventCodeManager, network_queue: Queue, error_queue: Queue
+    conf: CollectorConfig,
+    device_conf: DeviceConfig,
+    api_client: ApiClient,
+    code_manager: EventCodeManager,
+    network_queue: Queue,
+    error_queue: Queue,
 ):
     thread_name = "cos-main-collector-thread"
     collector_thread_flag = False
@@ -116,7 +123,7 @@ def start_collector_listener(
             collector_thread_flag = True
 
     if not collector_thread_flag:
-        _collector = Collector(conf=conf, api_client=api_client, code_manager=code_manager)
+        _collector = Collector(conf=conf, device_conf=device_conf, api_client=api_client, code_manager=code_manager)
         t = threading.Thread(
             target=_collector.run,
             args=(network_queue, error_queue),

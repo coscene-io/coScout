@@ -31,10 +31,6 @@ class Ros2Handler(BaseModel, HandlerInterface):
         return "ROS2 Handler"
 
     @staticmethod
-    def supports_static() -> bool:
-        return True
-
-    @staticmethod
     def __compute_ros2_dir_size(file_path: Path) -> int:
         size = 0
         for entry in file_path.iterdir():
