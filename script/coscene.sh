@@ -74,6 +74,7 @@ REMOVE_CONFIG=0
 MOD="default"
 SN_FILE=""
 SN_FIELD=""
+SERIAL_NUM=""
 USE_32BIT=0
 SKIP_VERIFY_CERT=0
 
@@ -102,6 +103,7 @@ usage: $0 [OPTIONS]
     --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
+    --serial_num            The serial number of the device, will skip sn_field and sn_file if provided
     --remove_config         Remove all config files, current device will be treated as a new device.
     --use_32bit             Use 32-bit version for cos
     --skip_verify_cert      Skip verify certificate when download files
@@ -149,19 +151,11 @@ setup_cgroup() {
   if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
     echo "Cgroup '$GROUP_NAME' already exists"
 
-    period=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_period_us)
-    quota=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_quota_us)
-
-    echo "Current CPU limit settings:"
-    echo "Period: $period microseconds"
-    echo "Quota: $quota microseconds"
-    echo "Effective CPU limit: $((quota * 100 / period))%"
-    return 0
+    cgdelete cpu:$GROUP_NAME
   fi
 
   echo "Creating new cgroup '$GROUP_NAME'..."
-  cgcreate -g cpu:/$GROUP_NAME
-  if [ $? -ne 0 ]; then
+  if ! cgcreate -g cpu:$GROUP_NAME; then
     echo "Failed to create cgroup"
     exit 1
   fi
@@ -170,7 +164,6 @@ setup_cgroup() {
   cgset -r cpu.cfs_period_us=100000 $GROUP_NAME
   cgset -r cpu.cfs_quota_us=$((CPU_PERCENT * 1000)) $GROUP_NAME
 
-  # 验证设置
   period=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_period_us)
   quota=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_quota_us)
 
@@ -244,6 +237,10 @@ while test $# -gt 0; do
     SN_FIELD="${1#*=}"
     shift
     ;;
+  --serial_num=*)
+    SERIAL_NUM="${1#*=}"
+    shift
+    ;;
   --remove_config)
     REMOVE_CONFIG=1
     shift
@@ -294,6 +291,8 @@ echo "project_slug is ${PROJECT_SLUG}"
 echo "coLink_endpoint is ${COLINK_ENDPOINT}"
 echo "sn_file is ${SN_FILE}"
 echo "sn_field is ${SN_FIELD}"
+echo "serial_num is ${SERIAL_NUM}"
+echo "=============================="
 
 # check org_slug and project_slug
 # Check if both ORG_SLUG and PROJECT_SLUG are empty
@@ -305,6 +304,12 @@ fi
 # Check if both ORG_SLUG and PROJECT_SLUG are not empty
 if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
   echo "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
+  exit 1
+fi
+
+# SN_FILE and SERIAL_NUM all empty, exit
+if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
+  echo "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
   exit 1
 fi
 
@@ -354,6 +359,7 @@ if [[ -n $USE_LOCAL ]]; then
   tar -xzf "$USE_LOCAL" -C "$TEMP_DIR/cos_binaries" || error_exit "Failed to extract $USE_LOCAL"
 fi
 
+echo ""
 echo "Start install coLink..."
 format() {
   local input=$1
@@ -468,6 +474,7 @@ EOF
   echo "Successfully installed coLink."
 fi
 
+echo ""
 echo "Start install cos..."
 
 # remove old config before install
@@ -503,6 +510,19 @@ sudo -u "$CUR_USER" tee "${COS_STATE_DIR}/install.state.json" >/dev/null <<EOL
   "init_install": true
 }
 EOL
+
+# check provide serial number
+if [[ -n $SERIAL_NUM ]]; then
+  echo "Provided serial number: $SERIAL_NUM"
+  SN_FILE="$COS_CONFIG_DIR/cos_sn.json"
+  SN_FIELD="serial_number"
+
+  sudo -u "$CUR_USER" tee "${SN_FILE}" >/dev/null <<EOL
+{
+  "$SN_FIELD": $SERIAL_NUM
+}
+EOL
+fi
 
 # create config file
 echo "Creating config file..."
