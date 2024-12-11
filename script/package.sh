@@ -34,6 +34,21 @@ SUPPORT_MESH_ARCH=("amd64" "aarch64")
 MESH_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
 COS_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com/coscout
 
+# get user input
+while test $# -gt 0; do
+  case $1 in
+  --cos_version=*)
+    COS_VERSION="${1#*=}"
+    shift # past argument=value
+    ;;
+  *)
+    echo "unknown option: $1"
+    help
+    exit 1
+    ;;
+  esac
+done
+
 # for range support mesh arch
 for arch in "${SUPPORT_MESH_ARCH[@]}"; do
   mesh_folder="${TEMP_DIR}/virmesh"
@@ -61,10 +76,32 @@ for arch in "${SUPPORT_COS_ARCH[@]}"; do
   curl -L -o "${cos_folder}/cos" "${cos_download_url}"
   curl -L -o "${cos_folder}/cos.sha256" "${cos_sha256_url}"
   curl -L -o "${cos_folder}/version" "${cos_version_url}"
+
+  # if arch is arm, download cgroup-bin
+  if [ "${arch}" == "arm" ]; then
+    cgroup_bin_download_url=${MESH_BASE_URL}/cgroup_bin/${arch}/cgroup_bin.deb
+    curl -L -o "${cos_folder}/cgroup_bin.deb" "${cgroup_bin_download_url}"
+  fi
 done
 
-# tar temp dir
+# tar temp dir with all binaries
 tar -cvzf "${HOME}/cos_binaries.tar.gz" -C "${TEMP_DIR}/" "."
+
+# tar binaries with single arch, if arch is arm64 or x86_64, contains virmesh and trzsz
+for arch in "${SUPPORT_COS_ARCH[@]}"; do
+  if [ "${arch}" == "arm" ]; then
+    tar -cvzf "${HOME}/cos_binaries_${arch}.tar.gz" -C "${TEMP_DIR}/" "cos/${arch}"
+  else
+    # arch is arm64, set virmesh arch to aarch64
+    if [ "${arch}" == "arm64" ]; then
+      mesh_arch="aarch64"
+    else
+      mesh_arch="amd64"
+    fi
+
+    tar -cvzf "${HOME}/cos_binaries_${arch}.tar.gz" -C "${TEMP_DIR}/" "cos/${arch}" "virmesh/virmesh-${mesh_arch}" "trzsz_tar/trzsz_${TRZSZ_VERSION}_linux_${mesh_arch}.tar.gz"
+  fi
+done
 
 # ls ${HOME}
 cd "${HOME}"
