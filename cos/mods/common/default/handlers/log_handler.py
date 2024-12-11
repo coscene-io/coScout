@@ -12,24 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-import shutil
-import time
-from functools import partial
 from pathlib import Path
 
-import pygtail
 from pydantic import BaseModel
 
-from cos.core.api import ApiClient
 from cos.mods.common.default.handlers.handler_interface import HandlerInterface
-from cos.mods.common.default.log_utils import (
-    get_end_timestamp,
-    get_file_encoding,
-    get_start_timestamp,
-    get_timestamp_from_line,
-    get_timestamp_hint_from_file,
-)
-from cos.mods.common.default.rule_executor import LogMessageDataItem, RuleDataItem, RuleExecutor
+from cos.mods.common.default.log_utils import LogReader
+from cos.mods.common.default.rule_executor import RuleDataItem
 
 _log = logging.getLogger(__name__)
 
@@ -39,19 +28,16 @@ class LogHandler(BaseModel, HandlerInterface):
         return "LOG Handler"
 
     @staticmethod
-    def supports_static() -> bool:
-        return False
-
-    @staticmethod
     def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and file_path.name.endswith(".log")
 
     def compute_path_state(self, file_path: Path):
-        start_time = get_start_timestamp(file_path)
+        reader = LogReader(file_path)
+        start_time = reader.get_start_timestamp()
         if start_time is None:
             raise Exception(f"Failed to get start timestamp for log file: {file_path}.")
 
-        end_time = get_end_timestamp(file_path)
+        end_time = reader.get_end_timestamp()
         if end_time is None:
             raise Exception(f"Failed to get end timestamp for log file: {file_path}.")
 
@@ -62,103 +48,55 @@ class LogHandler(BaseModel, HandlerInterface):
         }
 
     def msg_iterator(self, file_path: Path, active_topics: set[str]):
-        _log.warning("==> This method is not supported for log handler")
-        return
-
-    @staticmethod
-    def get_files_to_scan() -> set[Path]:
-        from cos.mods.common.default.file_state_handler import FileStateHandler
-
-        file_state_handler = FileStateHandler.get_instance()
-        all_files = file_state_handler.get_files(
-            FileStateHandler.state_is_listening_filter(),
-            FileStateHandler.state_unprocessed_filter(),
-        )
-        return {Path(filename) for filename in all_files if LogHandler.check_file_path(Path(filename))}
-
-    def get_log_input_stream(self):
-        tail_dict = dict()
-        latest_timestamps = dict()
-
-        while True:
-            # Update tail_dict with new files
-            new_tail_dict = dict()
-            for log_file in self.get_files_to_scan():
-                log_file_abs = str(log_file.absolute())
-                if log_file_abs in tail_dict:
-                    new_tail_dict[log_file_abs] = tail_dict[log_file_abs]
-                else:
-                    _log.info(f"==> Found new log file: {log_file}")
-                    new_tail_dict[log_file_abs] = self.__get_tail_and_hint(log_file)
-            tail_dict = new_tail_dict
-            time.sleep(5)
-
-            for filename, (tail, hint) in tail_dict.items():
-                try:
-                    for line in tail:
-                        timestamp = get_timestamp_from_line(line, hint)
-                        if timestamp:
-                            latest_timestamps[filename] = int(timestamp.timestamp())
-                        if filename not in latest_timestamps:
-                            continue
-
-                        yield RuleDataItem(
-                            filename,
-                            LogMessageDataItem(line),
-                            latest_timestamps[filename],
-                            "foxglove.Log",
-                        )
-                except FileNotFoundError:
-                    _log.warning(f"==> File not found, might be deleted: {filename}")
-                    del tail_dict[filename]
-                    if filename in latest_timestamps:
-                        del latest_timestamps[filename]
-                    break
-
-    def scan_dirs_and_diagnose(self, api_client: ApiClient, upload_fn: partial):
-        from cos.mods.common.default.file_state_handler import FileStateHandler
-
-        file_state_handler = FileStateHandler.get_instance()
-        if file_state_handler.active_topics and "/external_log" not in file_state_handler.active_topics:
-            for filename in file_state_handler.get_files(
-                FileStateHandler.state_is_listening_filter(),
-                FileStateHandler.state_unprocessed_filter(),
-                lambda file_path, __state: LogHandler.check_file_path(Path(file_path)),
-            ):
-                file_state_handler.update_file_state(Path(filename), "processed", True)
+        reader = LogReader(file_path)
+        if active_topics and "/external_log" not in active_topics:
             return
-        executor_name = "Log Scan Rule Executor"
-        rule_executor = RuleExecutor(executor_name, api_client, self.get_log_input_stream(), upload_fn)
-        rule_executor.execute()
+        for stamped_log in reader.stamped_log_generator():
+            ts = stamped_log.timestamp.timestamp()
+            yield RuleDataItem(
+                topic="/external_log",
+                msg={
+                    "timestamp": {
+                        "sec": int(ts),
+                        "nsec": int((ts - int(ts)) * 1e9),
+                    },
+                    "message": stamped_log.line,
+                    "file": file_path.name,
+                    "level": LogHandler._get_log_level(stamped_log.line),
+                },
+                ts=int(stamped_log.timestamp.timestamp()),
+                msgtype="foxglove.Log",
+            )
 
     @staticmethod
-    def __get_tail_and_hint(file_path: Path):
-        """Get the Pygtail object and timestamp hint for the given file path,
-        note that the file path should be checked before calling this method."""
-        filename_abs = str(file_path.absolute())
-        file_encoding = get_file_encoding(file_path)
-        return (
-            pygtail.Pygtail(
-                filename_abs,
-                save_on_end=False,
-                encoding=file_encoding,
-            ),
-            get_timestamp_hint_from_file(file_path, file_encoding),
-        )
+    def _get_log_level(line: str) -> int:
+        """
+        Get the log level from the log line.
+        Current implementation is simple.
+        """
+        if "DEBUG" in line:
+            return 1
+        if "WARN" in line:
+            return 3
+        if "ERROR" in line:
+            return 4
+        if "FATAL" in line:
+            return 5
+        return 2
 
-    @staticmethod
-    def prepare_cut(src_file_path: Path, target_dir: Path, start_time: int, end_time: int) -> str:
-        """TODO Slice log file and return the path of the sliced file"""
-        transcode_chunk_size = 1024 * 1024
-        dst_file_path = target_dir / src_file_path.name
-        file_encoding = get_file_encoding(src_file_path)
-        if file_encoding == "utf8":
-            shutil.copy(src_file_path, dst_file_path)
-        else:
-            with open(src_file_path, "r", encoding=file_encoding) as src_f:
-                with open(dst_file_path, "w", encoding="utf8") as dst_f:
-                    chunk = src_f.read(transcode_chunk_size)
-                    while chunk:
-                        dst_f.write(chunk)
-                        chunk = src_f.read(transcode_chunk_size)
-        return str(dst_file_path.absolute())
+    # @staticmethod
+    # def prepare_cut(src_file_path: Path, target_dir: Path, start_time: int, end_time: int) -> str:
+    #     """TODO Slice log file and return the path of the sliced file"""
+    #     transcode_chunk_size = 1024 * 1024
+    #     dst_file_path = target_dir / src_file_path.name
+    #     file_encoding = get_file_encoding(src_file_path)
+    #     if file_encoding == "utf8":
+    #         shutil.copy(src_file_path, dst_file_path)
+    #     else:
+    #         with open(src_file_path, "r", encoding=file_encoding) as src_f:
+    #             with open(dst_file_path, "w", encoding="utf8") as dst_f:
+    #                 chunk = src_f.read(transcode_chunk_size)
+    #                 while chunk:
+    #                     dst_f.write(chunk)
+    #                     chunk = src_f.read(transcode_chunk_size)
+    #     return str(dst_file_path.absolute())

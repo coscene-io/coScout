@@ -133,6 +133,7 @@ class BaseState(BaseModel, metaclass=ABCMeta):
 
 
 class Task(BaseModel):
+    name: str = ""
     title: str = ""
     description: str = ""
     record_name: str = ""
@@ -145,6 +146,8 @@ class Moment(BaseModel):
     moment struct.
     """
 
+    name: str = ""
+    is_new: bool = False
     title: str = ""
     description: str = ""
     # seconds since epoch
@@ -153,6 +156,9 @@ class Moment(BaseModel):
     duration: float = 0.0
     metadata: Dict[str, str] = Field(default_factory=dict)
     task: Task = Task()
+    event: Dict[str, Any] = Field(default_factory=dict)
+    rule_id: str = ""
+    code: str = ""
 
 
 class RecordCache(BaseState):

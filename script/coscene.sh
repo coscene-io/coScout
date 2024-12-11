@@ -74,6 +74,7 @@ REMOVE_CONFIG=0
 MOD="default"
 SN_FILE=""
 SN_FIELD=""
+SERIAL_NUM=""
 USE_32BIT=0
 SKIP_VERIFY_CERT=0
 
@@ -81,6 +82,11 @@ COLINK_ENDPOINT=""
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
 COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz
+
+# cgroup path
+GROUP_NAME="cos_cpu_limited"
+CPU_PERCENT=15
+CGROUP_PATH="/sys/fs/cgroup/cpu"
 
 help() {
   cat <<EOF
@@ -97,6 +103,7 @@ usage: $0 [OPTIONS]
     --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
+    --serial_num            The serial number of the device, will skip sn_field and sn_file if provided
     --remove_config         Remove all config files, current device will be treated as a new device.
     --use_32bit             Use 32-bit version for cos
     --skip_verify_cert      Skip verify certificate when download files
@@ -137,6 +144,16 @@ download_file() {
     curl -SLko "$dest" "$url" || error_exit "Failed to download $url without verifying the certificate"
   else
     curl -SLo "$dest" "$url" || error_exit "Failed to download $url"
+  fi
+}
+
+check_cgroup_tools() {
+  if ! command -v cgcreate &>/dev/null; then
+    echo "Cannot install cgroup-tools automatically. Please install it manually 'apt-get install -y cgroup-tools'."
+    return 1
+  else
+    echo "cgroup-tools is installed."
+    return 0
   fi
 }
 
@@ -194,6 +211,10 @@ while test $# -gt 0; do
     SN_FIELD="${1#*=}"
     shift
     ;;
+  --serial_num=*)
+    SERIAL_NUM="${1#*=}"
+    shift
+    ;;
   --remove_config)
     REMOVE_CONFIG=1
     shift
@@ -215,7 +236,7 @@ while test $# -gt 0; do
 done
 
 if [[ $USE_32BIT -eq 1 ]]; then
-  if [[ $ARCH != "arm64" ]] && [[  $ARCH != "arm" ]]; then
+  if [[ $ARCH != "arm64" ]] && [[ $ARCH != "arm" ]]; then
     echo "32-bit version is only supported on arm64 and arm architecture."
     exit 1
   fi
@@ -244,6 +265,7 @@ echo "project_slug is ${PROJECT_SLUG}"
 echo "coLink_endpoint is ${COLINK_ENDPOINT}"
 echo "sn_file is ${SN_FILE}"
 echo "sn_field is ${SN_FIELD}"
+echo "serial_num is ${SERIAL_NUM}"
 
 # check org_slug and project_slug
 # Check if both ORG_SLUG and PROJECT_SLUG are empty
@@ -255,6 +277,12 @@ fi
 # Check if both ORG_SLUG and PROJECT_SLUG are not empty
 if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
   echo "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
+  exit 1
+fi
+
+# SN_FILE and SERIAL_NUM all empty, exit
+if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
+  echo "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
   exit 1
 fi
 
@@ -304,6 +332,7 @@ if [[ -n $USE_LOCAL ]]; then
   tar -xzf "$USE_LOCAL" -C "$TEMP_DIR/cos_binaries" || error_exit "Failed to extract $USE_LOCAL"
 fi
 
+echo ""
 echo "Start install coLink..."
 format() {
   local input=$1
@@ -418,6 +447,7 @@ EOF
   echo "Successfully installed coLink."
 fi
 
+echo ""
 echo "Start install cos..."
 
 # remove old config before install
@@ -453,6 +483,19 @@ sudo -u "$CUR_USER" tee "${COS_STATE_DIR}/install.state.json" >/dev/null <<EOL
   "init_install": true
 }
 EOL
+
+# check provide serial number
+if [[ -n $SERIAL_NUM ]]; then
+  echo "Provided serial number: $SERIAL_NUM"
+  SN_FILE="$COS_CONFIG_DIR/cos_sn.json"
+  SN_FIELD="serial_number"
+
+  sudo -u "$CUR_USER" tee "${SN_FILE}" >/dev/null <<EOL
+{
+  "$SN_FIELD": $SERIAL_NUM
+}
+EOL
+fi
 
 # create config file
 echo "Creating config file..."
@@ -602,6 +645,12 @@ EOL
     echo "Installation completed successfully 🎉, you can use 'journalctl --user-unit=cos -f -n 50' to check the logs."
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
+
+    exec_command="exec $COS_SHELL_BASE/bin/cos daemon"
+    if check_cgroup_tools; then
+      exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon"
+    fi
+
     sudo tee /etc/init/cos.conf >/dev/null <<EOF
 description "coScout: Data Collector by coScene"
 author "coScene"
@@ -609,21 +658,41 @@ author "coScene"
 start on started networking
 stop on runlevel [!2345]
 
+nice 19
+
 # Limit the start attempts
 respawn
 respawn limit 10 86400
 
 pre-start script
-    rm -rf $CUR_USER_HOME/.cache/coscene/onefile_*
+  rm -rf $CUR_USER_HOME/.cache/coscene/onefile_*
+
+  if command -v cgcreate &>/dev/null; then
+    if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
+      cgdelete cpu:$GROUP_NAME
+    fi
+
+    if ! cgcreate -g cpu:$GROUP_NAME; then
+      echo "Failed to create cgroup"
+      exit 1
+    fi
+
+    cgset -r cpu.cfs_period_us=100000 $GROUP_NAME
+    cgset -r cpu.cfs_quota_us=$((CPU_PERCENT * 1000)) $GROUP_NAME
+  fi
 end script
 
 script
     cd $CUR_USER_HOME/.local/state/cos
-    exec $COS_SHELL_BASE/bin/cos daemon
+    $exec_command
 end script
 
 post-stop script
-    # Any cleanup code can go here
+  if command -v cgcreate &>/dev/null; then
+    if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
+      cgdelete cpu:$GROUP_NAME
+    fi
+  fi
 end script
 
 # Logging settings

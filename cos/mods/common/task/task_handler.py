@@ -134,6 +134,8 @@ class TaskHandler:
                 if start_time <= mtime <= end_time:
                     _filename = str(file.relative_to(dir_path))
                     files.append(FileInfo(filepath=str(file.resolve().absolute()), filename=_filename))
+                else:
+                    _log.info(f"==> Skip file {file}, mtime: {mtime}, start_time: {start_time}, end_time: {end_time}")
         return files
 
     def _unqiue_files(self, files: list[FileInfo]) -> list[FileInfo]:
