@@ -147,32 +147,6 @@ download_file() {
   fi
 }
 
-setup_cgroup() {
-  if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
-    echo "Cgroup '$GROUP_NAME' already exists"
-
-    cgdelete cpu:$GROUP_NAME
-  fi
-
-  echo "Creating new cgroup '$GROUP_NAME'..."
-  if ! cgcreate -g cpu:$GROUP_NAME; then
-    echo "Failed to create cgroup"
-    exit 1
-  fi
-
-  echo "Setting CPU limit to $CPU_PERCENT%..."
-  cgset -r cpu.cfs_period_us=100000 $GROUP_NAME
-  cgset -r cpu.cfs_quota_us=$((CPU_PERCENT * 1000)) $GROUP_NAME
-
-  period=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_period_us)
-  quota=$(cat $CGROUP_PATH/$GROUP_NAME/cpu.cfs_quota_us)
-
-  echo "CPU limit settings:"
-  echo "Period: $period microseconds"
-  echo "Quota: $quota microseconds"
-  echo "Effective CPU limit: $((quota * 100 / period))%"
-}
-
 check_cgroup_tools() {
   if ! command -v cgcreate &>/dev/null; then
     echo "Cannot install cgroup-tools automatically. Please install it manually 'apt-get install -y cgroup-tools'."
@@ -292,7 +266,6 @@ echo "coLink_endpoint is ${COLINK_ENDPOINT}"
 echo "sn_file is ${SN_FILE}"
 echo "sn_field is ${SN_FIELD}"
 echo "serial_num is ${SERIAL_NUM}"
-echo "=============================="
 
 # check org_slug and project_slug
 # Check if both ORG_SLUG and PROJECT_SLUG are empty
@@ -673,10 +646,6 @@ EOL
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
 
-    if check_cgroup_tools; then
-      setup_cgroup
-    fi
-
     exec_command="exec $COS_SHELL_BASE/bin/cos daemon"
     if check_cgroup_tools; then
       exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon"
@@ -696,7 +665,21 @@ respawn
 respawn limit 10 86400
 
 pre-start script
-    rm -rf $CUR_USER_HOME/.cache/coscene/onefile_*
+  rm -rf $CUR_USER_HOME/.cache/coscene/onefile_*
+
+  if command -v cgcreate &>/dev/null; then
+    if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
+      cgdelete cpu:$GROUP_NAME
+    fi
+
+    if ! cgcreate -g cpu:$GROUP_NAME; then
+      echo "Failed to create cgroup"
+      exit 1
+    fi
+
+    cgset -r cpu.cfs_period_us=100000 $GROUP_NAME
+    cgset -r cpu.cfs_quota_us=$((CPU_PERCENT * 1000)) $GROUP_NAME
+  fi
 end script
 
 script
@@ -705,7 +688,11 @@ script
 end script
 
 post-stop script
-    # Any cleanup code can go here
+  if command -v cgcreate &>/dev/null; then
+    if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
+      cgdelete cpu:$GROUP_NAME
+    fi
+  fi
 end script
 
 # Logging settings
