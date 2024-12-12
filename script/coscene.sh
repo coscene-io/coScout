@@ -487,13 +487,11 @@ EOL
 # check provide serial number
 if [[ -n $SERIAL_NUM ]]; then
   echo "Provided serial number: $SERIAL_NUM"
-  SN_FILE="$COS_CONFIG_DIR/cos_sn.json"
+  SN_FILE="$COS_CONFIG_DIR/cos_sn.yaml"
   SN_FIELD="serial_number"
 
   sudo -u "$CUR_USER" tee "${SN_FILE}" >/dev/null <<EOL
-{
-  "$SN_FIELD": $SERIAL_NUM
-}
+"$SN_FIELD": "$SERIAL_NUM"
 EOL
 fi
 
