@@ -700,11 +700,7 @@ script
 end script
 
 post-stop script
-  if command -v cgcreate &>/dev/null; then
-    if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
-      cgdelete cpu:$GROUP_NAME
-    fi
-  fi
+  # post-stop script
 end script
 
 # Logging settings
