@@ -644,6 +644,20 @@ EOL
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
 
+    if ! command -v cgcreate &>/dev/null; then
+      if [[ -n $USE_LOCAL  ]] && [[ $ARCH == "arm" ]]; then
+        echo "Installing cgroup-tools..."
+        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/libcgroup1.deb"
+        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/cgroup_lite.deb"
+        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/cgroup_bin.deb"
+
+        if ! command -v cgcreate &>/dev/null; then
+          echo "Failed to install cgroup-tools."
+          exit 1
+        fi
+      fi
+    fi
+
     exec_command="exec $COS_SHELL_BASE/bin/cos daemon"
     if check_cgroup_tools; then
       exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon"
