@@ -15,6 +15,7 @@
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -88,11 +89,6 @@ class FileStateHandler:
                     self.listen_dirs = set()
                     self.active_topics = set()  # topics that are currently being listened to
                     self.load_state()
-
-                    # Update the log file in the listen dirs as processed on startup
-                    for filename, file_state in self.state.items():
-                        if LogHandler.check_file_path(Path(filename)) and file_state.get("is_listening"):
-                            self.__update_file_state(Path(filename), "processed", True)
                     self.save_state()
 
     def get_file_handler(self, file_path: Path):
@@ -178,8 +174,13 @@ class FileStateHandler:
                 continue
 
             for entry in src_dir.iterdir():
-                handler = self.get_file_handler(entry)
                 file_state = self.__get_file_state(entry)
+
+                # Skip unsupported files
+                if file_state and file_state.get("unsupported"):
+                    continue
+
+                handler = self.get_file_handler(entry)
                 if not handler:
                     # File is not supported by any handler, mark it as unsupported if not already and skip
                     if not file_state or not file_state.get("unsupported"):
@@ -190,6 +191,17 @@ class FileStateHandler:
                                 "unsupported": True,
                             },
                         )
+                    continue
+
+                # Check if file is last modified within 24 hours, if not, mark it as unsupported and skip
+                if entry.is_file() and entry.stat().st_mtime < time.time() - 24 * 3600:
+                    self.__set_file_state(
+                        entry,
+                        {
+                            "size": entry.stat().st_size,
+                            "unsupported": True,
+                        },
+                    )
                     continue
 
                 is_listening = src_dir in listen_dirs
