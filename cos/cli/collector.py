@@ -75,8 +75,6 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
                 is_first_run = False
 
             mod = load_mod(api_client, conf)
-            mod.run()
-
             code_manager = EventCodeManager(
                 conf=conf.event_code,
                 convert_code=mod.convert_code,
@@ -95,6 +93,8 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
                 conf=conf.http_server,
                 api_client=api_client,
             )
+
+            mod.run()
         except DeviceNotFound:
             _log.warning("No device found, check if robot.yaml is present waiting for next scan.")
             error_queue.put({"code": "DeviceNotFound"})
