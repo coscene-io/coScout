@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.request import BaseHandler
 
 from kebab import KebabSource, load_source
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cos.collector import CollectorConfig, EventCodeConfig
 from cos.collector.collector import DeviceConfig
@@ -32,8 +32,12 @@ from cos.utils.yaml import dump
 _log = logging.getLogger(__name__)
 
 
+class HttpServerConfig(BaseModel):
+    port: int = 22524
+
+
 class AppConfig(BaseModel):
-    logging: dict = {}
+    logging: dict = Field(default_factory=dict)
     api: ApiClientConfig = ApiClientConfig()
     collector: CollectorConfig = CollectorConfig()
     event_code: EventCodeConfig = EventCodeConfig()
@@ -41,7 +45,8 @@ class AppConfig(BaseModel):
     device_register: RegisterConfig = RegisterConfig()
     mod: ModConfig = ModConfig()
     device: DeviceConfig = DeviceConfig()
-    topics: list[str] = []
+    topics: list[str] = Field(default_factory=list)
+    http_server: HttpServerConfig = HttpServerConfig()
 
     def write_as_yaml(self, file_path: Path = None, exclude_defaults: bool = False):
         if file_path is None:

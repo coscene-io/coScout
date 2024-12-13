@@ -29,12 +29,13 @@ from cos.collector import Collector, EventCodeManager, CollectorConfig
 from cos.collector.collector import DeviceConfig
 from cos.collector.mod import Mod
 from cos.collector.openers import CosHandler
-from cos.config import AppConfig, load_kebab_source
+from cos.config import AppConfig, load_kebab_source, HttpServerConfig
 from cos.constant import COS_ONEFILE_PATH
 from cos.core.api import ApiClient, ApiClientState, get_client
 from cos.core.exceptions import DeviceNotFound, Unauthorized
 from cos.core.heartbeat import Heartbeat, HeartbeatConfig
 from cos.core.register import Register
+from cos.core.server import CustomHttpServer
 from cos.install.updater import Updater
 from cos.mods import ModLoader
 from cos.version import get_version
@@ -89,6 +90,11 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
                 network_queue=network_queue,
                 error_queue=error_queue,
             )
+
+            start_http_server(
+                conf=conf.http_server,
+                api_client=api_client,
+            )
         except DeviceNotFound:
             _log.warning("No device found, check if robot.yaml is present waiting for next scan.")
             error_queue.put({"code": "DeviceNotFound"})
@@ -105,6 +111,27 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
             _log.error("An error occurred when running collector", exc_info=True)
             error_queue.put({"code": type(e).__name__, "error_msg": str(e)})
         time.sleep(conf.collector.scan_interval_in_secs)
+
+
+def start_http_server(conf: HttpServerConfig, api_client: ApiClient):
+    thread_name = "cos-main-http-server-thread"
+    http_server_thread_flag = False
+
+    for t in threading.enumerate():
+        if t.name == thread_name:
+            http_server_thread_flag = True
+
+    if not http_server_thread_flag:
+        _http_server = CustomHttpServer(conf=conf, api_client=api_client)
+        t = threading.Thread(
+            target=_http_server.start,
+            name=thread_name,
+            daemon=True,
+        )
+        t.start()
+        _log.info("Thread start run http server")
+    else:
+        _log.info("Thread already start run http server, skip!")
 
 
 def start_collector_listener(
