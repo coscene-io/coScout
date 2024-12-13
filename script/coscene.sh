@@ -78,12 +78,13 @@ COLINK_NETWORK=""
 SERIAL_NUM=""
 USE_32BIT=0
 SKIP_VERIFY_CERT=0
-
 COLINK_ENDPOINT=""
+USE_OLD_COLINK=0
 
 COLINK_VERSION=1.0.0
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
 COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/colink/v${COLINK_VERSION}/colink-${MESH_ARCH}
+VIRMESH_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz
 
 # cgroup path
@@ -111,6 +112,7 @@ usage: $0 [OPTIONS]
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
     --skip_verify_cert      Skip verify certificate when download files
+    --use_old_colink        Use old colink version
 EOF
 }
 
@@ -235,6 +237,10 @@ while test $# -gt 0; do
     SKIP_VERIFY_CERT=1
     shift # past argument
     ;;
+  --use_old_colink)
+    USE_OLD_COLINK=1
+    shift # past argument
+    ;;
   *)
     echo "unknown option: $1"
     help
@@ -251,7 +257,7 @@ if [[ $USE_32BIT -eq 1 ]]; then
   ARCH="arm"
 fi
 
-CUR_USER=${SUDO_USER:-${USER:-$(whoami)}}
+CUR_USER=${USER:-$(whoami)}
 if [ -z "$CUR_USER" ]; then
   echo "can not get current user"
   exit 1
@@ -266,6 +272,7 @@ fi
 echo "User home directory: $CUR_USER_HOME"
 
 # get user input
+echo ""
 get_user_input SERVER_URL "please input server_url: " "${SERVER_URL}"
 echo "server_url is ${SERVER_URL}"
 echo "org_slug is ${ORG_SLUG}"
@@ -289,12 +296,22 @@ if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
 fi
 
 # check colink endpoint and network
-if [[ -z "$COLINK_ENDPOINT" && -z "$COLINK_NETWORK" ]]; then
-  echo "Both COLINK_ENDPOINT and COLINK_NETWORK are empty."
-elif [[ -n "$COLINK_ENDPOINT" && -n "$COLINK_NETWORK" ]]; then
-  echo "Both COLINK_ENDPOINT and COLINK_NETWORK are not empty."
+if [[ -n $USE_OLD_COLINK ]]; then
+  echo "Use old colink version, skip colink endpoint and network check."
+  if [[ -z "$COLINK_ENDPOINT" ]]; then
+    echo "ERROR: COLINK_ENDPOINT is empty."
+    exit 1
+  fi
 else
-  echo "ERROR: coLink_endpoint and coLink_network must either both be empty or both be not empty."
+  if [[ -z "$COLINK_ENDPOINT" && -z "$COLINK_NETWORK" ]]; then
+    echo "Both COLINK_ENDPOINT and COLINK_NETWORK are empty."
+  elif [[ -n "$COLINK_ENDPOINT" && -n "$COLINK_NETWORK" ]]; then
+    echo "Both COLINK_ENDPOINT and COLINK_NETWORK are not empty."
+  else
+    echo "ERROR: coLink_endpoint and coLink_network must either both be empty or both be not empty."
+    exit 1
+  fi
+fi
 
 # SN_FILE and SERIAL_NUM all empty, exit
 if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
@@ -356,9 +373,9 @@ format() {
 }
 
 # check old coLink binary
-if [ -e /usr/local/bin/colink ]; then
+if [ -e /usr/local/bin/coLink ]; then
   echo "Previously installed version:"
-  /usr/local/bin/colink -V
+  /usr/local/bin/coLink -V
 fi
 
 # check coLink endpoint or mesh arch
@@ -368,16 +385,20 @@ else
   echo "Downloading new coLink binary..."
 
   if [[ -n $USE_LOCAL ]]; then
-    mv -f "$TEMP_DIR/cos_binaries/colink/colink-${MESH_ARCH}" "$TEMP_DIR"/colink
+    mv -f "$TEMP_DIR/cos_binaries/colink/colink-${MESH_ARCH}" "$TEMP_DIR"/coLink
   else
-    download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    if [[ -n $USE_OLD_COLINK ]]; then
+      download_file "$TEMP_DIR"/coLink $VIRMESH_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    else
+      download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    fi
   fi
 
-  chmod +x "$TEMP_DIR"/colink
+  chmod +x "$TEMP_DIR"/coLink
   echo "Installed new coLink version:"
-  "$TEMP_DIR"/colink -V
+  "$TEMP_DIR"/coLink -V
 
-  sudo mv -f "$TEMP_DIR"/colink /usr/local/bin/colink
+  sudo mv -f "$TEMP_DIR"/coLink /usr/local/bin/coLink
 
   echo "Downloading new trzsz binary..."
   if [[ -n $USE_LOCAL ]]; then
@@ -397,14 +418,14 @@ else
   if [[ $DISABLE_SERVICE -eq 0 ]]; then
     if [[ "$(ps --no-headers -o comm 1 2>&1)" == "systemd" ]] && command -v systemctl 2>&1; then
       echo "Installing systemd service..."
-      sudo tee /etc/systemd/system/colink.service >/dev/null <<EOF
+      sudo tee /etc/systemd/system/coLink.service >/dev/null <<EOF
 
 [Unit]
 Description=coLink Client Daemon
 
 [Service]
 WorkingDirectory=/etc
-ExecStart=/usr/local/bin/colink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
+ExecStart=/usr/local/bin/coLink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
 Restart=always
 RestartSec=30
 
@@ -414,15 +435,14 @@ EOF
       sudo systemctl daemon-reload
 
       echo "Starting coLink service..."
-      sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink && sudo systemctl disable coLink && sudo rm -f /etc/systemd/system/coLink.service
       sudo systemctl is-active --quiet virmesh && sudo systemctl stop virmesh && sudo systemctl disable virmesh && sudo rm -f /etc/systemd/system/virmesh.service
-      sudo systemctl is-active --quiet colink && sudo systemctl stop colink
-      sudo systemctl enable colink
-      sudo systemctl start colink
+      sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink
+      sudo systemctl enable coLink
+      sudo systemctl start coLink
       echo "Start coLink service done."
     elif /sbin/init --version 2>&1 | grep -q upstart; then
       echo "Installing upstart service..."
-      sudo tee /etc/init/colink.conf >/dev/null <<EOF
+      sudo tee /etc/init/coLink.conf >/dev/null <<EOF
 description "coLink Client Daemon"
 
 # Start the service when networking is up
@@ -446,11 +466,11 @@ script
     # Change to the appropriate working directory
     cd /etc
     # Start the daemon
-    exec /usr/local/bin/colink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
+    exec /usr/local/bin/coLink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
 end script
 EOF
 
-      SERVICE_NAME="colink"
+      SERVICE_NAME="coLink"
       STATUS_OUTPUT=$(sudo initctl status "$SERVICE_NAME")
       if echo "$STATUS_OUTPUT" | grep -q "start/running"; then
         echo "$SERVICE_NAME is running. Stopping it now..."
