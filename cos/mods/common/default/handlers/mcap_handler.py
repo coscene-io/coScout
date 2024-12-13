@@ -36,10 +36,6 @@ class McapHandler(BaseModel, HandlerInterface):
         return "MCAP Handler"
 
     @staticmethod
-    def supports_static() -> bool:
-        return True
-
-    @staticmethod
     def check_file_path(file_path: Path) -> bool:
         return file_path.is_file() and file_path.name.endswith(".mcap")
 
@@ -53,13 +49,17 @@ class McapHandler(BaseModel, HandlerInterface):
             end_time = reader.get_summary().statistics.message_end_time // 1_000_000_000
             return {"size": file_path.stat().st_size, "start_time": start_time, "end_time": end_time}
 
-    def msg_iterator(self, file_path: Path):
+    def msg_iterator(self, file_path: Path, active_topics: set[str]):
         with file_path.open("rb") as f:
             reader = make_reader(
                 f,
                 decoder_factories=[JsonDecoderFactory(), Ros1DecoderFactory(), Ros2DecoderFactory(), ProtobufDecoderFactory()],
             )
-            for schema, channel, message, decoded_msg in reader.iter_decoded_messages(log_time_order=True):
+            if not active_topics:
+                active_topics = None
+            for schema, channel, message, decoded_msg in reader.iter_decoded_messages(
+                topics=active_topics, log_time_order=True
+            ):
                 yield RuleDataItem(
                     topic=channel.topic, msg=decoded_msg, ts=message.log_time // 1_000_000_000, msgtype=schema.name
                 )

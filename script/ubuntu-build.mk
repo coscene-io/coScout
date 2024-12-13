@@ -14,7 +14,7 @@
 
 dist/cos:
 	python3 -m pip install -q -r requirements.txt nuitka
-	python3 -m nuitka --standalone --onefile --static-libpython=no --follow-imports --include-package=rosbags --output-filename=cos --output-dir=dist --company-name=coscene --onefile-tempdir-spec="%CACHE_DIR%/%COMPANY%/onefile_%PID%_%TIME%" main.py
+	python3 -m nuitka --standalone --onefile --static-libpython=no --follow-imports --include-package=rosbags --output-filename=cos --output-dir=dist --company-name=coscene --onefile-tempdir-spec="{CACHE_DIR}/{COMPANY}/coscout" main.py
 
 ifneq ($(strip $(DOMESTIC)),)
 export PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple

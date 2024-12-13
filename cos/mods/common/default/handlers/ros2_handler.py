@@ -31,10 +31,6 @@ class Ros2Handler(BaseModel, HandlerInterface):
         return "ROS2 Handler"
 
     @staticmethod
-    def supports_static() -> bool:
-        return True
-
-    @staticmethod
     def __compute_ros2_dir_size(file_path: Path) -> int:
         size = 0
         for entry in file_path.iterdir():
@@ -74,10 +70,11 @@ class Ros2Handler(BaseModel, HandlerInterface):
     def get_file_size(self, file_path: Path) -> int:
         return self.__compute_ros2_dir_size(file_path)
 
-    def msg_iterator(self, file_path: Path):
+    def msg_iterator(self, file_path: Path, active_topics: set[str]):
         skipped_topics = set()
         with Ros2Reader(file_path) as reader:
-            for connection, timestamp, rawdata in reader.messages():
+            connections = [conn for conn in reader.connections() if conn.topic in active_topics]
+            for connection, timestamp, rawdata in reader.messages(connections=connections):
                 try:
                     msg = deserialize_cdr(rawdata, connection.msgtype)
                     yield RuleDataItem(

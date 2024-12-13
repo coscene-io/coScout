@@ -20,3 +20,4 @@ psutil~=5.9.8
 rosbags~=0.10.0
 boto3~=1.34.100
 numpy==2.1.0
+sortedcontainers==2.4.0

@@ -30,12 +30,8 @@ class Ros1Handler(BaseModel, HandlerInterface):
         return "ROS1 Handler"
 
     @staticmethod
-    def supports_static() -> bool:
-        return True
-
-    @staticmethod
     def check_file_path(file_path: Path) -> bool:
-        return file_path.is_file() and (file_path.name.endswith(".bag") or file_path.name.endswith(".bag.active"))
+        return file_path.is_file() and file_path.name.endswith(".bag")
 
     def compute_path_state(self, file_path: Path):
         with Ros1Reader(file_path) as reader:
@@ -52,9 +48,10 @@ class Ros1Handler(BaseModel, HandlerInterface):
         """Normalize the message type from a/msg/b to a/b"""
         return "/".join(msgtype.split("/msg/"))
 
-    def msg_iterator(self, file_path: Path):
+    def msg_iterator(self, file_path: Path, active_topics: set[str]):
         with AnyReader([file_path]) as reader:
-            for connection, timestamp, rawdata in reader.messages():
+            connections = [conn for conn in reader.connections if conn.topic in active_topics]
+            for connection, timestamp, rawdata in reader.messages(connections=connections):
                 try:
                     msg = reader.deserialize(rawdata, connection.msgtype)
                     yield RuleDataItem(

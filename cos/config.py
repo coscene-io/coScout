@@ -21,6 +21,7 @@ from kebab import KebabSource, load_source
 from pydantic import BaseModel
 
 from cos.collector import CollectorConfig, EventCodeConfig
+from cos.collector.collector import DeviceConfig
 from cos.collector.mod import ModConfig
 from cos.constant import COS_DEFAULT_CONFIG_PATH
 from cos.core.api import ApiClientConfig
@@ -39,6 +40,8 @@ class AppConfig(BaseModel):
     updater: UpdaterConfig = UpdaterConfig()
     device_register: RegisterConfig = RegisterConfig()
     mod: ModConfig = ModConfig()
+    device: DeviceConfig = DeviceConfig()
+    topics: list[str] = []
 
     def write_as_yaml(self, file_path: Path = None, exclude_defaults: bool = False):
         if file_path is None:

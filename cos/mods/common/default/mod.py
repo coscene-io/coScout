@@ -11,11 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import fnmatch
 import json
 import logging
 import os
-import platform
 import random
 import shutil
 import threading
@@ -25,16 +24,16 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from strictyaml import load
 
 from cos.collector import Mod
-from cos.constant import COS_DEFAULT_CONFIG_PATH, DEFAULT_MOD_STATE_DIR, DEFAULT_MOD_TEMP_DIR
+from cos.constant import DEFAULT_MOD_STATE_DIR
 from cos.core.api import ApiClient
 from cos.core.exceptions import DeviceNotFound
-from cos.core.models import FileInfo, RecordCache
+from cos.core.models import FileInfo, Moment, RecordCache, Task
 from cos.mods.common.default.file_state_handler import FileStateHandler
-from cos.mods.common.default.handlers import LogHandler
+from cos.mods.common.default.remote_rule import RemoteRule
 from cos.mods.common.task.task_handler import TaskHandler
 from cos.utils import flatten
 
@@ -43,13 +42,15 @@ _log = logging.getLogger(__name__)
 
 class DefaultModConfig(BaseModel):
     enabled: bool = False
-    base_dirs: list[str] = None
-    base_dir: str = ""
+    base_dirs: list[str] = Field(default_factory=list)  # Deprecated
+    base_dir: str = ""  # Deprecated
+    listen_dirs: list[str] = Field(default_factory=list)
+    collect_dirs: list[str] = Field(default_factory=list)
+    topics: list[str] = Field(default_factory=list)
     sn_file: str | None = ""
     sn_field: str | None = ""
-    ros2_customized_msgs_dirs: list[str] = []
-    upload_files: list[str] = []
-    scan_history: bool = False
+    ros2_customized_msgs_dirs: list[str] = Field(default_factory=list)
+    upload_files: list[str] = Field(default_factory=list)
 
 
 class DefaultMod(Mod):
@@ -63,9 +64,11 @@ class DefaultMod(Mod):
         self.conf = _conf
         self.log_thread_name = "cos-mod-default-log-listener"
         self.task_thread_name = "cos-mod-task-collector-handler"
-        self.static_file_thread_name = "cos-mod-default-static-file-listener"
-        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs, self.conf.scan_history)
+        self.file_listener_thread_name = "cos-mod-default-file-listener"
+        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs)
 
+        self.state_dir = DEFAULT_MOD_STATE_DIR
+        self.state_dir.mkdir(parents=True, exist_ok=True)
         super().__init__()
 
     @staticmethod
@@ -98,14 +101,10 @@ class DefaultMod(Mod):
                 shutil.copy(source_file, target_file)
                 _log.info(f"==> Copy error json file to record folder: {target_file}")
 
-            files = {str(target_file): FileInfo(filepath=str(target_file), filename=target_file.name)}
+            files = {str(target_file): FileInfo(filepath=target_file, filename=target_file.name)}
             for key in ["bag", "log", "files"]:
                 for filepath in error_json.get(key, []):
                     filename = key + "/" + Path(filepath).name
-                    files[filename] = FileInfo(filepath=filepath, filename=filename)
-            for key in ["zips"]:
-                for filepath in error_json.get(key, []):
-                    filename = Path(filepath).name
                     files[filename] = FileInfo(filepath=filepath, filename=filename)
             for dir_base_path in error_json.get("dirs", []):
                 for filepath in Path(dir_base_path).glob("**/*"):
@@ -120,22 +119,45 @@ class DefaultMod(Mod):
                 "rules": error_json.get("record", {}).get("rules", []),
             }
             rc.labels = error_json.get("record", {}).get("labels", [])
-            rc.paths_to_delete = error_json.get("paths_to_delete", [])
 
             # update diagnosis task
             rc.diagnosis_task = error_json.get("diagnosis_task", {})
 
+            # update moment
+            rc.moments = []
+            for moment in error_json.get("moments", []):
+                ts = moment.get("timestamp")
+                # 当前部分组件使用的是毫秒级别的时间戳，所以这里需要转换
+                if ts > 1_000_000_000_000:
+                    ts = ts / 1000
+
+                moment_to_create = Moment(
+                    title=moment.get("title"),
+                    description=moment.get("description"),
+                    timestamp=ts,
+                    duration=moment.get("timestamp") - moment.get("start_time"),
+                    rule_id=moment.get("rule_id"),
+                    code=moment.get("code"),
+                )
+                if moment.get("create_task", True):
+                    moment_to_create.task = Task(
+                        title=moment.get("title"),
+                        description=moment.get("description"),
+                        assignee=moment.get("assign_to"),  # todo: assignee
+                        sync_task=moment.get("sync_task", False),
+                    )
+                rc.moments.append(moment_to_create)
+
             rc.save_state()
             _log.info(f"==> Converted error log to record state: {rc.state_path}")
 
-            # 把上传状态写回json
-            error_json["uploaded"] = True
-            self.__update_error_json(error_json, error_json_path)
+            # 把 json 删除
+            os.remove(error_json_path)
             _log.info(f"==> Handle err file done: {error_json_path}")
         else:
             _log.debug(f"==> Skip handle err file: {error_json_path}")
 
-    def __find_files_and_update_error_json(self, error_json_path: str, temp_dir: Path):
+    def __find_files_and_update_error_json(self, error_json_path: str):
         with open(error_json_path, "r", encoding="utf8") as fp:
             error_json = json.load(fp)
 
@@ -148,58 +170,50 @@ class DefaultMod(Mod):
         start_time = error_json["cut"]["start"]
         end_time = error_json["cut"]["end"]
         error_json_id, _ = os.path.splitext(os.path.basename(error_json_path))
-        temp_files_dir = temp_dir / error_json_id
-        temp_files_dir.mkdir(parents=True, exist_ok=True)
 
         _log.info(
             f"==> Search for files in {self.file_state_handler.src_dirs}, start_time: {start_time}, end_time: {end_time}"
         )
+
+        def upload_whitelist_filter(filename, _file_state):
+            if not error_json["cut"]["whiteList"]:
+                # return True if whiteList is empty or None
+                return True
+            return any(fnmatch.fnmatchcase(filename, pattern) for pattern in error_json["cut"]["whiteList"])
+
         raw_files = self.file_state_handler.get_files(
+            FileStateHandler.state_is_collecting_filter(),
             FileStateHandler.state_timestamp_filter(start_time, end_time),
             FileStateHandler.state_dir_filter(False),
+            upload_whitelist_filter,
         )
         _log.info(f"==> Found files: {raw_files}")
         raw_files += error_json["cut"]["extraFiles"]
 
         _log.info(f"==> Search for dirs in {self.file_state_handler.src_dirs}, start_time: {start_time}, end_time: {end_time}")
-        raw_dirs = self.file_state_handler.get_files(
+        dirs = self.file_state_handler.get_files(
+            FileStateHandler.state_is_collecting_filter(),
             FileStateHandler.state_timestamp_filter(start_time, end_time),
             FileStateHandler.state_dir_filter(True),
+            upload_whitelist_filter,
         )
-        _log.info(f"==> Found dirs: {raw_dirs}")
+        _log.info(f"==> Found dirs: {dirs}")
 
         bag_files = []
         log_files = []
         other_files = []
-        dirs = []
-        zips = []
-        for dir_name in raw_dirs:
-            dir_path = Path(dir_name)
-            cur_dir = temp_files_dir / dir_path.name
-            shutil.copytree(dir_path, cur_dir)
-            dirs.append(str(cur_dir))
         for file in raw_files:
             # todo: use handlers to handle different file types
             try:
                 if Path(file).is_file():
                     if file.endswith(".bag"):
-                        dst_path = shutil.copy(file, temp_files_dir)
-                        bag_files.append(dst_path)
+                        bag_files.append(file)
                     elif file.endswith(".log"):
-                        dst_path = LogHandler.prepare_cut(Path(file), temp_files_dir, start_time, end_time)
-                        log_files.append(dst_path)
+                        log_files.append(file)
                     else:
-                        dst_path = shutil.copy(file, temp_files_dir)
-                        other_files.append(dst_path)
+                        other_files.append(file)
                 elif Path(file).is_dir():
-                    dst_path = (temp_files_dir / Path(file).name).with_suffix(".zip")
-                    shutil.make_archive(
-                        str(dst_path.with_suffix("")),
-                        "zip",
-                        Path(file).parent,
-                        Path(file).name,
-                    )
-                    zips.append(str(dst_path))
+                    dirs.append(file)
             except Exception:
                 _log.error(f"==> Cut file failed: {file}", exc_info=True)
 
@@ -207,16 +221,14 @@ class DefaultMod(Mod):
         error_json["log"] = log_files
         error_json["files"] = other_files
         error_json["dirs"] = dirs
-        error_json["zips"] = zips
         error_json["flag"] = True
         error_json["startTime"] = int(time.time() * 1000) + random.randint(1, 1000)
-        error_json["paths_to_delete"] = [str(temp_files_dir)]
 
         with open(error_json_path, "w", encoding="utf8") as fp:
             json.dump(error_json, fp, indent=4)
 
     @staticmethod
-    def __dump_upload_json(
+    def __upload_impl(
         before,
         title,
         description,
@@ -247,6 +259,7 @@ class DefaultMod(Mod):
                 "extraFiles": extra_files,
                 "start": start_time,
                 "end": end_time,
+                "whiteList": white_list,
             },
         }
         if title:
@@ -266,14 +279,14 @@ class DefaultMod(Mod):
         DefaultMod.__update_error_json(upload_data, json_path)
 
     @staticmethod
-    def __handle_unprocessed_files(api_client: ApiClient, file_state_handler: FileStateHandler, state_dir: Path):
+    def __handle_unprocessed_files(
+        api_client: ApiClient,
+        file_state_handler: FileStateHandler,
+        upload_fn: partial,
+    ):
         _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
-        for file in file_state_handler.get_files():
-            file_state_handler.static_file_diagnosis(
-                api_client,
-                Path(file),
-                partial(DefaultMod.__dump_upload_json, state_dir=state_dir),
-            )
+        for file in file_state_handler.get_files(FileStateHandler.state_is_listening_filter()):
+            file_state_handler.diagnose(api_client, Path(file), upload_fn, file_state_handler.active_topics)
 
     def run(self):
         if not self.conf.enabled:
@@ -281,87 +294,68 @@ class DefaultMod(Mod):
             return
 
         self.start_task_handler(self._api_client, self.conf.upload_files)
-        base_dirs = self.conf.base_dirs if self.conf.base_dirs else []
-        if len(base_dirs) == 0 and not self.conf.base_dir:
-            _log.info("Default Mod base dirs/dir is empty, skip!")
-            return
 
-        base_dirs_set: set[Path] = set()
-        for base_dir_str in base_dirs:
-            base_dir = Path(base_dir_str).absolute()
-            base_dirs_set.add(base_dir)
+        # Compute the listening directories, use base_dirs and base_dir if listen_dirs is not set or empty
+        base_dirs = {Path(base_dir).absolute() for base_dir in self.conf.base_dirs}
         if self.conf.base_dir:
-            base_dir = Path(self.conf.base_dir).absolute()
-            base_dirs_set.add(base_dir)
-        self.file_state_handler.update_dirs(base_dirs_set)
+            base_dirs.add(Path(self.conf.base_dir).absolute())
+        listen_dirs = {Path(listen_dir).absolute() for listen_dir in self.conf.listen_dirs}
+        collect_dirs = {Path(collect_dir).absolute() for collect_dir in self.conf.collect_dirs}
+        if not listen_dirs:
+            listen_dirs = base_dirs
+        if not collect_dirs:
+            collect_dirs = base_dirs
 
-        state_dir = DEFAULT_MOD_STATE_DIR
-        state_dir.mkdir(parents=True, exist_ok=True)
-        temp_dir = DEFAULT_MOD_TEMP_DIR
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        self.start_log_listener(state_dir)
-        self.start_static_file_listener(state_dir)
+        if listen_dirs and len(listen_dirs) > 0:
+            self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
+
+            # Compute topics in both rules and config
+            self.file_state_handler.active_topics = {
+                topic
+                for topic in RemoteRule(self._api_client).list_topics_in_rules()
+                if topic in [*self.conf.topics, "/external_log"]
+            }
+
+            # start file listener
+            self.start_file_listener()
+        else:
+            _log.info("Default Mod listen_dirs/base_dirs/base_dir is empty, skip!")
 
         # handle error json files
-        _log.info(f"==> Search for new error json {str(state_dir)}")
+        _log.info(f"==> Search for new error json {str(self.state_dir)}")
 
-        self.file_state_handler.update_dirs(base_dirs_set)  # update dirs before find error json
-        for error_json_path in self.__find_error_json(state_dir):
+        self.file_state_handler.update_dirs(listen_dirs, collect_dirs)  # update dirs before find error json
+        for error_json_path in self.__find_error_json(self.state_dir):
             # noinspection PyBroadException
             try:
-                self.__find_files_and_update_error_json(error_json_path, temp_dir)
+                self.__find_files_and_update_error_json(error_json_path)
                 self.handle_error_json(error_json_path)
             except Exception:
                 # 打印错误，但保证循环不被打断
                 _log.error(f"An error occurred when handling: {error_json_path}", exc_info=True)
 
-    def start_log_listener(self, state_dir: Path):
-        log_thread_flag = False
+    def start_file_listener(self):
+        file_thread_flag = False
 
         for t in threading.enumerate():
-            if t.name == self.log_thread_name:
-                log_thread_flag = True
+            if t.name == self.file_listener_thread_name:
+                file_thread_flag = True
 
-        if not log_thread_flag:
-            t = threading.Thread(
-                target=LogHandler().scan_dirs_and_diagnose,
-                args=(
-                    self._api_client,
-                    partial(
-                        DefaultMod.__dump_upload_json,
-                        state_dir=state_dir,
-                    ),
-                ),
-                name=self.log_thread_name,
-                daemon=True,
-            )
-            t.start()
-            _log.info("Thread start log listener")
-        else:
-            _log.info("Thread already start log listener, skip!")
-
-    def start_static_file_listener(self, state_dir: Path):
-        static_file_thread_flag = False
-
-        for t in threading.enumerate():
-            if t.name == self.static_file_thread_name:
-                static_file_thread_flag = True
-
-        if not static_file_thread_flag:
+        if not file_thread_flag:
             t = threading.Thread(
                 target=DefaultMod.__handle_unprocessed_files,
                 args=(
                     self._api_client,
                     self.file_state_handler,
-                    state_dir,
+                    partial(DefaultMod.__upload_impl, state_dir=self.state_dir),
                 ),
-                name=self.static_file_thread_name,
+                name=self.file_listener_thread_name,
                 daemon=True,
             )
             t.start()
-            _log.info("Thread start static file listener")
+            _log.info("Thread start file listener")
         else:
-            _log.info("Thread already start static file listener, skip!")
+            _log.info("Thread already start file listener, skip!")
 
     def start_task_handler(self, api_client: ApiClient, upload_files: list[str]):
         if upload_files is None:
@@ -384,35 +378,13 @@ class DefaultMod(Mod):
         else:
             _log.info("Thread task already handle, skip!")
 
-    @staticmethod
-    def __generate_device_sn():
-        sn_file_path = COS_DEFAULT_CONFIG_PATH.parent / "sn.txt"
-        sn_file_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            if not sn_file_path.is_file():
-                sn = uuid.uuid4().hex
-                with open(sn_file_path.absolute(), "w", encoding="utf8") as y:
-                    y.write(sn)
-        except PermissionError as e:
-            raise DeviceNotFound(f"access to {sn_file_path} denied") from e
-
-        with open(sn_file_path.absolute(), "r", encoding="utf8") as y:
-            sn = y.read().strip()
-
-        node = platform.node()
-        return {
-            "serial_number": sn,
-            "display_name": f"{node}@{sn}",
-            "description": f"node: {node}, sn: {sn}",
-        }
-
     def get_device(self) -> dict[str, str]:
         if not self.conf.sn_file:
-            return self.__generate_device_sn()
+            raise DeviceNotFound("sn_file not found in default mod config")
 
         sn_file_path = Path(self.conf.sn_file)
         if not sn_file_path.exists():
-            return self.__generate_device_sn()
+            raise DeviceNotFound(f"{sn_file_path} not found")
 
         file_path_str = str(sn_file_path.absolute())
         if file_path_str.endswith(".txt"):
@@ -432,7 +404,7 @@ class DefaultMod(Mod):
                     flatten_data = flatten(_data)
                 except Exception:
                     _log.error("Failed to load sn file", exc_info=True)
-                    return self.__generate_device_sn()
+                    raise DeviceNotFound(f"Failed to load sn file from {sn_file_path}")
             sn = flatten_data.get(self.conf.sn_field)
             if not sn:
                 _log.error("Failed to get sn field", exc_info=True)
@@ -442,7 +414,7 @@ class DefaultMod(Mod):
                 "display_name": sn,
                 "description": sn,
             }
-        return self.__generate_device_sn()
+        raise DeviceNotFound("sn_file format not supported")
 
     def convert_code(self, code_json):
         code_list = []

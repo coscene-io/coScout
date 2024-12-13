@@ -48,7 +48,7 @@ armv7l)
   ARCH="arm"
   ;;
 *)
-  echo "Unsupported architecture: $ARCH. Only x86_64 and arm64 are supported." >&2
+  echo "Unsupported architecture: $ARCH. Only x86_64, arm64, arm are supported." >&2
   exit 1
   ;;
 esac
@@ -75,7 +75,9 @@ MOD="default"
 SN_FILE=""
 SN_FIELD=""
 COLINK_NETWORK=""
+SERIAL_NUM=""
 USE_32BIT=0
+SKIP_VERIFY_CERT=0
 
 COLINK_ENDPOINT=""
 
@@ -83,6 +85,11 @@ COLINK_VERSION=1.0.0
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
 COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/colink/v${COLINK_VERSION}/colink-${MESH_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz
+
+# cgroup path
+GROUP_NAME="cos_cpu_limited"
+CPU_PERCENT=15
+CGROUP_PATH="/sys/fs/cgroup/cpu"
 
 help() {
   cat <<EOF
@@ -92,16 +99,18 @@ usage: $0 [OPTIONS]
     --server_url            Api server url, e.g. https://openapi.coscene.cn
     --project_slug          The slug of the project to upload to
     --org_slug              The slug of the organization device belongs to, project_slug or org_slug should be provided
+    --remove_config         Remove all config files, current device will be treated as a new device
     --beta                  Use beta version for cos
     --use_local             Use local binary file zip path e.g. /xx/path/xx.zip
     --disable_service       Disable systemd or upstart service installation
     --mod                   Select the mod to install - task, default or other custom mod (default is 'default')
-    --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
-    --remove_config         Remove all config files, current device will be treated as a new device
+    --serial_num            The serial number of the device, will skip sn_field and sn_file if provided
+    --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
+    --skip_verify_cert      Skip verify certificate when download files
 EOF
 }
 
@@ -132,12 +141,23 @@ trap handle_error ERR
 download_file() {
   local dest=$1
   local url=$2
-  local verify_cert=${3:-1} # Default to verifying the cert if not provided
+  local skip_verify_cert=${3:-1} # Default to verifying the cert if not provided
 
-  if [[ "$verify_cert" -eq 0 ]]; then
+  if [[ "$skip_verify_cert" -eq 1 ]]; then
+    echo "Skip verify certificate when download file"
     curl -SLko "$dest" "$url" || error_exit "Failed to download $url without verifying the certificate"
   else
-    curl -SLko "$dest" "$url" || error_exit "Failed to download $url"
+    curl -SLo "$dest" "$url" || error_exit "Failed to download $url"
+  fi
+}
+
+check_cgroup_tools() {
+  if ! command -v cgcreate &>/dev/null; then
+    echo "Cannot install cgroup-tools automatically. Please install it manually 'apt-get install -y cgroup-tools'."
+    return 1
+  else
+    echo "cgroup-tools is installed."
+    return 0
   fi
 }
 
@@ -195,6 +215,10 @@ while test $# -gt 0; do
     SN_FIELD="${1#*=}"
     shift
     ;;
+  --serial_num=*)
+    SERIAL_NUM="${1#*=}"
+    shift
+    ;;
   --remove_config)
     REMOVE_CONFIG=1
     shift
@@ -207,6 +231,10 @@ while test $# -gt 0; do
     USE_32BIT=1
     shift # past argument
     ;;
+  --skip_verify_cert)
+    SKIP_VERIFY_CERT=1
+    shift # past argument
+    ;;
   *)
     echo "unknown option: $1"
     help
@@ -216,7 +244,7 @@ while test $# -gt 0; do
 done
 
 if [[ $USE_32BIT -eq 1 ]]; then
-  if [[ $ARCH != "arm64" ]] && [[  $ARCH != "arm" ]]; then
+  if [[ $ARCH != "arm64" ]] && [[ $ARCH != "arm" ]]; then
     echo "32-bit version is only supported on arm64 and arm architecture."
     exit 1
   fi
@@ -245,6 +273,7 @@ echo "project_slug is ${PROJECT_SLUG}"
 echo "coLink_endpoint is ${COLINK_ENDPOINT}"
 echo "sn_file is ${SN_FILE}"
 echo "sn_field is ${SN_FIELD}"
+echo "serial_num is ${SERIAL_NUM}"
 
 # check org_slug and project_slug
 # Check if both ORG_SLUG and PROJECT_SLUG are empty
@@ -266,6 +295,10 @@ elif [[ -n "$COLINK_ENDPOINT" && -n "$COLINK_NETWORK" ]]; then
   echo "Both COLINK_ENDPOINT and COLINK_NETWORK are not empty."
 else
   echo "ERROR: coLink_endpoint and coLink_network must either both be empty or both be not empty."
+
+# SN_FILE and SERIAL_NUM all empty, exit
+if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
+  echo "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
   exit 1
 fi
 
@@ -315,6 +348,7 @@ if [[ -n $USE_LOCAL ]]; then
   tar -xzf "$USE_LOCAL" -C "$TEMP_DIR/cos_binaries" || error_exit "Failed to extract $USE_LOCAL"
 fi
 
+echo ""
 echo "Start install coLink..."
 format() {
   local input=$1
@@ -331,24 +365,12 @@ fi
 if [[ -z $COLINK_ENDPOINT ]] || [[ -z $MESH_ARCH ]]; then
   echo "coLink endpoint and mesh arch are empty, skip coLink installation."
 else
-  VERSION_ID=$(format "$(awk -F= '$1=="VERSION_ID" { print $2 ;}' /etc/os-release)")
-  SYSTEM_NAME=$(format "$(awk -F= '$1=="NAME" { print $2 ;}' /etc/os-release)")
-  VERIFY_CERT=1
   echo "Downloading new coLink binary..."
-  if [[ -z $USE_LOCAL && $SYSTEM_NAME = "Ubuntu" && $VERSION_ID -le 1606 ]]; then
-    read -r -p "Your system version is outdated and does not have the latest root certificate. You may need to bypass the certificate verification process. Do you want to proceed? 你的操作系统版本太低，没有最新的根证书，需要忽略证书验证吗？ [Y/N]" anwser
-    case $anwser in
-    Y | y)
-      VERIFY_CERT=0
-      ;;
-    *) ;;
-    esac
-  fi
 
   if [[ -n $USE_LOCAL ]]; then
     mv -f "$TEMP_DIR/cos_binaries/colink/colink-${MESH_ARCH}" "$TEMP_DIR"/colink
   else
-    download_file "$TEMP_DIR"/colink $COLINK_DOWNLOAD_URL $VERIFY_CERT
+    download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
   fi
 
   chmod +x "$TEMP_DIR"/colink
@@ -361,7 +383,7 @@ else
   if [[ -n $USE_LOCAL ]]; then
     cp "$TEMP_DIR/cos_binaries/trzsz_tar/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz" "$TEMP_DIR"/trzsz.tar.gz
   else
-    download_file "$TEMP_DIR"/trzsz.tar.gz $TRZSZ_DOWNLOAD_URL $VERIFY_CERT
+    download_file "$TEMP_DIR"/trzsz.tar.gz $TRZSZ_DOWNLOAD_URL $SKIP_VERIFY_CERT
   fi
 
   echo "unzip trzsz..."
@@ -445,6 +467,7 @@ EOF
   echo "Successfully installed coLink."
 fi
 
+echo ""
 echo "Start install cos..."
 
 # remove old config before install
@@ -480,6 +503,17 @@ sudo -u "$CUR_USER" tee "${COS_STATE_DIR}/install.state.json" >/dev/null <<EOL
   "init_install": true
 }
 EOL
+
+# check provide serial number
+if [[ -n $SERIAL_NUM ]]; then
+  echo "Provided serial number: $SERIAL_NUM"
+  SN_FILE="$COS_CONFIG_DIR/cos_sn.yaml"
+  SN_FIELD="serial_number"
+
+  sudo -u "$CUR_USER" tee "${SN_FILE}" >/dev/null <<EOL
+"$SN_FIELD": "$SERIAL_NUM"
+EOL
+fi
 
 # create config file
 echo "Creating config file..."
@@ -559,7 +593,7 @@ if [[ -n $USE_LOCAL ]]; then
 else
   mkdir -p "$TEMP_DIR/cos_binaries/cos/$ARCH"
   TMP_FILE="$TEMP_DIR/cos_binaries/cos/$ARCH/cos"
-  download_file "$TMP_FILE" "$DEFAULT_BINARY_URL"
+  download_file "$TMP_FILE" "$DEFAULT_BINARY_URL" $SKIP_VERIFY_CERT
   # check cos sha256sum
   REMOTE_SHA256=$(curl -sSfLk "$DEFAULT_BINARY_URL.sha256")
 fi
@@ -629,6 +663,26 @@ EOL
     echo "Installation completed successfully 🎉, you can use 'journalctl --user-unit=cos -f -n 50' to check the logs."
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
+
+    if ! command -v cgcreate &>/dev/null; then
+      if [[ -n $USE_LOCAL  ]] && [[ $ARCH == "arm" ]]; then
+        echo "Installing cgroup-tools..."
+        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/libcgroup1.deb"
+        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/cgroup_lite.deb"
+        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/cgroup_bin.deb"
+
+        if ! command -v cgcreate &>/dev/null; then
+          echo "Failed to install cgroup-tools."
+          exit 1
+        fi
+      fi
+    fi
+
+    exec_command="exec $COS_SHELL_BASE/bin/cos daemon"
+    if check_cgroup_tools; then
+      exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon"
+    fi
+
     sudo tee /etc/init/cos.conf >/dev/null <<EOF
 description "coScout: Data Collector by coScene"
 author "coScene"
@@ -636,21 +690,37 @@ author "coScene"
 start on started networking
 stop on runlevel [!2345]
 
+nice 19
+
 # Limit the start attempts
 respawn
 respawn limit 10 86400
 
 pre-start script
-    rm -rf $CUR_USER_HOME/.cache/coscene/onefile_*
+  rm -rf $CUR_USER_HOME/.cache/coscene/onefile_*
+
+  if command -v cgcreate &>/dev/null; then
+    if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
+      cgdelete cpu:$GROUP_NAME
+    fi
+
+    if ! cgcreate -g cpu:$GROUP_NAME; then
+      echo "Failed to create cgroup"
+      exit 1
+    fi
+
+    cgset -r cpu.cfs_period_us=100000 $GROUP_NAME
+    cgset -r cpu.cfs_quota_us=$((CPU_PERCENT * 1000)) $GROUP_NAME
+  fi
 end script
 
 script
     cd $CUR_USER_HOME/.local/state/cos
-    exec $COS_SHELL_BASE/bin/cos daemon
+    $exec_command
 end script
 
 post-stop script
-    # Any cleanup code can go here
+  # post-stop script
 end script
 
 # Logging settings

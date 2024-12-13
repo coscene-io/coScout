@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import json
 import logging
 from typing import Dict, List
 
@@ -23,7 +23,8 @@ from requests.exceptions import RequestException
 
 from cos.core import request_hook
 from cos.core.api import ApiClient, ApiClientConfig
-from cos.core.exceptions import CosException, Unauthorized
+from cos.core.exceptions import CosException, Unauthorized, RecordNotFound
+from cos.core.models import Moment
 
 _log = logging.getLogger(__name__)
 
@@ -303,6 +304,8 @@ class RestApiClient(ApiClient):
             )
             if response.status_code == 401:
                 raise Unauthorized("Unauthorized")
+            if response.status_code == 404:
+                raise RecordNotFound("RecordNotFound")
 
             result = response.json()
             if not result or "name" not in result:
@@ -587,15 +590,16 @@ class RestApiClient(ApiClient):
     # endregion
 
     # region event
-    def create_event(
+    def obtain_event(
         self,
         record_name,
         display_name: str,
-        trigger_time: int,
+        trigger_time: float,
         description: str = None,
         customized_fields: dict = None,
         device_name: str = None,
         duration: float = 0.0,
+        rule_id: str = "",
     ):
         """
         创建event
@@ -607,28 +611,38 @@ class RestApiClient(ApiClient):
         :param customized_fields:
         :param device_name:
         :param duration:
+        :param rule_id:
         :return: created event
         """
         if not record_name or not display_name:
             return None
-        url = "{api_base}/dataplatform/v1alpha2/{project}/events".format(api_base=self.api_base, project=self.project_name)
+        url = "{api_base}/dataplatform/v1alpha2/{project}/events:obtain".format(
+            api_base=self.api_base, project=self.project_name
+        )
         try:
+            event = {
+                "displayName": display_name,
+                "triggerTime": {
+                    "seconds": int(trigger_time),
+                    "nanos": int(trigger_time * 1e9) - int(trigger_time) * 1_000_000_000,
+                },
+                "duration": {
+                    "seconds": int(duration),
+                    "nanos": int(duration * 1e9) - int(duration) * 1_000_000_000,
+                },
+                "description": description,
+                "customizedFields": customized_fields or {},
+                "device": {"name": device_name},
+                "record": record_name,
+            }
+            if rule_id:
+                event["rule"] = {"id": rule_id}
+
             response = requests.post(
                 url=url,
-                params={"record": record_name},
                 json={
-                    "displayName": display_name,
-                    "triggerTime": {
-                        "seconds": int(trigger_time),
-                        "nanos": int(trigger_time % 1 * 1e9),
-                    },
-                    "duration": {
-                        "seconds": int(duration),
-                        "nanos": int(duration % 1 * 1e9),
-                    },
-                    "description": description,
-                    "customizedFields": customized_fields or {},
-                    "device": {"name": device_name},
+                    "parent": self.project_name,
+                    "event": event,
                 },
                 headers=self.request_headers,
                 auth=self.basic_auth,
@@ -642,6 +656,64 @@ class RestApiClient(ApiClient):
             return result
         except RequestException as e:
             six.raise_from(CosException("Create Event failed"), e)
+
+    def trigger_device_event(
+        self,
+        moment: Moment,
+        event_code: str,
+        record_name: str,
+        rule_id: str,
+        device_name: str,
+        device_extra_info: Dict[str, any],
+    ):
+        """
+        触发设备事件
+        :param moment: 事件的时间
+        :param event_code: 事件的code
+        :param record_name: 记录的名称
+        :param rule_id: 规则的ID
+        :param device_name: 设备的名称
+        :param device_extra_info: 设备的额外信息
+        :return:
+        """
+        url = "{api_base}/analysis/v1alpha1/{project}/deviceEvents:trigger".format(
+            api_base=self.api_base, project=self.project_name
+        )
+        payload = {
+            "parent": self.project_name,
+            "device_events": [
+                {
+                    "code": event_code,
+                    "parameters": moment.metadata,
+                    "trigger_time": {
+                        "seconds": int(moment.timestamp),
+                        "nanos": int(moment.timestamp * 1e9) - int(moment.timestamp) * 1_000_000_000,
+                    },
+                    "duration": str(moment.duration) + "s",
+                    "event_source": "DEVICE",
+                    "device": device_name,
+                    "diagnosis_rule_id": rule_id,
+                    "device_context": device_extra_info,
+                    "record": record_name,
+                    "moment": moment.name,
+                }
+            ],
+        }
+        try:
+            response = requests.post(
+                url=url,
+                json=payload,
+                headers=self.request_headers,
+                auth=self.basic_auth,
+                timeout=10,
+            )
+            if response.status_code == 401:
+                raise Unauthorized("Unauthorized")
+
+            response.raise_for_status()
+            _log.info("==> Triggered device event")
+        except RequestException as e:
+            six.raise_from(CosException("Trigger device event failed"), e)
 
     # endregion
 
@@ -946,23 +1018,64 @@ class RestApiClient(ApiClient):
 
     # region task
 
-    def create_task(self, record_name: str, title: str, description: str, assignee: str):
+    def upsert_task(self, record_name: str, event_name: str, title: str, description: str, assignee: str):
         """
         :param assignee: task 负责人
         :param description: task 描述
         :param title: task 标题
         :param record_name: 关联的 record
+        :param event_name: 关联的 event
         :return:
         """
-        url = "{api_base}/dataplatform/v1alpha2/{parent}/tasks".format(
+        url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks/-:upsert".format(
             api_base=self.api_base,
             parent=self.project_name,
+        )
+
+        task_description = json.dumps(
+            {
+                "root": {
+                    "children": [
+                        {
+                            "children": [{"mode": "normal", "text": description, "type": "text", "version": 1}],
+                            "indent": 0,
+                            "direction": "ltr",
+                            "format": "",
+                            "type": "paragraph",
+                            "version": 1,
+                        },
+                        {
+                            "children": [{"sourceName": event_name, "sourceType": "moment", "type": "source", "version": 1}],
+                            "direction": None,
+                            "format": "",
+                            "indent": 0,
+                            "type": "paragraph",
+                            "version": 1,
+                        },
+                    ],
+                    "direction": None,
+                    "indent": 0,
+                    "format": "",
+                    "type": "root",
+                    "version": 1,
+                }
+            }
         )
 
         try:
             response = requests.post(
                 url=url,
-                json={"title": title, "description": description, "assignee": assignee, "record": record_name},
+                json={
+                    "parent": self.project_name,
+                    "task": {
+                        "title": title,
+                        "description": task_description,
+                        "assignee": assignee,
+                        "category": "COMMON",
+                        "state": "PROCESSING",  # todo: 任务状态
+                        "commonTaskDetail": {"event": event_name},
+                    },
+                },
                 headers=self.request_headers,
                 auth=self.basic_auth,
                 timeout=10,
@@ -987,6 +1100,7 @@ class RestApiClient(ApiClient):
         trigger_time: int,
         start_time: int,
         end_time: int,
+        record_name: str,
     ):
         """
         :param title: task 标题
@@ -997,6 +1111,7 @@ class RestApiClient(ApiClient):
         :param trigger_time: 触发时间
         :param start_time: 开始时间
         :param end_time: 结束时间
+        :param record_name: 关联的 record
         """
         url = "{api_base}/dataplatform/v1alpha3/{parent}/tasks".format(
             api_base=self.api_base,
@@ -1011,6 +1126,7 @@ class RestApiClient(ApiClient):
                     "description": description,
                     "category": "DIAGNOSIS",
                     "state": "PROCESSING",
+                    "tags": {"recordName": record_name},
                     "diagnosisTaskDetail": {
                         "device": device,
                         "startTime": {
@@ -1126,7 +1242,7 @@ class RestApiClient(ApiClient):
             six.raise_from(CosException("Add the task tag failed"), e)
 
     def sync_task(self, task_name: str) -> None:
-        url = "{api_base}/dataplatform/v1alpha2/{task_name}:sync".format(
+        url = "{api_base}/dataplatform/v1alpha3/{task_name}:sync".format(
             api_base=self.api_base,
             task_name=task_name,
         )

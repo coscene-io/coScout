@@ -110,3 +110,12 @@ def can_read_path(file_path: str) -> bool:
     if not p.exists():
         return False
     return True
+
+
+def is_hidden_file(file_path: str) -> bool:
+    if not file_path:
+        return False
+
+    parts = file_path.split(os.sep)
+    parts = [part for part in parts if part]
+    return any(part.startswith(".") for part in parts)

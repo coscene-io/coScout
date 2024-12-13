@@ -13,15 +13,12 @@
 # limitations under the License.
 
 import logging
-import platform
-import uuid
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from strictyaml import load
 
 from cos.collector import Mod
-from cos.constant import COS_DEFAULT_CONFIG_PATH
 from cos.core.api import ApiClient
 from cos.core.exceptions import DeviceNotFound
 from cos.mods.common.task.task_handler import TaskHandler
@@ -34,8 +31,8 @@ class TaskModConfig(BaseModel):
     enabled: bool = False
     sn_file: str | None = ""
     sn_field: str | None = ""
-    upload_files: list[str] = []
-    base_dirs: list[str] = []
+    upload_files: list[str] = Field(default_factory=list)
+    base_dirs: list[str] = Field(default_factory=list)
 
 
 class TaskMod(Mod):
@@ -61,11 +58,11 @@ class TaskMod(Mod):
 
     def get_device(self):
         if not self.conf.sn_file:
-            return self.__generate_device_sn()
+            raise DeviceNotFound("sn_file not found in task mod config")
 
         sn_file_path = Path(self.conf.sn_file)
         if not sn_file_path.exists():
-            return self.__generate_device_sn()
+            raise DeviceNotFound(f"{sn_file_path} not found")
 
         file_path_str = str(sn_file_path.absolute())
         if file_path_str.endswith(".txt"):
@@ -85,7 +82,7 @@ class TaskMod(Mod):
                     flatten_data = flatten(_data)
                 except Exception:
                     _log.error("Failed to load sn file", exc_info=True)
-                    return self.__generate_device_sn()
+                    raise DeviceNotFound(f"Failed to load sn file from {sn_file_path}")
             sn = flatten_data.get(self.conf.sn_field)
             if not sn:
                 _log.error("Failed to get sn field", exc_info=True)
@@ -95,32 +92,10 @@ class TaskMod(Mod):
                 "display_name": sn,
                 "description": sn,
             }
-        return self.__generate_device_sn()
+        raise DeviceNotFound("sn_file format not supported")
 
     def convert_code(self, code_json):
         return {}
 
     def find_files(self, trigger_time):
         pass
-
-    @staticmethod
-    def __generate_device_sn():
-        sn_file_path = COS_DEFAULT_CONFIG_PATH.parent / "sn.txt"
-        sn_file_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            if not sn_file_path.is_file():
-                sn = uuid.uuid4().hex
-                with open(sn_file_path.absolute(), "w", encoding="utf8") as y:
-                    y.write(sn)
-        except PermissionError as e:
-            raise DeviceNotFound(f"access to {sn_file_path} denied") from e
-
-        with open(sn_file_path.absolute(), "r", encoding="utf8") as y:
-            sn = y.read().strip()
-
-        node = platform.node()
-        return {
-            "serial_number": sn,
-            "display_name": f"{node}@{sn}",
-            "description": f"node: {node}, sn: {sn}",
-        }

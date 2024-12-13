@@ -25,13 +25,6 @@ class HandlerInterface(ABC):
 
     @staticmethod
     @abstractmethod
-    def supports_static() -> bool:
-        """Check if the handler is static, by static,
-        it means the handler supports handling files that are not changing"""
-        pass
-
-    @staticmethod
-    @abstractmethod
     def check_file_path(file_path: Path) -> bool:
         """Check if the file path is supported by the handler"""
         pass
@@ -46,13 +39,13 @@ class HandlerInterface(ABC):
         return file_path.stat().st_size
 
     # The following methods are diagnose related
-    def diagnose(self, api_client: ApiClient, source: Path, upload_fn: partial):
+    def diagnose(self, api_client: ApiClient, source: Path, upload_fn: partial, active_topics: set[str]):
         """Diagnose the file"""
         executor_name = f"{source.name} Rule Executor"
-        rule_executor = RuleExecutor(executor_name, api_client, self.msg_iterator(source), upload_fn)
+        rule_executor = RuleExecutor(executor_name, api_client, self.msg_iterator(source, active_topics), upload_fn)
         rule_executor.execute()
 
     @abstractmethod
-    def msg_iterator(self, file_path: Path):
+    def msg_iterator(self, file_path: Path, active_topics: set[str]):
         """Get an iterator for the messages in the file"""
         pass

@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 from cos.constant import API_CLIENT_STATE_PATH, INSTALL_STATE_PATH
 from cos.core.exceptions import CosException, Sha256Mismatch
-from cos.core.models import BaseState, FileInfo
+from cos.core.models import BaseState, FileInfo, Moment
 from cos.name.project_name import ProjectName
 from cos.name.record_name import RecordName
 from cos.utils import LimitedFileReader, ProgressLogger, size_fmt
@@ -442,7 +442,7 @@ class ApiClient(metaclass=ABCMeta):
 
     # region event
     @abstractmethod
-    def create_event(
+    def obtain_event(
         self,
         record_name,
         display_name,
@@ -451,6 +451,7 @@ class ApiClient(metaclass=ABCMeta):
         customized_fields,
         device_name,
         duration,
+        rule_id,
     ):
         """
         创建event
@@ -462,7 +463,29 @@ class ApiClient(metaclass=ABCMeta):
         :param customized_fields:
         :param device_name:
         :param duration:
+        :param rule_id:
         :return: created event
+        """
+        pass
+
+    @abstractmethod
+    def trigger_device_event(
+        self,
+        moment: Moment,
+        event_code: str,
+        record_name: str,
+        rule_id: str,
+        device_name: str,
+        device_extra_info: Dict[str, any],
+    ):
+        """
+        触发设备事件
+        :param moment: 事件的时间
+        :param event_code: 事件的code
+        :param record_name: 记录的 resource_name
+        :param rule_id: 规则的id
+        :param device_name: 设备的resource name
+        :param device_extra_info: 设备的额外信息
         """
         pass
 
@@ -550,11 +573,11 @@ class ApiClient(metaclass=ABCMeta):
         except Exception:
             return False
 
-    def resumable_upload_files(self, record_name, file_infos, remove_after=False):
+    def resumable_upload_files(self, record_name, file_infos, part_state_path: str, skip_check_same_file: bool = False):
         """
         :param record_name: 记录的 resource_name
         :param file_infos:
-        :param remove_after: 上传完成后是否删除本地文件
+        :param part_state_path: 分片信息的存储路径
         :return: 创建的记录
         """
         rc = RecordName.from_str(record_name)
@@ -581,14 +604,20 @@ class ApiClient(metaclass=ABCMeta):
         sorted_files: List[FileInfo] = sorted(file_infos, key=lambda f: f.size)
         for f in sorted_files:
             try:
-                has_clone = self.check_clone_file(record_name=record_name, file_info=f)
-                if not has_clone:
-                    key = rc.simple_record_name() + "/files/" + f.filename
-                    uploader = S3MultipartUploader(s3_client, bucket="default", file_path=str(f.filepath.absolute()), key=key)
-                    uploader.upload()
-                if remove_after:
-                    f.filepath.unlink()
-                    _log.info(f"==> Deleted after upload: {f.filepath}")
+                if not skip_check_same_file:
+                    has_clone = self.check_clone_file(record_name=record_name, file_info=f)
+                    if has_clone:
+                        continue
+
+                key = rc.simple_record_name() + "/files/" + f.filename
+                uploader = S3MultipartUploader(
+                    s3_client,
+                    bucket="default",
+                    file_path=str(f.filepath.absolute()),
+                    key=key,
+                    part_state_path=part_state_path,
+                )
+                uploader.upload()
             except CosException:
                 _log.error(
                     f"==> Failed to upload {f.filepath}, will retry later",
@@ -698,9 +727,10 @@ class ApiClient(metaclass=ABCMeta):
 
     # region task
     @abstractmethod
-    def create_task(self, record_name: str, title: str, description: str, assignee: str | None):
+    def upsert_task(self, record_name: str, event_name: str, title: str, description: str, assignee: str | None):
         """
         :param assignee:  任务的执行者
+        :param event_name: 任务的event name
         :param record_name: 记录的resource name
         :param title: 任务的标题
         :param description: 任务的描述
@@ -719,6 +749,7 @@ class ApiClient(metaclass=ABCMeta):
         trigger_time: int,
         start_time: int,
         end_time: int,
+        record_name: str,
     ):
         """
         :param title: 任务的标题
@@ -729,6 +760,7 @@ class ApiClient(metaclass=ABCMeta):
         :param trigger_time: 触发时间
         :param start_time: 采集目标起始时间
         :param end_time: 采集目标结束时间
+        :param record_name: 关联记录的resource name
         """
         pass
 

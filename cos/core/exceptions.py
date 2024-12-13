@@ -28,3 +28,7 @@ class Unauthorized(CosException):
 
 class Sha256Mismatch(CosException):
     pass
+
+
+class RecordNotFound(CosException):
+    pass

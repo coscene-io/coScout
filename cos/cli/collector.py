@@ -26,6 +26,7 @@ import psutil
 
 from cos.cli.context import Context
 from cos.collector import Collector, EventCodeManager, CollectorConfig
+from cos.collector.collector import DeviceConfig
 from cos.collector.mod import Mod
 from cos.collector.openers import CosHandler
 from cos.config import AppConfig, load_kebab_source
@@ -49,6 +50,9 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
 
     signal.signal(signal.SIGINT, signal_handler)
     is_first_run = True
+
+    cos_url_handler.set_api_client(None)
+    load_mod(None, conf)
     while True:
         try:
             if conf.logging:
@@ -79,6 +83,7 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
             )
             start_collector_listener(
                 conf=conf.collector,
+                device_conf=conf.device,
                 api_client=api_client,
                 code_manager=code_manager,
                 network_queue=network_queue,
@@ -103,7 +108,12 @@ def run_forever(config_file: str, conf: AppConfig, cos_url_handler: CosHandler, 
 
 
 def start_collector_listener(
-    conf: CollectorConfig, api_client: ApiClient, code_manager: EventCodeManager, network_queue: Queue, error_queue: Queue
+    conf: CollectorConfig,
+    device_conf: DeviceConfig,
+    api_client: ApiClient,
+    code_manager: EventCodeManager,
+    network_queue: Queue,
+    error_queue: Queue,
 ):
     thread_name = "cos-main-collector-thread"
     collector_thread_flag = False
@@ -113,7 +123,7 @@ def start_collector_listener(
             collector_thread_flag = True
 
     if not collector_thread_flag:
-        _collector = Collector(conf=conf, api_client=api_client, code_manager=code_manager)
+        _collector = Collector(conf=conf, device_conf=device_conf, api_client=api_client, code_manager=code_manager)
         t = threading.Thread(
             target=_collector.run,
             args=(network_queue, error_queue),
@@ -131,18 +141,16 @@ def load_mod(api_client: ApiClient | None, conf: AppConfig):
 
     mod_conf = conf.mod
     mod_name = mod_conf.name.lower()
-    if "gaussian" in conf.api.server_url or "gs" == mod_name.lower():
-        mod_name = "gs"
 
     _log.info(f"Use mod {mod_name} for collector.")
-    return Mod.get_mod(mod_name)(api_client=api_client, conf=mod_conf.conf)
+    return Mod.get_mod(mod_name)(api_client=api_client, conf={**mod_conf.conf, "topics": conf.topics})
 
 
 @click.command
 @click.pass_obj
 def daemon(ctx: Context):
     ctx.source.disable_reload()
-    clean_old_binary()
+    # clean_old_binary()
     _log.info(f"Starting collector daemon with {get_version()}")
 
     network_queue = Queue()
