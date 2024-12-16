@@ -21,7 +21,7 @@ from typing import Callable
 
 from cos.constant import FILE_STATE_PATH
 from cos.core.api import ApiClient
-from cos.mods.common.default.handlers import HANDLERS, HandlerInterface, LogHandler, Ros2Handler
+from cos.mods.common.default.handlers import HANDLERS, HandlerInterface, Ros2Handler
 from cos.utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
@@ -242,7 +242,7 @@ class FileStateHandler:
         self.listen_dirs = listen_dirs
         self.__update_deleted_file_state()
         self.save_state()
-        _log.info(f"Finished updating directories")
+        _log.info("Finished updating directories")
 
     def diagnose(self, api_client: ApiClient, file_path: Path, upload_fn, active_topics: set[str]):
         file_state = self.__get_file_state(file_path)
