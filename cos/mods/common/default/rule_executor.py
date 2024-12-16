@@ -62,7 +62,7 @@ def v2_spec_to_rules(project_rules_spec: dict, upload_fn: Callable, project_name
                     {
                         "name": "upload",
                         "kwargs": {
-                            "trigger_ts": upload_spec.get("trigger_ts"),
+                            "trigger_ts": f"""{{ {upload_spec.get("trigger_ts")} }}""",
                             "before": upload_spec.get("pre_trigger"),
                             "after": upload_spec.get("post_trigger"),
                             "title": upload_spec.get("title"),

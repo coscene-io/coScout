@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import threading
 import time
@@ -241,9 +242,17 @@ class DefaultMod(Mod):
         white_list,
         after=0,
     ):
-        assert before >= 0 or after >= 0, "before or after must be greater than 0"
-        start_time_raw = datetime.fromtimestamp(trigger_ts) - timedelta(minutes=before)
-        end_time_raw = datetime.fromtimestamp(trigger_ts) + timedelta(minutes=after)
+        if isinstance(before, str):
+            before_str = before
+        else:
+            before_str = f"{before}m"
+
+        if isinstance(after, str):
+            after_str = after
+        else:
+            after_str = f"{after}m"
+        start_time_raw = datetime.fromtimestamp(float(trigger_ts)) - _parse_duration_str(before_str)
+        end_time_raw = datetime.fromtimestamp(float(trigger_ts)) + _parse_duration_str(after_str)
         start_time = int(start_time_raw.timestamp())
         end_time = int(end_time_raw.timestamp())
 
@@ -427,3 +436,16 @@ class DefaultMod(Mod):
 
     def find_files(self, trigger_time):
         pass
+
+
+def _parse_duration_str(duration_str: str) -> timedelta:
+    """
+    Parse a duration string into a timedelta object
+    duration_str: a string in the format of "(*h)?(*m)?(*s)?"
+    """
+    duration_re = re.compile(r"((?P<hours>\d+)h)?((?P<minutes>\d+)m)?((?P<seconds>\d+)s)?")
+    match = duration_re.match(duration_str)
+    if not match:
+        raise ValueError(f"Invalid duration string: {duration_str}")
+    duration_kwargs = {k: int(v) for k, v in match.groupdict().items() if v is not None}
+    return timedelta(**duration_kwargs)

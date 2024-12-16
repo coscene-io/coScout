@@ -157,6 +157,8 @@ class FileStateHandler:
                 self.__del_file_state(file_path)
 
     def update_dirs(self, listen_dirs: set[Path], collect_dirs: set[Path]):
+        _log.info(f"Start updating directories, listen_dirs: {listen_dirs}, collect_dirs: {collect_dirs}")
+
         # Skip directories that user have no read access or do not exist
         listen_dirs = {listen_dir for listen_dir in listen_dirs if can_read_path(str(listen_dir))}
         collect_dirs = {collect_dir for collect_dir in collect_dirs if can_read_path(str(collect_dir))}
@@ -193,8 +195,8 @@ class FileStateHandler:
                         )
                     continue
 
-                # Check if file is last modified within 24 hours, if not, mark it as unsupported and skip
-                if entry.is_file() and entry.stat().st_mtime < time.time() - 24 * 3600:
+                # Check if file is last modified within 2 hours, if not, mark it as unsupported and skip
+                if entry.is_file() and entry.stat().st_mtime < time.time() - 2 * 3600:
                     self.__set_file_state(
                         entry,
                         {
@@ -238,6 +240,7 @@ class FileStateHandler:
         self.listen_dirs = listen_dirs
         self.__update_deleted_file_state()
         self.save_state()
+        _log.info(f"Finished updating directories")
 
     def diagnose(self, api_client: ApiClient, file_path: Path, upload_fn, active_topics: set[str]):
         file_state = self.__get_file_state(file_path)
