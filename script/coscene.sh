@@ -89,7 +89,7 @@ TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_AR
 
 # cgroup path
 GROUP_NAME="cos_cpu_limited"
-CPU_PERCENT=15
+CPU_PERCENT=30
 CGROUP_PATH="/sys/fs/cgroup/cpu"
 
 help() {

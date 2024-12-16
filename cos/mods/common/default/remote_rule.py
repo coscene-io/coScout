@@ -41,6 +41,28 @@ class RemoteRule:
     def __init__(self, api_client: ApiClient):
         self._api_client = api_client
 
+    def get_project_diagnosis_rules(self) -> dict:
+        api_state = self._api_client.state.load_state()
+        device_name = api_state.device.get("name", None)
+        if not device_name:
+            _log.warning("device name is not found, skip get project diagnosis rules")
+            return {}
+
+        projects = self._api_client.list_device_projects(device_name=device_name)
+        if not projects or len(projects) == 0:
+            _log.warning("no projects found, skip get project diagnosis rules")
+            return {}
+
+        project_rules = {}
+        for project in projects:
+            project_name = project.get("name")
+            remote_rule = ProjectRemoteRule(self._api_client, project_name)
+
+            project_rules[project_name] = remote_rule.read_config()
+            project_rules[project_name]["version"] = remote_rule.get_config_version()
+
+        return project_rules
+
     def list_device_diagnosis_rules(self) -> list:
         api_state = self._api_client.state.load_state()
         device_name = api_state.device.get("name", None)

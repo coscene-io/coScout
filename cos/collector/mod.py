@@ -15,7 +15,7 @@
 import logging
 from abc import ABCMeta, abstractmethod
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cos.core.exceptions import DeviceNotFound
 from cos.core.models import RawDeviceCache
@@ -25,7 +25,7 @@ _log = logging.getLogger(__name__)
 
 class ModConfig(BaseModel):
     name: str = "default"
-    conf: dict = {}
+    conf: dict = Field(default_factory=dict)
 
 
 class Mod(metaclass=ABCMeta):
