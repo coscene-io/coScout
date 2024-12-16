@@ -81,6 +81,12 @@ for arch in "${SUPPORT_COS_ARCH[@]}"; do
   if [ "${arch}" == "arm" ]; then
     cgroup_bin_download_url=${MESH_BASE_URL}/cgroup_bin/${arch}/cgroup_bin.deb
     curl -L -o "${cos_folder}/cgroup_bin.deb" "${cgroup_bin_download_url}"
+
+    cgroup_lite_download_url=${MESH_BASE_URL}/cgroup_bin/${arch}/cgroup_lite.deb
+    curl -L -o "${cos_folder}/cgroup_lite.deb" "${cgroup_lite_download_url}"
+
+    libcgroup_download_url=${MESH_BASE_URL}/cgroup_bin/${arch}/libcgroup1.deb
+    curl -L -o "${cos_folder}/libcgroup1.deb" "${libcgroup_download_url}"
   fi
 done
 
