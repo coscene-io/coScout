@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Callable, Dict
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cos.collector.openers import CosHandler
 from cos.collector.remote_config import RemoteConfig
@@ -32,7 +32,7 @@ _log = logging.getLogger(__name__)
 
 class EventCodeConfig(BaseModel):
     enabled: bool = False
-    whitelist: Dict[str, int] = {}
+    whitelist: Dict[str, int] = Field(default_factory=dict)
     reset_interval_in_secs: int = 86400
     code_json_url: str = ""
 
