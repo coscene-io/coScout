@@ -15,6 +15,7 @@
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -89,12 +90,6 @@ class FileStateHandler:
                     self.active_topics = set()  # topics that are currently being listened to
                     self.load_state()
 
-                    # Update the log file in the listen dirs as processed on startup
-                    for filename, file_state in self.state.items():
-                        if LogHandler.check_file_path(Path(filename)) and file_state.get("is_listening"):
-                            self.__update_file_state(Path(filename), "processed", True)
-                    self.save_state()
-
     def get_file_handler(self, file_path: Path):
         for handler in self.file_handlers:
             if handler.check_file_path(file_path):
@@ -161,6 +156,8 @@ class FileStateHandler:
                 self.__del_file_state(file_path)
 
     def update_dirs(self, listen_dirs: set[Path], collect_dirs: set[Path]):
+        _log.info(f"Start updating directories, listen_dirs: {listen_dirs}, collect_dirs: {collect_dirs}")
+
         # Skip directories that user have no read access or do not exist
         listen_dirs = {listen_dir for listen_dir in listen_dirs if can_read_path(str(listen_dir))}
         collect_dirs = {collect_dir for collect_dir in collect_dirs if can_read_path(str(collect_dir))}
@@ -178,8 +175,15 @@ class FileStateHandler:
                 continue
 
             for entry in src_dir.iterdir():
-                handler = self.get_file_handler(entry)
                 file_state = self.__get_file_state(entry)
+
+                # Skip unsupported files
+                if file_state and file_state.get("unsupported"):
+                    # Do not skip unsupported files because they are too old
+                    if not file_state.get("too_old"):
+                        continue
+
+                handler = self.get_file_handler(entry)
                 if not handler:
                     # File is not supported by any handler, mark it as unsupported if not already and skip
                     if not file_state or not file_state.get("unsupported"):
@@ -190,6 +194,18 @@ class FileStateHandler:
                                 "unsupported": True,
                             },
                         )
+                    continue
+
+                # Check if file is last modified within 2 hours, if not, mark it as unsupported and skip
+                if entry.is_file() and entry.stat().st_mtime < time.time() - 2 * 60 * 60:
+                    self.__set_file_state(
+                        entry,
+                        {
+                            "size": handler.get_file_size(entry),
+                            "unsupported": True,
+                            "too_old": True,
+                        },
+                    )
                     continue
 
                 is_listening = src_dir in listen_dirs
@@ -226,6 +242,7 @@ class FileStateHandler:
         self.listen_dirs = listen_dirs
         self.__update_deleted_file_state()
         self.save_state()
+        _log.info(f"Finished updating directories")
 
     def diagnose(self, api_client: ApiClient, file_path: Path, upload_fn, active_topics: set[str]):
         file_state = self.__get_file_state(file_path)
