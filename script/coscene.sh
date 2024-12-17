@@ -243,7 +243,7 @@ if [[ $USE_32BIT -eq 1 ]]; then
   ARCH="arm"
 fi
 
-CUR_USER=${SUDO_USER:-${USER:-$(whoami)}}
+CUR_USER=${USER:-$(whoami)}
 if [ -z "$CUR_USER" ]; then
   echo "can not get current user"
   exit 1
@@ -274,40 +274,43 @@ if [[ -z $ORG_SLUG && -z $PROJECT_SLUG ]]; then
   exit 1
 fi
 
-# Check if both ORG_SLUG and PROJECT_SLUG are not empty
-if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
-  echo "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
-  exit 1
-fi
-
-# SN_FILE and SERIAL_NUM all empty, exit
-if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
-  echo "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
-  exit 1
-fi
-
-# check sn_file and sn_field
-# Check if SN_FILE is specified
-if [[ -n $SN_FILE ]]; then
-  # Check if SN_FILE has valid extension
-  valid_extensions=(.txt .json .yaml .yml)
-  extension="${SN_FILE##*.}"
-  if [[ ! " ${valid_extensions[*]} " =~ $extension ]]; then
-    echo "ERROR: sn file has an invalid extension. Only .txt, .json, .yaml, .yml extensions are allowed. Exiting."
+# if mod is default, check
+if [[ $MOD == "default" ]]; then
+  # Check if both ORG_SLUG and PROJECT_SLUG are not empty
+  if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
+    echo "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
     exit 1
   fi
 
-  # Check if SN_FILE exists
-  if [[ ! -f $SN_FILE ]]; then
-    echo "ERROR: sn file does not exist. Exiting."
+  # SN_FILE and SERIAL_NUM all empty, exit
+  if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
+    echo "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
     exit 1
   fi
 
-  # Check if extension is not .txt and SN_FIELD is empty
-  echo "extension is $extension"
-  if [[ $extension != "txt" && -z $SN_FIELD ]]; then
-    echo "ERROR: --sn_field is not specified when sn file exist. Exiting."
-    exit 1
+  # check sn_file and sn_field
+  # Check if SN_FILE is specified
+  if [[ -n $SN_FILE ]]; then
+    # Check if SN_FILE has valid extension
+    valid_extensions=(.txt .json .yaml .yml)
+    extension="${SN_FILE##*.}"
+    if [[ ! " ${valid_extensions[*]} " =~ $extension ]]; then
+      echo "ERROR: sn file has an invalid extension. Only .txt, .json, .yaml, .yml extensions are allowed. Exiting."
+      exit 1
+    fi
+
+    # Check if SN_FILE exists
+    if [[ ! -f $SN_FILE ]]; then
+      echo "ERROR: sn file does not exist. Exiting."
+      exit 1
+    fi
+
+    # Check if extension is not .txt and SN_FIELD is empty
+    echo "extension is $extension"
+    if [[ $extension != "txt" && -z $SN_FIELD ]]; then
+      echo "ERROR: --sn_field is not specified when sn file exist. Exiting."
+      exit 1
+    fi
   fi
 fi
 
