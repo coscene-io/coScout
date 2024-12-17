@@ -719,6 +719,9 @@ EOF
     else
       echo "$SERVICE_NAME is not running."
     fi
+
+    echo "reload upstart configuration..."
+    sudo initctl reload-configuration
     sudo initctl start $SERVICE_NAME
 
     echo "Installation completed successfully 🎉, you can use 'tail -f /var/log/upstart/cos.log' to check the logs."
