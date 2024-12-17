@@ -77,13 +77,14 @@ class FileStateHandler:
         self.file_handlers: list[HandlerInterface] = HANDLERS
         Ros2Handler.register_ros2_types(ros2_msg_dirs)
 
-    def __init__(self, ros2_msg_dirs: list[str]):
+    def __init__(self, skip_period_hours: int, ros2_msg_dirs: list[str]):
         if not FileStateHandler._instance:
             with FileStateHandler._lock:
                 if not FileStateHandler._instance:
                     FileStateHandler._instance = self
                     self.state: dict[str, dict] = dict()
                     self.update_lock = threading.Lock()
+                    self.skip_period_hours = skip_period_hours
                     self.__register_file_handlers(ros2_msg_dirs)
                     self.src_dirs = set()
                     self.listen_dirs = set()
@@ -97,11 +98,11 @@ class FileStateHandler:
         return None
 
     @classmethod
-    def get_instance(cls, ros2_msg_dirs=None):
+    def get_instance(cls, skip_period_hours: int, ros2_msg_dirs=None):
         if ros2_msg_dirs is None:
             ros2_msg_dirs = []
         if not cls._instance:
-            cls._instance = cls(ros2_msg_dirs)
+            cls._instance = cls(skip_period_hours, ros2_msg_dirs)
         return cls._instance
 
     def load_state(self, state_path: Path = None):
@@ -197,7 +198,7 @@ class FileStateHandler:
                     continue
 
                 # Check if file is last modified within 2 hours, if not, mark it as unsupported and skip
-                if entry.is_file() and entry.stat().st_mtime < time.time() - 2 * 60 * 60:
+                if entry.is_file() and entry.stat().st_mtime < time.time() - self.skip_period_hours * 60 * 60:
                     self.__set_file_state(
                         entry,
                         {

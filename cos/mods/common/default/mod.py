@@ -47,6 +47,7 @@ class DefaultModConfig(BaseModel):
     base_dir: str = ""  # Deprecated
     listen_dirs: list[str] = Field(default_factory=list)
     collect_dirs: list[str] = Field(default_factory=list)
+    skip_period_hours: int = 2
     topics: list[str] = Field(default_factory=list)
     sn_file: str | None = ""
     sn_field: str | None = ""
@@ -66,7 +67,9 @@ class DefaultMod(Mod):
         self.log_thread_name = "cos-mod-default-log-listener"
         self.task_thread_name = "cos-mod-task-collector-handler"
         self.file_listener_thread_name = "cos-mod-default-file-listener"
-        self.file_state_handler = FileStateHandler.get_instance(self.conf.ros2_customized_msgs_dirs)
+        self.file_state_handler = FileStateHandler.get_instance(
+            self.conf.skip_period_hours, self.conf.ros2_customized_msgs_dirs
+        )
 
         self.state_dir = DEFAULT_MOD_STATE_DIR
         self.state_dir.mkdir(parents=True, exist_ok=True)
