@@ -15,12 +15,13 @@
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
 from cos.constant import FILE_STATE_PATH
 from cos.core.api import ApiClient
-from cos.mods.common.default.handlers import HANDLERS, HandlerInterface, LogHandler, Ros2Handler
+from cos.mods.common.default.handlers import HANDLERS, HandlerInterface, Ros2Handler
 from cos.utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
@@ -76,24 +77,19 @@ class FileStateHandler:
         self.file_handlers: list[HandlerInterface] = HANDLERS
         Ros2Handler.register_ros2_types(ros2_msg_dirs)
 
-    def __init__(self, ros2_msg_dirs: list[str]):
+    def __init__(self, skip_period_hours: int, ros2_msg_dirs: list[str]):
         if not FileStateHandler._instance:
             with FileStateHandler._lock:
                 if not FileStateHandler._instance:
                     FileStateHandler._instance = self
                     self.state: dict[str, dict] = dict()
                     self.update_lock = threading.Lock()
+                    self.skip_period_hours = skip_period_hours
                     self.__register_file_handlers(ros2_msg_dirs)
                     self.src_dirs = set()
                     self.listen_dirs = set()
                     self.active_topics = set()  # topics that are currently being listened to
                     self.load_state()
-
-                    # Update the log file in the listen dirs as processed on startup
-                    for filename, file_state in self.state.items():
-                        if LogHandler.check_file_path(Path(filename)) and file_state.get("is_listening"):
-                            self.__update_file_state(Path(filename), "processed", True)
-                    self.save_state()
 
     def get_file_handler(self, file_path: Path):
         for handler in self.file_handlers:
@@ -102,11 +98,11 @@ class FileStateHandler:
         return None
 
     @classmethod
-    def get_instance(cls, ros2_msg_dirs=None):
+    def get_instance(cls, skip_period_hours: int, ros2_msg_dirs=None):
         if ros2_msg_dirs is None:
             ros2_msg_dirs = []
         if not cls._instance:
-            cls._instance = cls(ros2_msg_dirs)
+            cls._instance = cls(skip_period_hours, ros2_msg_dirs)
         return cls._instance
 
     def load_state(self, state_path: Path = None):
@@ -161,6 +157,8 @@ class FileStateHandler:
                 self.__del_file_state(file_path)
 
     def update_dirs(self, listen_dirs: set[Path], collect_dirs: set[Path]):
+        _log.info(f"Start updating directories, listen_dirs: {listen_dirs}, collect_dirs: {collect_dirs}")
+
         # Skip directories that user have no read access or do not exist
         listen_dirs = {listen_dir for listen_dir in listen_dirs if can_read_path(str(listen_dir))}
         collect_dirs = {collect_dir for collect_dir in collect_dirs if can_read_path(str(collect_dir))}
@@ -178,8 +176,15 @@ class FileStateHandler:
                 continue
 
             for entry in src_dir.iterdir():
-                handler = self.get_file_handler(entry)
                 file_state = self.__get_file_state(entry)
+
+                # Skip unsupported files
+                if file_state and file_state.get("unsupported"):
+                    # Do not skip unsupported files because they are too old
+                    if not file_state.get("too_old"):
+                        continue
+
+                handler = self.get_file_handler(entry)
                 if not handler:
                     # File is not supported by any handler, mark it as unsupported if not already and skip
                     if not file_state or not file_state.get("unsupported"):
@@ -190,6 +195,18 @@ class FileStateHandler:
                                 "unsupported": True,
                             },
                         )
+                    continue
+
+                # Check if file is last modified within 2 hours, if not, mark it as unsupported and skip
+                if entry.is_file() and entry.stat().st_mtime < time.time() - self.skip_period_hours * 60 * 60:
+                    self.__set_file_state(
+                        entry,
+                        {
+                            "size": handler.get_file_size(entry),
+                            "unsupported": True,
+                            "too_old": True,
+                        },
+                    )
                     continue
 
                 is_listening = src_dir in listen_dirs
@@ -226,6 +243,7 @@ class FileStateHandler:
         self.listen_dirs = listen_dirs
         self.__update_deleted_file_state()
         self.save_state()
+        _log.info("Finished updating directories")
 
     def diagnose(self, api_client: ApiClient, file_path: Path, upload_fn, active_topics: set[str]):
         file_state = self.__get_file_state(file_path)
