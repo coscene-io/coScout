@@ -112,7 +112,7 @@ usage: $0 [OPTIONS]
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
     --skip_verify_cert      Skip verify certificate when download files
-    --use_old_colink        Use old colink version
+    --use_old_coLink        Use old coLink version
 EOF
 }
 
@@ -435,6 +435,7 @@ EOF
       sudo systemctl daemon-reload
 
       echo "Starting coLink service..."
+      sudo systemctl is-active --quiet colink && sudo systemctl stop colink && sudo systemctl disable colink && sudo rm -f /etc/systemd/system/colink.service
       sudo systemctl is-active --quiet virmesh && sudo systemctl stop virmesh && sudo systemctl disable virmesh && sudo rm -f /etc/systemd/system/virmesh.service
       sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink
       sudo systemctl enable coLink
