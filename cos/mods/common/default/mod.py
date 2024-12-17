@@ -251,8 +251,10 @@ class DefaultMod(Mod):
             after_str = after
         else:
             after_str = f"{after}m"
-        start_time_raw = datetime.fromtimestamp(float(trigger_ts)) - _parse_duration_str(before_str)
-        end_time_raw = datetime.fromtimestamp(float(trigger_ts)) + _parse_duration_str(after_str)
+
+        trigger_ts = float(trigger_ts)
+        start_time_raw = datetime.fromtimestamp(trigger_ts) - _parse_duration_str(before_str)
+        end_time_raw = datetime.fromtimestamp(trigger_ts) + _parse_duration_str(after_str)
         start_time = int(start_time_raw.timestamp())
         end_time = int(end_time_raw.timestamp())
 
