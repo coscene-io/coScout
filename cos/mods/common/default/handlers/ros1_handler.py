@@ -56,7 +56,7 @@ class Ros1Handler(BaseModel, HandlerInterface):
                     msg = reader.deserialize(rawdata, connection.msgtype)
                     yield RuleDataItem(
                         topic=connection.topic,
-                        msg=msg,
+                        msg=msg.__dict__,
                         ts=timestamp // 1_000_000_000,
                         msgtype=self.__normalize_msgtype(connection.msgtype),
                     )

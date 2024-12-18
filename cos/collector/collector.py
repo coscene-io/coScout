@@ -165,8 +165,8 @@ class Collector:
 
                 obtain_event_res = self.api.obtain_event(
                     record_name=record_name,
-                    display_name=moment.title if moment.title else record_title,
-                    description=moment.description if moment.description else record_title,
+                    display_name=moment.title,
+                    description=moment.description,
                     customized_fields=moment.metadata,
                     trigger_time=moment.timestamp,
                     duration=moment.duration,

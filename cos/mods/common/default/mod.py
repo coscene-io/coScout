@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import threading
 import time
@@ -33,7 +34,6 @@ from cos.core.api import ApiClient
 from cos.core.exceptions import DeviceNotFound
 from cos.core.models import FileInfo, Moment, RecordCache, Task
 from cos.mods.common.default.file_state_handler import FileStateHandler
-from cos.mods.common.default.remote_rule import RemoteRule
 from cos.mods.common.task.task_handler import TaskHandler
 from cos.utils import flatten
 
@@ -244,9 +244,19 @@ class DefaultMod(Mod):
         white_list,
         after=0,
     ):
-        assert before >= 0 or after >= 0, "before or after must be greater than 0"
-        start_time_raw = datetime.fromtimestamp(trigger_ts) - timedelta(minutes=before)
-        end_time_raw = datetime.fromtimestamp(trigger_ts) + timedelta(minutes=after)
+        if isinstance(before, str):
+            before_str = before
+        else:
+            before_str = f"{before}m"
+
+        if isinstance(after, str):
+            after_str = after
+        else:
+            after_str = f"{after}m"
+
+        trigger_ts = float(trigger_ts)
+        start_time_raw = datetime.fromtimestamp(trigger_ts) - _parse_duration_str(before_str)
+        end_time_raw = datetime.fromtimestamp(trigger_ts) + _parse_duration_str(after_str)
         start_time = int(start_time_raw.timestamp())
         end_time = int(end_time_raw.timestamp())
 
@@ -286,10 +296,11 @@ class DefaultMod(Mod):
         api_client: ApiClient,
         file_state_handler: FileStateHandler,
         upload_fn: partial,
+        conf_topics: set[str],
     ):
         _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
         for file in file_state_handler.get_files(FileStateHandler.state_is_listening_filter()):
-            file_state_handler.diagnose(api_client, Path(file), upload_fn, file_state_handler.active_topics)
+            file_state_handler.diagnose(api_client, Path(file), upload_fn, conf_topics)
 
     def run(self):
         if not self.conf.enabled:
@@ -311,13 +322,6 @@ class DefaultMod(Mod):
 
         if listen_dirs and len(listen_dirs) > 0:
             self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
-
-            # Compute topics in both rules and config
-            self.file_state_handler.active_topics = {
-                topic
-                for topic in RemoteRule(self._api_client).list_topics_in_rules()
-                if topic in [*self.conf.topics, "/external_log"]
-            }
 
             # start file listener
             self.start_file_listener()
@@ -351,6 +355,7 @@ class DefaultMod(Mod):
                     self._api_client,
                     self.file_state_handler,
                     partial(DefaultMod.__upload_impl, state_dir=self.state_dir),
+                    {*self.conf.topics, "/external_log"},
                 ),
                 name=self.file_listener_thread_name,
                 daemon=True,
@@ -430,3 +435,16 @@ class DefaultMod(Mod):
 
     def find_files(self, trigger_time):
         pass
+
+
+def _parse_duration_str(duration_str: str) -> timedelta:
+    """
+    Parse a duration string into a timedelta object
+    duration_str: a string in the format of "(*h)?(*m)?(*s)?"
+    """
+    duration_re = re.compile(r"((?P<hours>\d+)h)?((?P<minutes>\d+)m)?((?P<seconds>\d+)s)?")
+    match = duration_re.match(duration_str)
+    if not match:
+        raise ValueError(f"Invalid duration string: {duration_str}")
+    duration_kwargs = {k: int(v) for k, v in match.groupdict().items() if v is not None}
+    return timedelta(**duration_kwargs)

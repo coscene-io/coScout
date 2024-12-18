@@ -245,7 +245,7 @@ class FileStateHandler:
         self.save_state()
         _log.info("Finished updating directories")
 
-    def diagnose(self, api_client: ApiClient, file_path: Path, upload_fn, active_topics: set[str]):
+    def diagnose(self, api_client: ApiClient, file_path: Path, upload_fn, conf_topics: set[str]):
         file_state = self.__get_file_state(file_path)
         handler = self.get_file_handler(file_path)
         if not handler:
@@ -265,7 +265,7 @@ class FileStateHandler:
         self.__update_file_state(file_path, "processed", True)
         self.__update_file_state(file_path, "ready_to_process", False)
         self.save_state()
-        handler.diagnose(api_client, file_path, upload_fn, active_topics)
+        handler.diagnose(api_client, file_path, upload_fn, conf_topics)
         _log.info(f"Finished processing file {file_path}")
 
     def get_files(self, *filters: Callable[[str, dict], bool]):

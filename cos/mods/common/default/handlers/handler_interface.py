@@ -11,13 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import logging
 from abc import ABC, abstractmethod
 from functools import partial
 from pathlib import Path
 
 from cos.core.api import ApiClient
 from cos.mods.common.default.rule_executor import RuleExecutor
+
+_log = logging.getLogger(__name__)
 
 
 class HandlerInterface(ABC):
@@ -39,11 +41,14 @@ class HandlerInterface(ABC):
         return file_path.stat().st_size
 
     # The following methods are diagnose related
-    def diagnose(self, api_client: ApiClient, source: Path, upload_fn: partial, active_topics: set[str]):
+    def diagnose(self, api_client: ApiClient, source: Path, upload_fn: partial, conf_topics: set[str]):
         """Diagnose the file"""
         executor_name = f"{source.name} Rule Executor"
-        rule_executor = RuleExecutor(executor_name, api_client, self.msg_iterator(source, active_topics), upload_fn)
-        rule_executor.execute()
+        rule_executor = RuleExecutor(executor_name, api_client, upload_fn)
+
+        effective_topics = rule_executor.active_topics & conf_topics
+        _log.info(f"==> Effective topics: {effective_topics}")
+        rule_executor.execute(self.msg_iterator(source, effective_topics))
 
     @abstractmethod
     def msg_iterator(self, file_path: Path, active_topics: set[str]):
