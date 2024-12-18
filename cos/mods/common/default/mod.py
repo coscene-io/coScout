@@ -34,7 +34,6 @@ from cos.core.api import ApiClient
 from cos.core.exceptions import DeviceNotFound
 from cos.core.models import FileInfo, Moment, RecordCache, Task
 from cos.mods.common.default.file_state_handler import FileStateHandler
-from cos.mods.common.default.remote_rule import RemoteRule
 from cos.mods.common.task.task_handler import TaskHandler
 from cos.utils import flatten
 
@@ -297,10 +296,11 @@ class DefaultMod(Mod):
         api_client: ApiClient,
         file_state_handler: FileStateHandler,
         upload_fn: partial,
+        conf_topics: set[str],
     ):
         _log.info(f"==> Search for files in {file_state_handler.src_dirs}")
         for file in file_state_handler.get_files(FileStateHandler.state_is_listening_filter()):
-            file_state_handler.diagnose(api_client, Path(file), upload_fn, file_state_handler.active_topics)
+            file_state_handler.diagnose(api_client, Path(file), upload_fn, conf_topics)
 
     def run(self):
         if not self.conf.enabled:
@@ -322,13 +322,6 @@ class DefaultMod(Mod):
 
         if listen_dirs and len(listen_dirs) > 0:
             self.file_state_handler.update_dirs(listen_dirs, collect_dirs)
-
-            # Compute topics in both rules and config
-            self.file_state_handler.active_topics = {
-                topic
-                for topic in RemoteRule(self._api_client).list_topics_in_rules()
-                if topic in [*self.conf.topics, "/external_log"]
-            }
 
             # start file listener
             self.start_file_listener()
@@ -362,6 +355,7 @@ class DefaultMod(Mod):
                     self._api_client,
                     self.file_state_handler,
                     partial(DefaultMod.__upload_impl, state_dir=self.state_dir),
+                    {*self.conf.topics, "/external_log"},
                 ),
                 name=self.file_listener_thread_name,
                 daemon=True,

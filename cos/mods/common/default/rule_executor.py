@@ -16,7 +16,6 @@ import celpy
 import json
 import logging
 from collections import namedtuple
-from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import partial
 
@@ -31,174 +30,12 @@ from cos.mods.common.default.remote_rule import RemoteRule
 _log = logging.getLogger(__name__)
 
 RuleDataItem = namedtuple("RuleDataItem", "topic msg ts msgtype")
-LogMessageDataItem = namedtuple("LogMessageDataItem", "message")
-
-
-def v2_spec_to_rules(project_rules_spec: dict, upload_fn: Callable, project_name: str):
-    """Convert a v2 rule spec to a list of Rule objects"""
-    rules = []
-    errs = []
-    for rule_idx, rule_spec in enumerate(project_rules_spec.get("rules", [])):
-        conditions = []
-        for condition_spec in rule_spec.get("conditionSpecs", []):
-            if "raw" in condition_spec:
-                conditions.append(condition_spec["raw"])
-            elif "structured" in condition_spec:
-                structured_condition = condition_spec["structured"]
-                sc_type = structured_condition["type"]
-                sc_path = structured_condition["path"]
-                sc_op = structured_condition["op"]
-
-                # change type from api enum to cel type
-                if sc_type == "STRING":
-                    sc_type = "string"
-                elif sc_type == "INT":
-                    sc_type = "int"
-                else:
-                    sc_type = ""
-
-                # change op from api enum to cel operator
-                if sc_op == "CONTAINS":
-                    sc_op = "contains"
-                if sc_op == "EQUAL":
-                    sc_op = "=="
-                else:
-                    sc_op = ""
-
-                if "predefined" in structured_condition:
-                    sc_value = structured_condition["predefined"]
-                elif "userInput" in structured_condition:
-                    # json marshal the string
-                    sc_value = json.dumps(structured_condition["userInput"])
-                else:
-                    sc_value = ""
-
-                # special handle for contains
-                if sc_op == "contains":
-                    conditions.append(
-                        "{c_type}({c_path}).contains({c_type}({c_value}))".format(
-                            c_type=sc_type,
-                            c_path=sc_path,
-                            c_value=sc_value,
-                        )
-                    )
-                else:
-                    conditions.append(
-                        "{c_type}({c_path}) {c_op} {c_type}({c_value})".format(
-                            c_type=sc_type,
-                            c_path=sc_path,
-                            c_op=sc_op,
-                            c_value=sc_value,
-                        )
-                    )
-
-        actions = []
-        for action_spec in rule_spec.get("actionSpecs", []):
-            if "upload" in action_spec:
-                upload_spec = action_spec["upload"]
-                actions.append(
-                    {
-                        "name": "upload",
-                        "kwargs": {
-                            "trigger_ts": """{ts}""",
-                            "before": upload_spec.get("preTrigger"),
-                            "after": upload_spec.get("postTrigger"),
-                            "title": upload_spec.get("title"),
-                            "description": upload_spec.get("description"),
-                            "labels": upload_spec.get("labels"),
-                            "extra_files": upload_spec.get("extraFiles"),
-                            "white_list": upload_spec.get("whiteList"),
-                        },
-                    }
-                )
-
-        cur_rules, cur_errs = validate_rule_spec(
-            {
-                "conditions": conditions,
-                "actions": actions,
-                "scopes": rule_spec.get("scopes", []),
-                "topics": rule_spec.get("activeTopics", []),
-            },
-            {"upload": partial(upload_fn, rule=rule_spec, project_name=project_name)},
-            rule_idx,
-        )
-
-        for rule in cur_rules:
-            # add metadata to the rule
-            rule.metadata = {"project_name": project_name, "original": rule_spec}
-
-            # add raw to the rule
-            rule.metadata["original"]["each"] = [rule.scope]
-
-        rules.extend(cur_rules)
-        errs.extend(cur_errs)
-    return rules, errs
-
-
-def build_engine_from_config(configs, upload_fn=None, api_client: ApiClient = None):
-    v1_rule_list = []
-    v2_rule_list = []
-    active_topics = set()
-    active_topics.add("/external_log")
-    for project_rule_sets in configs:
-        if not project_rule_sets.get("name", "").endswith("/diagnosisRule"):
-            _log.warning("==> Found an invalid project rule set, skipping")
-            continue
-        project_name = project_rule_sets["name"].removesuffix("/diagnosisRule")
-        for project_rule_set in project_rule_sets["rules"]:
-            if not project_rule_set.get("enabled", False):
-                continue
-
-            if project_rule_set.get("version", "") == "v1":
-                validation_result, rules = validate_config_wrapped(
-                    project_rule_set,
-                    {
-                        "upload": lambda rule: partial(upload_fn, project_name=project_name, rule=rule),
-                        "create_moment": lambda _: noop_create_moment,
-                    },
-                    project_name,
-                )
-                if not validation_result["success"]:
-                    _log.error(
-                        f"==> Failed to build rule for {project_name} "
-                        f"{json.dumps(project_rule_set, indent=2, ensure_ascii=False)} "
-                        f"due to {json.dumps(validation_result, indent=2, ensure_ascii=False)}, skipping"
-                    )
-                    continue
-                v1_rule_list += rules
-                for v1_rule in project_rule_set["rules"]:
-                    active_topics.update(v1_rule.get("activeTopics", []))
-
-            elif project_rule_set.get("version", "") == "v2":
-                rules, errs = v2_spec_to_rules(project_rule_set, upload_fn, project_name)
-                if errs:
-                    _log.error(
-                        f"==> Failed to build rule for {project_name} "
-                        f"{json.dumps(project_rule_set, indent=2, ensure_ascii=False)} due to "
-                        f"due to {errs}, skipping"
-                    )
-                    continue
-                v2_rule_list += rules
-                for v2_rule in project_rule_set["rules"]:
-                    active_topics.update(v2_rule.get("activeTopics", []))
-            else:
-                _log.error(
-                    f"==> Found an invalid project rule set version for {project_name} "
-                    f"{json.dumps(project_rule_set, indent=2, ensure_ascii=False)}, skipping"
-                )
-
-    device = api_client.state.load_state().device.get("name", "")
-
-    return CompatibleEngine(v1_rule_list, v2_rule_list, active_topics, api_client, device)
 
 
 class CompatibleEngine:
-    def __init__(
-        self, v1_rules: list[V1Rule], v2_rules: list[Rule], active_topics: set[str], api_client: ApiClient, device: str
-    ):
+    def __init__(self, v1_rules: list[V1Rule], v2_rules: list[Rule], api_client: ApiClient, device: str):
         self.v1_rules = v1_rules
         self.v2_rules = v2_rules
-        self.active_topics = active_topics
         self.api_client = api_client
         self.device = device
 
@@ -207,8 +44,6 @@ class CompatibleEngine:
         Consume a message and evaluate upon all rules
         msg_fn: a factory function that returns a message using msg_fn()
         """
-        if item.topic not in self.active_topics:
-            return
 
         activation_without_scope = {
             "msg": celpy.adapter.json_to_cel(item.msg),
@@ -249,7 +84,7 @@ class CompatibleEngine:
             self.hit_upload(rule.project_name, rule.spec, hit, should_upload)
 
         for rule in self.v2_rules:
-            if item.topic not in rule.topics:
+            if rule.topics and item.topic not in rule.topics:
                 continue
             activation = {**activation_without_scope, "scope": celpy.adapter.json_to_cel(rule.scope)}
             if not all(cond.evaluate(activation) for cond in rule.conditions):
@@ -321,37 +156,208 @@ class CompatibleEngine:
 
 
 class RuleExecutor:
-    def __init__(self, name, api_client: ApiClient, input_stream, upload_fn):
+    def __init__(self, name, api_client: ApiClient, upload_fn):
         self.__name = name
         self.__api_client = api_client
         self.__remote_rule = RemoteRule(api_client)
-        self.__input_stream = input_stream
         self.__upload_fn = upload_fn
+        self.active_topics = set()
+        self.__device = self.__api_client.state.load_state().device.get("name", "")
         self.__configs = None
         self.__engine: CompatibleEngine | None = None
-        self.update_config()
+        self.__update_engine()
 
-    def consume_chunk(self):
+    def execute(self, input_stream):
         _log.info(f"==> {self.__name} consume_chunk started")
         start_time = datetime.now()
         last_item_read_time = start_time
-        for item in self.__input_stream:
+        for item in input_stream:
             # This is to avoid gap in input stream
             if datetime.now() - last_item_read_time > timedelta(seconds=30):
-                self.update_config()
+                self.__update_engine()
             self.__engine.consume_next(item)
             if datetime.now() - start_time > timedelta(minutes=1):
-                self.update_config()
+                self.__update_engine()
                 start_time = datetime.now()
             last_item_read_time = datetime.now()
         _log.info(f"==> {self.__name} consume_chunk ended")
 
-    def update_config(self):
+    def __update_engine(self):
         new_configs = self.__remote_rule.list_device_diagnosis_rules()
         if new_configs == self.__configs:
             return
         self.__configs = new_configs
-        self.__engine = build_engine_from_config(self.__configs, self.__upload_fn, self.__api_client)
 
-    def execute(self):
-        self.consume_chunk()
+        v1_rule_list = []
+        v2_rule_list = []
+        active_topics = set()
+        active_topics.add("/external_log")
+        all_rules_have_topics = True
+        for project_rule_sets in self.__configs:
+            if not project_rule_sets.get("name", "").endswith("/diagnosisRule"):
+                _log.warning("==> Found an invalid project rule set, skipping")
+                continue
+            project_name = project_rule_sets["name"].removesuffix("/diagnosisRule")
+            for project_rule_set in project_rule_sets["rules"]:
+                if not project_rule_set.get("enabled", False):
+                    continue
+
+                if project_rule_set.get("version", "") == "v1":
+                    validation_result, rules = validate_config_wrapped(
+                        project_rule_set,
+                        {
+                            "upload": lambda rule: partial(self.__upload_fn, project_name=project_name, rule=rule),
+                            "create_moment": lambda _: noop_create_moment,
+                        },
+                        project_name,
+                    )
+                    if not validation_result["success"]:
+                        _log.error(
+                            f"==> Failed to build rule for {project_name} "
+                            f"{json.dumps(project_rule_set, indent=2, ensure_ascii=False)} "
+                            f"due to {json.dumps(validation_result, indent=2, ensure_ascii=False)}, skipping"
+                        )
+                        continue
+                    v1_rule_list += rules
+                    if all_rules_have_topics:
+                        for v1_rule in project_rule_set.get("rules", []):
+                            if not v1_rule.get("activeTopics", []):
+                                all_rules_have_topics = False
+                                _log.warning(f"no topics found in some rules of {project_name}, will diagnose all topics")
+                                active_topics.clear()
+                                break
+                            else:
+                                active_topics.update(v1_rule.get("activeTopics", []))
+
+                elif project_rule_set.get("version", "") == "v2":
+                    rules, errs = self.__v2_spec_to_rules(project_rule_set, project_name)
+                    if errs:
+                        _log.error(
+                            f"==> Failed to build rule for {project_name} "
+                            f"{json.dumps(project_rule_set, indent=2, ensure_ascii=False)} due to "
+                            f"due to {errs}, skipping"
+                        )
+                        continue
+                    v2_rule_list += rules
+                    if all_rules_have_topics:
+                        for v2_rule in rules:
+                            if not v2_rule.topics:
+                                _log.warning(f"no topics found in some rules of {project_name}, will diagnose all topics")
+                                all_rules_have_topics = False
+                                active_topics.clear()
+                                break
+                            else:
+                                active_topics.update(v2_rule.topics)
+
+                else:
+                    _log.error(
+                        f"==> Found an invalid project rule set version for {project_name} "
+                        f"{json.dumps(project_rule_set, indent=2, ensure_ascii=False)}, skipping"
+                    )
+
+        self.active_topics = active_topics
+        self.__engine = CompatibleEngine(v1_rule_list, v2_rule_list, self.__api_client, self.__device)
+
+    def __v2_spec_to_rules(self, project_rules_spec: dict, project_name: str):
+        """Convert a v2 rule spec to a list of Rule objects"""
+        rules = []
+        errs = []
+        for rule_idx, rule_spec in enumerate(project_rules_spec.get("rules", [])):
+            conditions = []
+            for condition_spec in rule_spec.get("conditionSpecs", []):
+                if "raw" in condition_spec:
+                    conditions.append(condition_spec["raw"])
+                elif "structured" in condition_spec:
+                    structured_condition = condition_spec["structured"]
+                    sc_type = structured_condition["type"]
+                    sc_path = structured_condition["path"]
+                    sc_op = structured_condition["op"]
+
+                    # change type from api enum to cel type
+                    if sc_type == "STRING":
+                        sc_type = "string"
+                    elif sc_type == "INT":
+                        sc_type = "int"
+                    else:
+                        sc_type = ""
+
+                    # change op from api enum to cel operator
+                    if sc_op == "CONTAINS":
+                        sc_op = "contains"
+                    if sc_op == "EQUAL":
+                        sc_op = "=="
+                    else:
+                        sc_op = ""
+
+                    if "predefined" in structured_condition:
+                        sc_value = structured_condition["predefined"]
+                    elif "userInput" in structured_condition:
+                        # json marshal the string
+                        sc_value = json.dumps(structured_condition["userInput"])
+                    else:
+                        sc_value = ""
+
+                    # special handle for contains
+                    if sc_op == "contains":
+                        conditions.append(
+                            "{c_type}({c_path}).contains({c_type}({c_value}))".format(
+                                c_type=sc_type,
+                                c_path=sc_path,
+                                c_value=sc_value,
+                            )
+                        )
+                    else:
+                        conditions.append(
+                            "{c_type}({c_path}) {c_op} {c_type}({c_value})".format(
+                                c_type=sc_type,
+                                c_path=sc_path,
+                                c_op=sc_op,
+                                c_value=sc_value,
+                            )
+                        )
+
+            actions = []
+            for action_spec in rule_spec.get("actionSpecs", []):
+                if "upload" in action_spec:
+                    upload_spec = action_spec["upload"]
+                    actions.append(
+                        {
+                            "name": "upload",
+                            "kwargs": {
+                                "trigger_ts": """{ts}""",
+                                "before": upload_spec.get("preTrigger"),
+                                "after": upload_spec.get("postTrigger"),
+                                "title": upload_spec.get("title"),
+                                "description": upload_spec.get("description"),
+                                "labels": upload_spec.get("labels"),
+                                "extra_files": upload_spec.get("extraFiles"),
+                                "white_list": upload_spec.get("whiteList"),
+                            },
+                        }
+                    )
+
+            # Skip rules without upload action
+            if not actions:
+                continue
+
+            cur_rules, cur_errs = validate_rule_spec(
+                {
+                    "conditions": conditions,
+                    "actions": actions,
+                    "scopes": rule_spec.get("scopes", []),
+                    "topics": rule_spec.get("activeTopics", []),
+                },
+                {"upload": partial(self.__upload_fn, rule=rule_spec, project_name=project_name)},
+                rule_idx,
+            )
+
+            for rule in cur_rules:
+                # add metadata to the rule
+                rule.metadata = {"project_name": project_name, "original": rule_spec}
+
+                # add raw to the rule
+                rule.metadata["original"]["each"] = [rule.scope]
+
+            rules.extend(cur_rules)
+            errs.extend(cur_errs)
+        return rules, errs
