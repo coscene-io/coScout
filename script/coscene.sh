@@ -89,7 +89,7 @@ TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_AR
 
 # cgroup path
 GROUP_NAME="cos_cpu_limited"
-CPU_PERCENT=30
+CPU_PERCENT=15
 CGROUP_PATH="/sys/fs/cgroup/cpu"
 
 help() {
@@ -313,34 +313,38 @@ else
   fi
 fi
 
-# SN_FILE and SERIAL_NUM all empty, exit
-if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
-  echo "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
-  exit 1
-fi
+# if mod is default, check
+if [[ $MOD == "default" ]]; then
 
-# check sn_file and sn_field
-# Check if SN_FILE is specified
-if [[ -n $SN_FILE ]]; then
-  # Check if SN_FILE has valid extension
-  valid_extensions=(.txt .json .yaml .yml)
-  extension="${SN_FILE##*.}"
-  if [[ ! " ${valid_extensions[*]} " =~ $extension ]]; then
-    echo "ERROR: sn file has an invalid extension. Only .txt, .json, .yaml, .yml extensions are allowed. Exiting."
+  # SN_FILE and SERIAL_NUM all empty, exit
+  if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
+    echo "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
     exit 1
   fi
 
-  # Check if SN_FILE exists
-  if [[ ! -f $SN_FILE ]]; then
-    echo "ERROR: sn file does not exist. Exiting."
-    exit 1
-  fi
+  # check sn_file and sn_field
+  # Check if SN_FILE is specified
+  if [[ -n $SN_FILE ]]; then
+    # Check if SN_FILE has valid extension
+    valid_extensions=(.txt .json .yaml .yml)
+    extension="${SN_FILE##*.}"
+    if [[ ! " ${valid_extensions[*]} " =~ $extension ]]; then
+      echo "ERROR: sn file has an invalid extension. Only .txt, .json, .yaml, .yml extensions are allowed. Exiting."
+      exit 1
+    fi
 
-  # Check if extension is not .txt and SN_FIELD is empty
-  echo "extension is $extension"
-  if [[ $extension != "txt" && -z $SN_FIELD ]]; then
-    echo "ERROR: --sn_field is not specified when sn file exist. Exiting."
-    exit 1
+    # Check if SN_FILE exists
+    if [[ ! -f $SN_FILE ]]; then
+      echo "ERROR: sn file does not exist. Exiting."
+      exit 1
+    fi
+
+    # Check if extension is not .txt and SN_FIELD is empty
+    echo "extension is $extension"
+    if [[ $extension != "txt" && -z $SN_FIELD ]]; then
+      echo "ERROR: --sn_field is not specified when sn file exist. Exiting."
+      exit 1
+    fi
   fi
 fi
 
@@ -757,6 +761,9 @@ EOF
     else
       echo "$SERVICE_NAME is not running."
     fi
+
+    echo "reload upstart configuration..."
+    sudo initctl reload-configuration
     sudo initctl start $SERVICE_NAME
 
     echo "Installation completed successfully 🎉, you can use 'tail -f /var/log/upstart/cos.log' to check the logs."
