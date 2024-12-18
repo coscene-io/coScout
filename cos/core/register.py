@@ -38,8 +38,11 @@ class Register:
     def run(self):
         while True:
             raw_device = RawDeviceCache().load_state().dict()
-            pubkey = self._get_colink_key()
-            is_authorized = self.api_client.register_and_authorize_device(**raw_device, tags={"colink_pubkey": pubkey})
+            colink_pubkey = self._get_colink_key()
+            virmesh_pubkey = self._get_virmesh_key()
+            is_authorized = self.api_client.register_and_authorize_device(
+                **raw_device, tags={"colink_pubkey": colink_pubkey, "virmesh_pubkey": virmesh_pubkey}
+            )
             if is_authorized:
                 self.api_client = get_client(self.api_conf)
                 self.setup_cos_version()
@@ -84,19 +87,30 @@ class Register:
             _log.warning("device name not found, skipping")
             return
 
-        pubkey = self._get_colink_key()
-        if not pubkey:
+        colink_pubkey = self._get_colink_key()
+        virmesh_pubkey = self._get_virmesh_key()
+        if not colink_pubkey and not virmesh_pubkey:
             _log.warning("coLink pubkey not found, skipping")
             return
 
         tags = api_state.device.get("tags", {})
         colink_tag = tags.get("colink_pubkey", None)
-        if colink_tag and (colink_tag == pubkey):
-            _log.info("coLink pubkey already exists, skipping")
-            return
+        virmesh_tag = tags.get("virmesh_pubkey", None)
+        if colink_tag and virmesh_tag:
+            if (colink_tag == colink_pubkey) and (virmesh_tag == virmesh_pubkey):
+                _log.info("coLink pubkey already exists, skipping")
+                return
+        else:
+            if colink_tag and (colink_tag == colink_pubkey):
+                _log.info("coLink pubkey already exists, skipping")
+                return
+            if virmesh_tag and (virmesh_tag == virmesh_pubkey):
+                _log.info("virmesh pubkey already exists, skipping")
+                return
 
         new_tags = tags.copy()
-        new_tags["colink_pubkey"] = pubkey
+        new_tags["colink_pubkey"] = colink_pubkey
+        new_tags["virmesh_pubkey"] = virmesh_pubkey
 
         self.api_client.update_device_tags(device["name"], new_tags)
         _log.info("coLink pubkey added for device %s", device["name"])
@@ -115,6 +129,20 @@ class Register:
         with pubkey_file.open("r", encoding="utf8") as fp:
             pubkey = fp.read()
             pubkey = pubkey.removeprefix("colink").strip()
+            if not pubkey:
+                _log.warning("coLink pubkey is empty, skipping")
+                return ""
+            return pubkey
+
+    def _get_virmesh_key(self) -> str:
+        pubkey_file = Path("/etc/virmesh.pub")
+        if not pubkey_file.exists():
+            _log.warning("coLink pubkey file not found, skipping")
+            return ""
+
+        with pubkey_file.open("r", encoding="utf8") as fp:
+            pubkey = fp.read()
+            pubkey = pubkey.removeprefix("virmesh").strip()
             if not pubkey:
                 _log.warning("coLink pubkey is empty, skipping")
                 return ""
