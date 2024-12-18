@@ -391,7 +391,7 @@ else
   if [[ -n $USE_LOCAL ]]; then
     mv -f "$TEMP_DIR/cos_binaries/colink/colink-${MESH_ARCH}" "$TEMP_DIR"/coLink
   else
-    if [[ -n $USE_OLD_COLINK ]]; then
+    if [[ $USE_OLD_COLINK -eq 1 ]]; then
       download_file "$TEMP_DIR"/coLink $VIRMESH_DOWNLOAD_URL $SKIP_VERIFY_CERT
     else
       download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
