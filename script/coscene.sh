@@ -237,7 +237,7 @@ while test $# -gt 0; do
     SKIP_VERIFY_CERT=1
     shift # past argument
     ;;
-  --use_old_colink)
+  --use_old_coLink)
     USE_OLD_COLINK=1
     shift # past argument
     ;;
