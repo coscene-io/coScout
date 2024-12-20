@@ -2,3 +2,6 @@
 /.env/
 /.tmp/
 /cmd/apiary/apiary
+
+.idea/
+.vscode/

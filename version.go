@@ -1,4 +1,4 @@
-package cos_agent
+package coscout
 
 // Version information set by link flags during build. We fall back to these sane
 // default values when we build outside the Makefile context (e.g. go build or go test).

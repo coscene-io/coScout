@@ -1,7 +1,7 @@
 package commands
 
 import (
-	cosagent "github.com/coscene-io/cos-agent"
+	cosagent "github.com/coscene-io/coscout"
 	"github.com/spf13/cobra"
 )
 

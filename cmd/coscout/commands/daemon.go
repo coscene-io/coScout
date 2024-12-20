@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/coscene-io/cos-agent/internal/api"
-	"github.com/coscene-io/cos-agent/internal/config"
-	"github.com/coscene-io/cos-agent/internal/register"
-	"github.com/coscene-io/cos-agent/internal/storage"
+	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/register"
+	"github.com/coscene-io/coscout/internal/storage"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +19,7 @@ import (
 func NewDaemonCommand(cfgPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Run cos-agent as a daemon",
+		Short: "Run coScout as a daemon",
 		Run: func(cmd *cobra.Command, args []string) {
 			storageDB := storage.NewBoltDB(getDBPath())
 			confManager := config.InitConfManager(*cfgPath, &storageDB)

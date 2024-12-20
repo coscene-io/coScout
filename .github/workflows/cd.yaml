@@ -11,7 +11,7 @@ jobs:
   image-push:
     uses: coscene-io/cicd-templates/.github/workflows/image-push-go.yml@main
     with:
-      project: cos-agent
+      project: coscout
     secrets: inherit
 
   upgrade-server:
@@ -19,5 +19,5 @@ jobs:
       - image-push
     uses: coscene-io/cicd-templates/.github/workflows/sub-chart-upgrade.yml@main
     with:
-      deployment-name: coscene-cos-agent
+      deployment-name: coscene-coscout
     secrets: inherit

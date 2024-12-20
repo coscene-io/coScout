@@ -11,9 +11,9 @@ import (
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	openDpsV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
 	"connectrpc.com/connect"
-	"github.com/coscene-io/cos-agent/internal/config"
-	"github.com/coscene-io/cos-agent/internal/storage"
-	"github.com/coscene-io/cos-agent/pkg/constant"
+	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/coscene-io/coscout/pkg/constant"
 	log "github.com/sirupsen/logrus"
 )
 

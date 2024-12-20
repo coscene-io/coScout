@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/coscene-io/cos-agent/cmd/cos-agent/commands"
+	"github.com/coscene-io/coscout/cmd/coscout/commands"
 	log "github.com/sirupsen/logrus"
 )
 

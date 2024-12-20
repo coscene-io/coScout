@@ -13,7 +13,7 @@ build:
           gitCommit:
             ignoreChanges: true
   artifacts:
-    - image: coseus.azurecr.io/cos-agent
+    - image: coseus.azurecr.io/coscout
       custom:
         buildCommand: docker buildx build --file Dockerfile.cos --secret id=netrc,src=/home/runner/.netrc --tag $IMAGE --push $BUILD_CONTEXT
         dependencies:

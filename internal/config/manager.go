@@ -3,8 +3,8 @@ package config
 import (
 	"strings"
 
-	"github.com/coscene-io/cos-agent/internal/storage"
-	"github.com/coscene-io/cos-agent/pkg/utils"
+	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/coscene-io/x/conf"
 	log "github.com/sirupsen/logrus"
 )
@@ -32,7 +32,7 @@ func (c ConfManager) LoadOnce() *AppConfig {
 		log.Fatalf("unable to load cos config: %v", err)
 	}
 
-	for _, f := range appConf.ConfManager.Import {
+	for _, f := range appConf.Import {
 		if !strings.HasPrefix(f, LocalFilePrefix) {
 			continue
 		}

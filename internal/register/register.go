@@ -1,15 +1,16 @@
 package register
 
 import (
+	"errors"
 	"strconv"
 	"time"
 
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
-	"github.com/coscene-io/cos-agent/internal/api"
-	"github.com/coscene-io/cos-agent/internal/config"
-	"github.com/coscene-io/cos-agent/internal/storage"
-	"github.com/coscene-io/cos-agent/pkg/constant"
+	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/coscene-io/coscout/pkg/constant"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -19,15 +20,14 @@ type ModRegister interface {
 	GetDevice() *openDpsV1alpha1Resource.Device
 }
 
-func NewModRegister(conf config.RegisterConfig) ModRegister {
+func NewModRegister(conf config.RegisterConfig) (ModRegister, error) {
 	switch conf.Provider {
-	case constant.RegisterProviderAgi:
-		return NewAgiModRegister(conf.Conf)
 	case constant.RegisterProviderFile:
-		return NewFileModRegister(conf.Conf)
+		return NewFileModRegister(conf.Conf), nil
 	default:
-		return NewAutoModRegister(conf.Conf)
+		log.Errorf("Invalid register provider: %s", conf.Provider)
 	}
+	return nil, errors.New("invalid register provider")
 }
 
 type DeviceStatusResponse struct {
@@ -54,7 +54,18 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 		device := r.getDeviceInfo()
 		// If device is not registered, register it
 		if device == nil || device.GetName() == "" {
-			isSucceed, localDevice := r.registerDevice(NewModRegister(r.config.Register).GetDevice())
+			modRegister, err := NewModRegister(r.config.Register)
+			if err != nil {
+				channel <- DeviceStatusResponse{
+					Authorized: false,
+					Exist:      false,
+				}
+
+				time.Sleep(60 * time.Second)
+				continue
+			}
+
+			isSucceed, localDevice := r.registerDevice(modRegister.GetDevice())
 			if !isSucceed {
 				channel <- DeviceStatusResponse{
 					Authorized: false,
@@ -204,13 +215,13 @@ func (r *Register) getRemoteDeviceStatus(device string) (exist bool, state openD
 }
 
 func (r *Register) exchangeAuthToken(device string) (isSucceed bool) {
-	bytes, err := r.storage.Get([]byte(constant.DeviceAuthKey), []byte(constant.DeviceAuthExchangeCodeKey))
+	exchangeCodeBytes, err := r.storage.Get([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExchangeCodeKey))
 	if err != nil {
 		log.Warnf("unable to get device auth token: %v", err)
 		return false
 	}
 
-	token, expireTime, err := r.reqClient.ExchangeDeviceAuthToken(device, string(bytes))
+	token, expireTime, err := r.reqClient.ExchangeDeviceAuthToken(device, string(exchangeCodeBytes))
 	if err != nil {
 		log.Warnf("unable to exchange device auth token: %v", err)
 		return false
