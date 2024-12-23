@@ -57,7 +57,7 @@ class Ros1Handler(BaseModel, HandlerInterface):
                     yield RuleDataItem(
                         topic=connection.topic,
                         msg=msg.__dict__,
-                        ts=timestamp // 1_000_000_000,
+                        ts=timestamp / 1_000_000_000,
                         msgtype=self.__normalize_msgtype(connection.msgtype),
                     )
                 except Exception:

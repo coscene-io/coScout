@@ -61,7 +61,7 @@ class McapHandler(BaseModel, HandlerInterface):
                 topics=active_topics, log_time_order=True
             ):
                 yield RuleDataItem(
-                    topic=channel.topic, msg=decoded_msg.__dict__, ts=message.log_time // 1_000_000_000, msgtype=schema.name
+                    topic=channel.topic, msg=decoded_msg.__dict__, ts=message.log_time / 1_000_000_000, msgtype=schema.name
                 )
 
 

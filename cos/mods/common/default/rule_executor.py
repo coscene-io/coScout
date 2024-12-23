@@ -87,7 +87,9 @@ class CompatibleEngine:
             if rule.topics and item.topic not in rule.topics:
                 continue
             activation = {**activation_without_scope, "scope": celpy.adapter.json_to_cel(rule.scope)}
-            if not all(cond.evaluate(activation) for cond in rule.conditions):
+
+            _log.info(f"==> Evaluating rule with debounce time {rule.debounce_time}")
+            if not rule.eval_conditions(activation, item.ts):
                 continue
 
             should_upload = self.should_upload(
@@ -344,8 +346,9 @@ class RuleExecutor:
                 {
                     "conditions": conditions,
                     "actions": actions,
-                    "scopes": rule_spec.get("scopes", []),
+                    "scopes": rule_spec.get("each", []),
                     "topics": rule_spec.get("activeTopics", []),
+                    "condition_debounce": rule_spec.get("conditionDebounce", 0),
                 },
                 {"upload": partial(self.__upload_fn, rule=rule_spec, project_name=project_name)},
                 rule_idx,

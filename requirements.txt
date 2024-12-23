@@ -14,7 +14,7 @@ mcap-protobuf-support~=0.5.1
 mcap-ros1-support~=0.7.1
 mcap-ros2-support~=0.5.3
 cel-python==0.1.5
-cos-ruleengine==0.1.38
+cos-ruleengine==0.1.39
 chardet~=5.2.0
 pygtail~=0.14.0
 psutil~=5.9.8
