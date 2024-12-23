@@ -296,7 +296,7 @@ if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
 fi
 
 # check colink endpoint and network
-if [[ -n $USE_OLD_COLINK ]]; then
+if [[ $USE_OLD_COLINK -eq 1 ]]; then
   echo "Use old colink version, skip colink endpoint and network check."
   if [[ -z "$COLINK_ENDPOINT" ]]; then
     echo "ERROR: COLINK_ENDPOINT is empty."
