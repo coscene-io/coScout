@@ -95,7 +95,6 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
-		log.Infof("exist: %v, state: %v", exist, state)
 
 		if !exist {
 			channel <- DeviceStatusResponse{
@@ -164,6 +163,10 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 }
 
 func (r *Register) registerDevice(device *openDpsV1alpha1Resource.Device) (isSucceed bool, d *openDpsV1alpha1Resource.Device) {
+	if device == nil {
+		return false, &openDpsV1alpha1Resource.Device{}
+	}
+
 	remoteDevice, exchangeCode, err := r.reqClient.RegisterDevice(device, r.config.Api.OrgSlug, r.config.Api.ProjectSlug)
 	if err != nil {
 		log.Warnf("unable to register device: %v", err)
