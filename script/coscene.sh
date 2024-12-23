@@ -74,13 +74,17 @@ REMOVE_CONFIG=0
 MOD="default"
 SN_FILE=""
 SN_FIELD=""
+COLINK_NETWORK=""
 SERIAL_NUM=""
 USE_32BIT=0
 SKIP_VERIFY_CERT=0
-
 COLINK_ENDPOINT=""
+USE_OLD_COLINK=0
+
+COLINK_VERSION=1.0.0
 ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
-COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
+COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/colink/v${COLINK_VERSION}/colink-${MESH_ARCH}
+VIRMESH_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/virmesh/v0.2.9/virmesh-${MESH_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${MESH_ARCH}.tar.gz
 
 # cgroup path
@@ -96,17 +100,19 @@ usage: $0 [OPTIONS]
     --server_url            Api server url, e.g. https://openapi.coscene.cn
     --project_slug          The slug of the project to upload to
     --org_slug              The slug of the organization device belongs to, project_slug or org_slug should be provided
+    --remove_config         Remove all config files, current device will be treated as a new device
     --beta                  Use beta version for cos
     --use_local             Use local binary file zip path e.g. /xx/path/xx.zip
     --disable_service       Disable systemd or upstart service installation
     --mod                   Select the mod to install - task, default or other custom mod (default is 'default')
-    --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
     --serial_num            The serial number of the device, will skip sn_field and sn_file if provided
-    --remove_config         Remove all config files, current device will be treated as a new device.
+    --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
+    --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
     --skip_verify_cert      Skip verify certificate when download files
+    --use_old_coLink        Use old coLink version
 EOF
 }
 
@@ -219,12 +225,20 @@ while test $# -gt 0; do
     REMOVE_CONFIG=1
     shift
     ;;
+  --coLink_network=*)
+    COLINK_NETWORK="${1#*=}"
+    shift
+    ;;
   --use_32bit)
     USE_32BIT=1
     shift # past argument
     ;;
   --skip_verify_cert)
     SKIP_VERIFY_CERT=1
+    shift # past argument
+    ;;
+  --use_old_coLink)
+    USE_OLD_COLINK=1
     shift # past argument
     ;;
   *)
@@ -258,6 +272,7 @@ fi
 echo "User home directory: $CUR_USER_HOME"
 
 # get user input
+echo ""
 get_user_input SERVER_URL "please input server_url: " "${SERVER_URL}"
 echo "server_url is ${SERVER_URL}"
 echo "org_slug is ${ORG_SLUG}"
@@ -274,13 +289,32 @@ if [[ -z $ORG_SLUG && -z $PROJECT_SLUG ]]; then
   exit 1
 fi
 
-# if mod is default, check
-if [[ $MOD == "default" ]]; then
-  # Check if both ORG_SLUG and PROJECT_SLUG are not empty
-  if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
-    echo "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
+# Check if both ORG_SLUG and PROJECT_SLUG are not empty
+if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
+  echo "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
+  exit 1
+fi
+
+# check colink endpoint and network
+if [[ -n $USE_OLD_COLINK ]]; then
+  echo "Use old colink version, skip colink endpoint and network check."
+  if [[ -z "$COLINK_ENDPOINT" ]]; then
+    echo "ERROR: COLINK_ENDPOINT is empty."
     exit 1
   fi
+else
+  if [[ -z "$COLINK_ENDPOINT" && -z "$COLINK_NETWORK" ]]; then
+    echo "Both COLINK_ENDPOINT and COLINK_NETWORK are empty."
+  elif [[ -n "$COLINK_ENDPOINT" && -n "$COLINK_NETWORK" ]]; then
+    echo "Both COLINK_ENDPOINT and COLINK_NETWORK are not empty."
+  else
+    echo "ERROR: coLink_endpoint and coLink_network must either both be empty or both be not empty."
+    exit 1
+  fi
+fi
+
+# if mod is default, check
+if [[ $MOD == "default" ]]; then
 
   # SN_FILE and SERIAL_NUM all empty, exit
   if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
@@ -355,9 +389,13 @@ else
   echo "Downloading new coLink binary..."
 
   if [[ -n $USE_LOCAL ]]; then
-    mv -f "$TEMP_DIR/cos_binaries/virmesh/virmesh-${MESH_ARCH}" "$TEMP_DIR"/coLink
+    mv -f "$TEMP_DIR/cos_binaries/colink/colink-${MESH_ARCH}" "$TEMP_DIR"/coLink
   else
-    download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    if [[ $USE_OLD_COLINK -eq 1 ]]; then
+      download_file "$TEMP_DIR"/coLink $VIRMESH_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    else
+      download_file "$TEMP_DIR"/coLink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    fi
   fi
 
   chmod +x "$TEMP_DIR"/coLink
@@ -391,7 +429,9 @@ Description=coLink Client Daemon
 
 [Service]
 WorkingDirectory=/etc
-ExecStart=/usr/local/bin/coLink --endpoint $COLINK_ENDPOINT --allow-ssh
+ExecStart=/usr/local/bin/coLink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
+Restart=always
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target
@@ -399,6 +439,7 @@ EOF
       sudo systemctl daemon-reload
 
       echo "Starting coLink service..."
+      sudo systemctl is-active --quiet colink && sudo systemctl stop colink && sudo systemctl disable colink && sudo rm -f /etc/systemd/system/colink.service
       sudo systemctl is-active --quiet virmesh && sudo systemctl stop virmesh && sudo systemctl disable virmesh && sudo rm -f /etc/systemd/system/virmesh.service
       sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink
       sudo systemctl enable coLink
@@ -425,11 +466,12 @@ respawn limit 4 30
 normal exit 0
 
 env COLINK_ENDPOINT=$COLINK_ENDPOINT
+env COLINK_NETWORK=$COLINK_NETWORK
 script
     # Change to the appropriate working directory
     cd /etc
     # Start the daemon
-    exec /usr/local/bin/coLink --endpoint $COLINK_ENDPOINT --allow-ssh
+    exec /usr/local/bin/coLink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
 end script
 EOF
 
