@@ -64,7 +64,7 @@ class LogHandler(BaseModel, HandlerInterface):
                     "file": file_path.name,
                     "level": LogHandler._get_log_level(stamped_log.line),
                 },
-                ts=int(stamped_log.timestamp.timestamp()),
+                ts=stamped_log.timestamp.timestamp(),
                 msgtype="foxglove.Log",
             )
 

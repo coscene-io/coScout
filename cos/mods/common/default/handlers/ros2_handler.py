@@ -82,7 +82,7 @@ class Ros2Handler(BaseModel, HandlerInterface):
                 try:
                     msg = deserialize_cdr(rawdata, connection.msgtype)
                     yield RuleDataItem(
-                        topic=connection.topic, msg=msg, ts=timestamp // 1_000_000_000, msgtype=connection.msgtype
+                        topic=connection.topic, msg=msg.__dict__, ts=timestamp / 1_000_000_000, msgtype=connection.msgtype
                     )
                 except Exception:
                     if connection.topic not in skipped_topics:
