@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"google.golang.org/protobuf/encoding/protojson"
 	"net/http"
 	"time"
 
@@ -20,14 +22,17 @@ import (
 type RequestClient struct {
 	storage   storage.Storage
 	deviceCli openDpsV1alpha1Connect.DeviceServiceClient
+	configCli openDpsV1alpha1Connect.ConfigMapServiceClient
 }
 
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *RequestClient {
 	httpClient := http.DefaultClient
 	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL)
+	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL)
 
 	return &RequestClient{
 		deviceCli: deviceClient,
+		configCli: configClient,
 		storage:   storage,
 	}
 }
@@ -118,11 +123,62 @@ func (r *RequestClient) GetDevice(name string) (*openDpsV1alpha1Resource.Device,
 	return apiRes.Msg, nil
 }
 
+func (r *RequestClient) GetConfigMapWithCache(name string) (*openDpsV1alpha1Resource.ConfigMap, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	configMap := openDpsV1alpha1Resource.ConfigMap{}
+	configStr, err := r.storage.Get([]byte(constant.DeviceRemoteCacheBucket), []byte(name))
+	if err == nil && len(configStr) > 0 {
+		err = protojson.Unmarshal(configStr, &configMap)
+		if err != nil {
+			log.Errorf("unable to unmarshal config map from cache: %v", err)
+		}
+	}
+
+	metadataRequest := openDpsV1alpha1Service.GetConfigMapMetadataRequest{
+		Name: name,
+	}
+	metadataApiReq := connect.NewRequest(&metadataRequest)
+	metadataApiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+	metadata, err := r.configCli.GetConfigMapMetadata(ctx, metadataApiReq)
+	if err != nil {
+		log.Errorf("unable to get config map metadata: %v", err)
+		return &configMap, nil
+	}
+
+	if configMap.GetMetadata() != nil && (configMap.GetMetadata().CurrentVersion == metadata.Msg.GetCurrentVersion()) {
+		return &configMap, nil
+	}
+
+	req := openDpsV1alpha1Service.GetConfigMapRequest{
+		Name: name,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.configCli.GetConfigMap(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to get config map: %v", err)
+		return &configMap, nil
+	}
+	bytes, err := protojson.Marshal(apiRes.Msg)
+	if err != nil {
+		log.Errorf("unable to marshal config map: %v", err)
+		return apiRes.Msg, nil
+	}
+	err = r.storage.Put([]byte(constant.DeviceRemoteCacheBucket), []byte(name), bytes)
+	if err != nil {
+		log.Errorf("unable to put config map to cache: %v", err)
+	}
+	return apiRes.Msg, nil
+}
+
 func (r *RequestClient) getAuthToken() string {
 	bytes, err := r.storage.Get([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthKey))
 	if err != nil {
 		log.Errorf("unable to get auth token: %v", err)
 		return ""
 	}
-	return string(bytes)
+	return constant.BasicAuthPrefix + " " + base64.StdEncoding.EncodeToString([]byte(constant.BasicAuthUsername+":"+string(bytes)))
 }

@@ -15,6 +15,10 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
+const (
+	deviceAuthCheckInterval = 60 * time.Second
+)
+
 type ModRegister interface {
 	// GetDevice returns the device information for different providers
 	GetDevice() *openDpsV1alpha1Resource.Device
@@ -61,7 +65,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 					Exist:      false,
 				}
 
-				time.Sleep(60 * time.Second)
+				time.Sleep(deviceAuthCheckInterval)
 				continue
 			}
 
@@ -72,23 +76,13 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 					Exist:      false,
 				}
 
-				time.Sleep(60 * time.Second)
+				time.Sleep(deviceAuthCheckInterval)
 				continue
 			}
 			device = localDevice
 		}
 
-		// Check device auth token
-		valid := r.checkAuthToken()
-		if valid {
-			channel <- DeviceStatusResponse{
-				Authorized: true,
-				Exist:      true,
-			}
-
-			time.Sleep(60 * time.Second)
-			continue
-		}
+		log.Infof("Current device serial number: %s", device.GetSerialNumber())
 
 		// check device status
 		exist, state, err := r.getRemoteDeviceStatus(device.GetName())
@@ -98,9 +92,10 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 				Exist:      false,
 			}
 
-			time.Sleep(60 * time.Second)
+			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
+		log.Infof("exist: %v, state: %v", exist, state)
 
 		if !exist {
 			channel <- DeviceStatusResponse{
@@ -109,7 +104,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s already deleted.", device.GetSerialNumber())
-			time.Sleep(5 * time.Minute)
+			time.Sleep(deviceAuthCheckInterval * 10)
 			continue
 		}
 
@@ -120,7 +115,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s already be rejected", device.GetSerialNumber())
-			time.Sleep(1 * time.Minute)
+			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
 
@@ -131,12 +126,24 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s is pending", device.GetSerialNumber())
-			time.Sleep(1 * time.Minute)
+			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
 
 		// If device is approved, exchange auth token
 		if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_APPROVED {
+			// Check device auth token
+			valid := r.checkAuthToken()
+			if valid {
+				channel <- DeviceStatusResponse{
+					Authorized: true,
+					Exist:      true,
+				}
+
+				time.Sleep(deviceAuthCheckInterval)
+				continue
+			}
+
 			isSucceed := r.exchangeAuthToken(device.GetName())
 			if !isSucceed {
 				channel <- DeviceStatusResponse{
@@ -151,7 +158,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 		}
 
-		time.Sleep(60 * time.Second)
+		time.Sleep(deviceAuthCheckInterval)
 		continue
 	}
 }

@@ -49,7 +49,7 @@ type FileModRegisterConfig struct {
 
 type ModConfConfig struct {
 	Name   string      `koanf:"name" yaml:"name" json:"name"`
-	Config interface{} `koanf:"config" yaml:"config" json:"config"`
+	Config interface{} `koanf:"conf" yaml:"conf" json:"conf"`
 }
 
 type DefaultModConfConfig struct {

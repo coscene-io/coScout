@@ -1,11 +1,16 @@
 package utils
 
-import "os"
+import (
+	"os"
+)
 
-func PathExist(path string) bool {
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
+func CheckReadPath(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
 		return false
 	}
-	return err == nil
+	if info.Mode().Perm()&0444 == 0444 {
+		return true
+	}
+	return false
 }

@@ -1,13 +1,13 @@
 package constant
 
 const (
-	RegisterProviderGs   = "gs"
-	RegisterProviderAgi  = "agi"
 	RegisterProviderFile = "file"
 	RegisterProviderAuto = "auto"
 
 	// AuthHeaderKey request header key.
-	AuthHeaderKey = "Authorization"
+	AuthHeaderKey     = "Authorization"
+	BasicAuthPrefix   = "Basic"
+	BasicAuthUsername = "apikey"
 
 	DeviceAuthBucket          = "device_auth"
 	DeviceAuthKey             = "api_token"
@@ -16,4 +16,9 @@ const (
 
 	DeviceMetadataBucket = "device_metadata"
 	DeviceInfoKey        = "device_info"
+
+	// DeviceRemoteCacheBucket Remote Config cache key
+	DeviceRemoteCacheBucket = "device_remote_cache"
+
+	DeviceRemoteConfigBucket = "device_remote_config"
 )
