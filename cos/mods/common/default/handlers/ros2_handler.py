@@ -22,6 +22,7 @@ from rosbags.typesys import get_types_from_msg, register_types
 
 from cos.mods.common.default.handlers.handler_interface import HandlerInterface
 from cos.mods.common.default.rule_executor import RuleDataItem
+from cos.utils.files import can_read_path
 
 _log = logging.getLogger(__name__)
 
@@ -42,6 +43,9 @@ class Ros2Handler(BaseModel, HandlerInterface):
 
     @staticmethod
     def check_file_path(file_path: Path) -> bool:
+        # First check if the path is accessible
+        if not can_read_path(str(file_path)):
+            return False
         if not file_path.is_dir():
             return False
         contains_db3 = False
