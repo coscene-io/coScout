@@ -4,6 +4,8 @@ const (
 	RegisterProviderFile = "file"
 	RegisterProviderAuto = "auto"
 
+	TaskHandlerType = "task"
+
 	// AuthHeaderKey request header key.
 	AuthHeaderKey     = "Authorization"
 	BasicAuthPrefix   = "Basic"

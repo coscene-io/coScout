@@ -10,9 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"os/signal"
-	"os/user"
-	"path"
-	"path/filepath"
 	"syscall"
 )
 
@@ -21,7 +18,7 @@ func NewDaemonCommand(cfgPath *string) *cobra.Command {
 		Use:   "daemon",
 		Short: "Run coScout as a daemon",
 		Run: func(cmd *cobra.Command, args []string) {
-			storageDB := storage.NewBoltDB(getDBPath())
+			storageDB := storage.NewBoltDB(config.GetDBPath())
 			confManager := config.InitConfManager(*cfgPath, &storageDB)
 
 			appConf := confManager.LoadOnce()
@@ -71,43 +68,4 @@ func run(confManager *config.ConfManager, reqClient *api.RequestClient, register
 			isAuthed = false
 		}
 	}
-}
-
-func getUserBaseFolder() string {
-	baseRelativePath := ".local/state/cos"
-
-	u, err := user.Current()
-	if err != nil {
-		log.Errorf("Get current user failed: %v", err)
-		return path.Join(".", baseRelativePath)
-	}
-	homeDir := u.HomeDir
-	return path.Join(homeDir, baseRelativePath)
-}
-
-func getDBPath() string {
-	dbRelativePath := "db/cos.db"
-
-	dbPath := path.Join(getUserBaseFolder(), dbRelativePath)
-	dir := filepath.Dir(dbPath)
-
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, os.ModePerm); err != nil {
-			log.Panicf("Create db directory failed: %v", err)
-		}
-	}
-
-	// Check if the file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		// Create the file if it does not exist
-		file, err := os.Create(dbPath)
-		if err != nil {
-			log.Panicf("Create db file failed: %v", err)
-		}
-		err = file.Close()
-		if err != nil {
-			log.Panicf("Close db file failed: %v", err)
-		}
-	}
-	return dbPath
 }

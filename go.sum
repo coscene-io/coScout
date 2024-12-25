@@ -1,9 +1,13 @@
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.0-20240508200655-46a4cf4ba109.1 h1:x6Nhr/Jb9x1Y2wOA4Vu+UjUqps3a9Q0KsETNPo+AQR8=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.0-20240508200655-46a4cf4ba109.1/go.mod h1:AxRT+qTj5PJCz2nyQzsR/qxAcveW5USRhJTt/edTO5w=
-buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241218093424-37f1f029e9d0.1 h1:OwhcwmL330NmzTrqRXYy37MdoGUJF1tb4Zd3Z6fjRJI=
-buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241218093424-37f1f029e9d0.1/go.mod h1:PUMU/VNCesr5UxwKA1tm60sguRHbTKXemrePyPg35s0=
-buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.0-20241218093424-37f1f029e9d0.1 h1:dh2H/POvVzhz61lP9hGs11EygaVrZHeMHBmO/q98vFM=
-buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.0-20241218093424-37f1f029e9d0.1/go.mod h1:NIe3I3q1VRiMMfDtDAGYM1cYwQ6qX+q93m5xDYeLVa4=
+buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241224063524-ef759b132bdb.1 h1:bwTNcuMq2w7OI0OtrWSwkVAaZDg0xlxC8jDfQUbgZa4=
+buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241224063524-ef759b132bdb.1/go.mod h1:8JR/K8yZoE7E7h9hTsJb8LNjzN8mZxMtqHjt0X44TgY=
+buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241224064023-cb6db000209f.1 h1:NbRZFyh10Q1mfkaq0QMOZUEd6yipTI/kM0I2YtjXr+Y=
+buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241224064023-cb6db000209f.1/go.mod h1:6D1wT0GlvIwt3wiH/Gkpm54kgHLbs/wCgt+3f8o6Els=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.0-20241224063524-ef759b132bdb.1 h1:R/gYLPDlLrbp5J0BrS3paF588rHRBzzri+EaYAQXQbE=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.0-20241224063524-ef759b132bdb.1/go.mod h1:NIe3I3q1VRiMMfDtDAGYM1cYwQ6qX+q93m5xDYeLVa4=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.0-20241224064023-cb6db000209f.1 h1:8tdm/yV838pLPADrXeIqq+rLpnC0foE3vGL/fhnbTgA=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.0-20241224064023-cb6db000209f.1/go.mod h1:NIe3I3q1VRiMMfDtDAGYM1cYwQ6qX+q93m5xDYeLVa4=
 buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.0-20230414000709-087bc8072ce4.1 h1:yZw3O+JrjTXZKP6po92oDStcMACXPIVOCHsac3soqY0=
 buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.0-20230414000709-087bc8072ce4.1/go.mod h1:lnzk6cUUDbbKWUULkgNuJ5Av0NM6OwAt8s41CzIJi0s=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
@@ -238,6 +242,8 @@ github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQD
 github.com/ryanuber/columnize v0.0.0-20160712163229-9b3edd62028f/go.mod h1:sm1tb6uqfes/u+d4ooFouqFdy9/2g9QGwK3SQygK0Ts=
 github.com/ryanuber/columnize v2.1.0+incompatible/go.mod h1:sm1tb6uqfes/u+d4ooFouqFdy9/2g9QGwK3SQygK0Ts=
 github.com/ryanuber/go-glob v1.0.0/go.mod h1:807d1WSdnB0XRJzKNil9Om6lcp/3a0v4qIHxIXzX/Yc=
+github.com/samber/lo v1.47.0 h1:z7RynLwP5nbyRscyvcD043DWYoOcYRv3mV8lBeqOCLc=
+github.com/samber/lo v1.47.0/go.mod h1:RmDH9Ct32Qy3gduHQuKJ3gW1fMHAnE/fAzQuf6He5cU=
 github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529/go.mod h1:DxrIzT+xaE7yg65j358z/aeFdxmN0P9QXhEzd20vsDc=
 github.com/sirupsen/logrus v1.2.0/go.mod h1:LxeOpSwHxABJmUn/MG1IvRgCAasNZTLOkJPxbbu5VWo=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=

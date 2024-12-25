@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"net/http"
 	"time"
 
@@ -23,16 +26,19 @@ type RequestClient struct {
 	storage   storage.Storage
 	deviceCli openDpsV1alpha1Connect.DeviceServiceClient
 	configCli openDpsV1alpha1Connect.ConfigMapServiceClient
+	taskCli   openDpsV1alpha1Connect.TaskServiceClient
 }
 
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *RequestClient {
 	httpClient := http.DefaultClient
 	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL)
 	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL)
+	taskClient := openDpsV1alpha1Connect.NewTaskServiceClient(httpClient, apiConfig.ServerURL)
 
 	return &RequestClient{
 		deviceCli: deviceClient,
 		configCli: configClient,
+		taskCli:   taskClient,
 		storage:   storage,
 	}
 }
@@ -170,6 +176,70 @@ func (r *RequestClient) GetConfigMapWithCache(name string) (*openDpsV1alpha1Reso
 	err = r.storage.Put([]byte(constant.DeviceRemoteCacheBucket), []byte(name), bytes)
 	if err != nil {
 		log.Errorf("unable to put config map to cache: %v", err)
+	}
+	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) ListDeviceTasks(deviceName string, state *openDpsV1alpha1Enum.TaskStateEnum_TaskState) ([]*openDpsV1alpha1Resource.Task, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.ListDeviceTasksRequest{
+		Parent:   deviceName,
+		PageSize: 10,
+		Filter:   fmt.Sprintf("state=%s AND category=UPLOAD", state.String()),
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.taskCli.ListDeviceTasks(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to list device tasks: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to list device tasks"))
+	}
+
+	return apiRes.Msg.DeviceTasks, nil
+}
+
+func (r *RequestClient) UpdateTaskState(name string, state *openDpsV1alpha1Enum.TaskStateEnum_TaskState) (*openDpsV1alpha1Resource.Task, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.UpdateTaskRequest{
+		Task: &openDpsV1alpha1Resource.Task{
+			Name:  name,
+			State: *state,
+		},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"state"},
+		},
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.taskCli.UpdateTask(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to update task state: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to update task state"))
+	}
+	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) AddTaskTags(task string, tags map[string]string) (*emptypb.Empty, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.AddTaskTagsRequest{
+		Task: task,
+		Tags: tags,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.taskCli.AddTaskTags(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to add task tags: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to add task tags"))
 	}
 	return apiRes.Msg, nil
 }

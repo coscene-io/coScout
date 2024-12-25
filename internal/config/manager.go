@@ -32,6 +32,10 @@ func InitConfManager(cfg string, s *storage.Storage) *ConfManager {
 	}
 }
 
+func (c ConfManager) GetStorage() *storage.Storage {
+	return c.storage
+}
+
 func (c ConfManager) SetRemote(key string, value string) {
 	err := (*c.storage).Put([]byte(constant.DeviceRemoteConfigBucket), []byte(key), []byte(value))
 	if err != nil {

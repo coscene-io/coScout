@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/mod/task"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
 	"strings"
@@ -24,8 +25,12 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 			select {
 			case <-t.C:
 				refreshRemoteConfig(confManager, reqClient)
-				confManager.LoadWithRemote()
+				appConfig := confManager.LoadWithRemote()
 
+				err := task.NewTaskHandler(*reqClient, *appConfig, confManager.GetStorage()).Run()
+				if err != nil {
+					errorChan <- err
+				}
 			case <-ctx.Done():
 				return
 			}
