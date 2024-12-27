@@ -1,6 +1,7 @@
 package api
 
 import (
+	openAnaV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/resources"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -11,10 +12,13 @@ import (
 	"net/http"
 	"time"
 
+	openAnaV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/analysis/v1alpha1/services/servicesconnect"
 	openDpsV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/dataplatform/v1alpha1/services/servicesconnect"
+	openAnaV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/services"
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	openDpsV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
+
 	"connectrpc.com/connect"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/storage"
@@ -23,10 +27,13 @@ import (
 )
 
 type RequestClient struct {
-	storage   storage.Storage
-	deviceCli openDpsV1alpha1Connect.DeviceServiceClient
-	configCli openDpsV1alpha1Connect.ConfigMapServiceClient
-	taskCli   openDpsV1alpha1Connect.TaskServiceClient
+	storage        storage.Storage
+	deviceCli      openDpsV1alpha1Connect.DeviceServiceClient
+	configCli      openDpsV1alpha1Connect.ConfigMapServiceClient
+	taskCli        openDpsV1alpha1Connect.TaskServiceClient
+	rcdCli         openDpsV1alpha1Connect.RecordServiceClient
+	eventCli       openDpsV1alpha1Connect.EventServiceClient
+	deviceEventCli openAnaV1alpha1Connect.DeviceEventServiceClient
 }
 
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *RequestClient {
@@ -34,12 +41,18 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *Requ
 	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL)
 	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL)
 	taskClient := openDpsV1alpha1Connect.NewTaskServiceClient(httpClient, apiConfig.ServerURL)
+	recordClient := openDpsV1alpha1Connect.NewRecordServiceClient(httpClient, apiConfig.ServerURL)
+	eventClient := openDpsV1alpha1Connect.NewEventServiceClient(httpClient, apiConfig.ServerURL)
+	deviceEventClient := openAnaV1alpha1Connect.NewDeviceEventServiceClient(httpClient, apiConfig.ServerURL)
 
 	return &RequestClient{
-		deviceCli: deviceClient,
-		configCli: configClient,
-		taskCli:   taskClient,
-		storage:   storage,
+		deviceCli:      deviceClient,
+		configCli:      configClient,
+		taskCli:        taskClient,
+		rcdCli:         recordClient,
+		eventCli:       eventClient,
+		deviceEventCli: deviceEventClient,
+		storage:        storage,
 	}
 }
 
@@ -242,6 +255,83 @@ func (r *RequestClient) AddTaskTags(task string, tags map[string]string) (*empty
 		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to add task tags"))
 	}
 	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) CreateTask(projectName string, task *openDpsV1alpha1Resource.Task) (*openDpsV1alpha1Resource.Task, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.CreateTaskRequest{
+		Parent: projectName,
+		Task:   task,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.taskCli.CreateTask(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to create task: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to create task"))
+	}
+	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.Record) (*openDpsV1alpha1Resource.Record, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.CreateRecordRequest{
+		Parent: parent,
+		Record: rc,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.rcdCli.CreateRecord(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to save record cache: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to save record cache"))
+	}
+	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) TriggerDeviceEvent(projectName string, deviceEvent *openAnaV1alpha1Resource.DeviceEvent) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openAnaV1alpha1Service.TriggerDeviceEventsRequest{
+		Parent:       projectName,
+		DeviceEvents: []*openAnaV1alpha1Resource.DeviceEvent{deviceEvent},
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	_, err := r.deviceEventCli.TriggerDeviceEvents(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to trigger device events: %v", err)
+		return connect.NewError(connect.CodeInternal, errors.New("unable to trigger device events"))
+	}
+	return nil
+}
+
+func (r *RequestClient) ObtainEvent(projectName string, event *openDpsV1alpha1Resource.Event) (*openDpsV1alpha1Resource.Event, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.ObtainEventRequest{
+		Parent: projectName,
+		Event:  event,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.eventCli.ObtainEvent(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to obtain event: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to obtain event"))
+	}
+
+	return apiRes.Msg.GetEvent(), nil
 }
 
 func (r *RequestClient) getAuthToken() string {

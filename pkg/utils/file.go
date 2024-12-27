@@ -2,6 +2,7 @@ package utils
 
 import (
 	"os"
+	"path/filepath"
 )
 
 func CheckReadPath(path string) bool {
@@ -13,4 +14,20 @@ func CheckReadPath(path string) bool {
 		return true
 	}
 	return false
+}
+
+func DeleteDir(dir string) bool {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return true
+	}
+
+	err := os.RemoveAll(dir)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+func GetParentFolder(path string) string {
+	return filepath.Dir(path)
 }

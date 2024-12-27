@@ -27,9 +27,12 @@ type Moment struct {
 	// Timestamp seconds
 	Timestamp float64 `json:"timestamp" yaml:"timestamp"`
 	// Duration seconds
-	Duration float64           `json:"duration" yaml:"duration"`
-	Metadata map[string]string `json:"metadata" yaml:"metadata"`
-	Task
+	Duration float64                `json:"duration" yaml:"duration"`
+	Metadata map[string]string      `json:"metadata" yaml:"metadata"`
+	Task     Task                   `json:"task" yaml:"task"`
+	Event    map[string]interface{} `json:"event" yaml:"event"`
+	Code     string                 `json:"code" yaml:"code"`
+	RuleId   string                 `json:"rule_id" yaml:"rule_id"`
 }
 
 type Task struct {

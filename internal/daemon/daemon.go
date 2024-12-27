@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/mod/task"
 	log "github.com/sirupsen/logrus"
@@ -19,7 +20,15 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // This will signal all goroutines to exit gracefully
 
+	go func() {
+		err := collector.Collect(ctx, reqClient, confManager, errorChan)
+		if err != nil {
+			errorChan <- err
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 	go func(t *time.Ticker) {
 		for {
 			select {
