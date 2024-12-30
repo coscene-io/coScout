@@ -17,7 +17,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
   go build -ldflags "-s -w" -trimpath -o /go/bin/cos ./cmd/cos
 
-FROM --platform=${TARGETPLATFORM} alpine:3.20.3
+FROM --platform=${TARGETPLATFORM} alpine:3.21.0
 
 RUN apk add --update --no-cache \
     ca-certificates \
