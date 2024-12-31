@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"net/http"
@@ -14,10 +15,12 @@ import (
 
 	openAnaV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/analysis/v1alpha1/services/servicesconnect"
 	openDpsV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/dataplatform/v1alpha1/services/servicesconnect"
+	openStorV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/datastorage/v1alpha1/services/servicesconnect"
 	openAnaV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/services"
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	openDpsV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
+	openStorV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/datastorage/v1alpha1/services"
 
 	"connectrpc.com/connect"
 	"github.com/coscene-io/coscout/internal/config"
@@ -27,13 +30,16 @@ import (
 )
 
 type RequestClient struct {
-	storage        storage.Storage
-	deviceCli      openDpsV1alpha1Connect.DeviceServiceClient
-	configCli      openDpsV1alpha1Connect.ConfigMapServiceClient
-	taskCli        openDpsV1alpha1Connect.TaskServiceClient
-	rcdCli         openDpsV1alpha1Connect.RecordServiceClient
-	eventCli       openDpsV1alpha1Connect.EventServiceClient
-	deviceEventCli openAnaV1alpha1Connect.DeviceEventServiceClient
+	storage          storage.Storage
+	deviceCli        openDpsV1alpha1Connect.DeviceServiceClient
+	configCli        openDpsV1alpha1Connect.ConfigMapServiceClient
+	taskCli          openDpsV1alpha1Connect.TaskServiceClient
+	rcdCli           openDpsV1alpha1Connect.RecordServiceClient
+	eventCli         openDpsV1alpha1Connect.EventServiceClient
+	deviceEventCli   openAnaV1alpha1Connect.DeviceEventServiceClient
+	securityTokenCli openStorV1alpha1Connect.SecurityTokenServiceClient
+	fileCli          openDpsV1alpha1Connect.FileServiceClient
+	labelCli         openDpsV1alpha1Connect.LabelServiceClient
 }
 
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *RequestClient {
@@ -44,15 +50,21 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *Requ
 	recordClient := openDpsV1alpha1Connect.NewRecordServiceClient(httpClient, apiConfig.ServerURL)
 	eventClient := openDpsV1alpha1Connect.NewEventServiceClient(httpClient, apiConfig.ServerURL)
 	deviceEventClient := openAnaV1alpha1Connect.NewDeviceEventServiceClient(httpClient, apiConfig.ServerURL)
+	securityTokenClient := openStorV1alpha1Connect.NewSecurityTokenServiceClient(httpClient, apiConfig.ServerURL)
+	fileClient := openDpsV1alpha1Connect.NewFileServiceClient(httpClient, apiConfig.ServerURL)
+	labelClient := openDpsV1alpha1Connect.NewLabelServiceClient(httpClient, apiConfig.ServerURL)
 
 	return &RequestClient{
-		deviceCli:      deviceClient,
-		configCli:      configClient,
-		taskCli:        taskClient,
-		rcdCli:         recordClient,
-		eventCli:       eventClient,
-		deviceEventCli: deviceEventClient,
-		storage:        storage,
+		deviceCli:        deviceClient,
+		configCli:        configClient,
+		taskCli:          taskClient,
+		rcdCli:           recordClient,
+		eventCli:         eventClient,
+		deviceEventCli:   deviceEventClient,
+		securityTokenCli: securityTokenClient,
+		fileCli:          fileClient,
+		labelCli:         labelClient,
+		storage:          storage,
 	}
 }
 
@@ -332,6 +344,138 @@ func (r *RequestClient) ObtainEvent(projectName string, event *openDpsV1alpha1Re
 	}
 
 	return apiRes.Msg.GetEvent(), nil
+}
+
+func (r *RequestClient) GenerateSecurityToken(project string) (*openStorV1alpha1Service.GenerateSecurityTokenResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openStorV1alpha1Service.GenerateSecurityTokenRequest{
+		Project: project,
+		ExpireDuration: &durationpb.Duration{
+			Seconds: 24 * 60 * 60,
+		},
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.securityTokenCli.GenerateSecurityToken(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to generate security token: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to generate security token"))
+	}
+	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) CheckCloneFile(recordName, fileName, sha256 string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.CloneFileRequest{
+		Parent: recordName,
+		File:   fileName,
+		Sha256: sha256,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	_, err := r.fileCli.CloneFile(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to check clone file: %v", err)
+		return false
+	}
+	return true
+}
+
+func (r *RequestClient) UpdateRecordLabels(projectName, recordName string, labels []string) (*openDpsV1alpha1Resource.Record, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	createdLabels := make([]*openDpsV1alpha1Resource.Label, 0)
+	for _, label := range labels {
+		l, err := r.ensureLabel(projectName, label)
+		if err != nil {
+			return nil, err
+		}
+		createdLabels = append(createdLabels, l)
+	}
+
+	req := openDpsV1alpha1Service.UpdateRecordRequest{
+		Record: &openDpsV1alpha1Resource.Record{
+			Name:   recordName,
+			Labels: createdLabels,
+		},
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{"labels"},
+		},
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.rcdCli.UpdateRecord(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to update record: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to update record"))
+	}
+	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) ensureLabel(projectName string, displayName string) (*openDpsV1alpha1Resource.Label, error) {
+	label, err := r.getLabel(projectName, displayName)
+	if err != nil {
+		return nil, err
+	}
+	if label != nil {
+		return label, nil
+	}
+	label, err = r.addLabel(projectName, displayName)
+	return label, err
+}
+
+func (r *RequestClient) getLabel(projectName string, displayName string) (*openDpsV1alpha1Resource.Label, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.ListLabelsRequest{
+		Parent:   projectName,
+		Filter:   fmt.Sprintf("displayName=%s", displayName),
+		PageSize: 10,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.labelCli.ListLabels(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to list labels: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to list labels"))
+	}
+	for _, label := range apiRes.Msg.Labels {
+		if label.GetDisplayName() == displayName {
+			return label, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *RequestClient) addLabel(projectName string, displayName string) (*openDpsV1alpha1Resource.Label, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.CreateLabelRequest{
+		Parent: projectName,
+		Label: &openDpsV1alpha1Resource.Label{
+			DisplayName: displayName,
+		},
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.labelCli.CreateLabel(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to create label: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to create label"))
+	}
+	return apiRes.Msg, nil
 }
 
 func (r *RequestClient) getAuthToken() string {

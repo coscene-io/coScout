@@ -12,7 +12,6 @@ import (
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
-	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
 	"os"
@@ -90,7 +89,7 @@ func (c CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resourc
 			continue
 		}
 		taskName, ok := cache.UploadTask["name"].(string)
-		if !ok {
+		if !ok || taskName == "" {
 			continue
 		}
 
@@ -101,17 +100,23 @@ func (c CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resourc
 			log.Infof("Cancelling task %s", taskName)
 
 			cache.Skipped = true
-			err = collector.SaveRecordCache(&cache)
+			err = cache.Save()
 			if err != nil {
 				log.Errorf("Failed to save record cache %s: %v", rc, err)
 				continue
 			}
+		}
+	}
 
-			_, err = c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_CANCELLED.Enum())
-			if err != nil {
-				log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
-				continue
-			}
+	for _, task := range tasks {
+		if task.GetName() == "" {
+			continue
+		}
+
+		log.Infof("Starting handle cancelling task %s", task.GetName())
+		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_CANCELLED.Enum())
+		if err != nil {
+			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
 		}
 	}
 }
@@ -155,11 +160,12 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 	if len(taskFolders) == 0 {
 		return
 	}
-	files := make([]string, 0)
+
+	files := make(map[string]model.FileInfo)
 	for _, folder := range taskFolders {
 		canRead := utils.CheckReadPath(folder)
 		if !canRead {
-			log.Errorf("Folder %s is not readable", folder)
+			log.Warnf("Path %s is not readable, skip!", folder)
 			continue
 		}
 
@@ -174,7 +180,17 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 			}
 
 			if info.ModTime().After(startTime.AsTime()) && info.ModTime().Before(endTime.AsTime()) {
-				files = append(files, path)
+				filename, err := filepath.Rel(folder, path)
+				if err != nil {
+					log.Errorf("Failed to get relative path: %v", err)
+					filename = filepath.Base(path)
+				}
+
+				files[path] = model.FileInfo{
+					FileName: filename,
+					Size:     info.Size(),
+					Path:     path,
+				}
 			}
 			return nil
 		})
@@ -186,10 +202,13 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 	}
 
 	if len(files) == 0 {
+		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum())
+		if err != nil {
+			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
+		}
 		return
 	}
 
-	files = lo.Uniq(files)
 	projectName := strings.Split(task.GetName(), "/tasks/")[0]
 	rc := model.RecordCache{
 		ProjectName: projectName,
@@ -200,7 +219,7 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 		},
 		OriginalFiles: files,
 	}
-	err := collector.SaveRecordCache(&rc)
+	err := rc.Save()
 	if err != nil {
 		log.Errorf("Failed to save record cache: %v", err)
 		return
@@ -213,13 +232,6 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 	_, err = c.reqClient.AddTaskTags(task.GetName(), tags)
 	if err != nil {
 		log.Errorf("Failed to add task tags: %v", err)
-	}
-
-	if len(files) == 0 {
-		_, err = c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum())
-		if err != nil {
-			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
-		}
 	}
 }
 

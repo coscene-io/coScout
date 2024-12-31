@@ -3,7 +3,6 @@ package collector
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/pkg/constant"
@@ -24,45 +23,18 @@ import (
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
 
 const checkInterval = 60 * time.Second
 
-func SaveRecordCache(rc *model.RecordCache) error {
-	baseFolder := config.GetRecordCacheFolder()
-
-	seconds := rc.Timestamp / 1000
-	milliseconds := rc.Timestamp % 1000
-	dirName := time.Unix(seconds, 0).UTC().Format("2006-01-02-15-04-05") + "_" + strconv.Itoa(int(milliseconds))
-
-	dirPath := filepath.Join(baseFolder, dirName, ".cos")
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-			log.Errorf("create cache directory failed: %v", err)
-			return errors.New("create cache directory failed")
-		}
-	}
-
-	file := filepath.Join(dirPath, "state.json")
-	data, err := json.Marshal(rc)
-	if err != nil {
-		log.Errorf("marshal record cache failed: %v", err)
-		return errors.New("marshal record cache failed")
-	}
-	err = os.WriteFile(file, data, 0644)
-	if err != nil {
-		log.Errorf("write record cache failed: %v", err)
-		return errors.New("write record cache failed")
-	}
-	return nil
-}
-
 func FindAllRecordCaches() []string {
 	baseFolder := config.GetRecordCacheFolder()
 	var records []string
+	if !utils.CheckReadPath(baseFolder) {
+		return records
+	}
 
 	err := filepath.Walk(baseFolder, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -177,7 +149,7 @@ func createRelatedRecordResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 
 func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient, deviceConfig config.DeviceConfig) {
 	recordName, ok := rc.Record["name"].(string)
-	if !ok {
+	if !ok || recordName == "" {
 		return
 	}
 	recordTitle, _ := rc.Record["title"].(string)
@@ -228,7 +200,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				rc.Moments[i].IsNew = true
 			}
 
-			err = SaveRecordCache(rc)
+			err = rc.Save()
 			if err != nil {
 				log.Errorf("save record cache failed: %v", err)
 			}
@@ -298,7 +270,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			log.Errorf("create task failed: %v", err)
 		} else {
 			rc.DiagnosisTask["name"] = task.GetName()
-			err = SaveRecordCache(rc)
+			err = rc.Save()
 			if err != nil {
 				log.Errorf("save record cache failed: %v", err)
 			}
@@ -345,7 +317,7 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCa
 		"description": record.GetDescription(),
 	}
 
-	err = SaveRecordCache(rc)
+	err = rc.Save()
 	if err != nil {
 		log.Errorf("save record cache failed: %v", err)
 	}
