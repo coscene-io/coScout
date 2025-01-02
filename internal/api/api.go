@@ -154,6 +154,30 @@ func (r *RequestClient) GetDevice(name string) (*openDpsV1alpha1Resource.Device,
 	return apiRes.Msg, nil
 }
 
+func (r *RequestClient) SendHeartbeat(deviceName string, cosVersion string, networks *openDpsV1alpha1Service.NetworkUsage, extraInfo map[string]string) (*emptypb.Empty, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.HeartbeatDeviceRequest{
+		Name:         deviceName,
+		NetworkUsage: networks,
+		ExtraInfo:    extraInfo,
+	}
+	if cosVersion != "" {
+		req.CosVersion = cosVersion
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.deviceCli.HeartbeatDevice(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to send device heartbeat: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to send device heartbeat"))
+	}
+
+	return apiRes.Msg, nil
+}
+
 func (r *RequestClient) GetConfigMapWithCache(name string) (*openDpsV1alpha1Resource.ConfigMap, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

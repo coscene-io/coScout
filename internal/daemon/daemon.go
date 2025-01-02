@@ -5,6 +5,7 @@ import (
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/mod/task"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -47,6 +48,8 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 			ticker.Reset(checkInterval)
 		}
 	}(ticker)
+
+	go core.SendHeartbeat(ctx, reqClient, confManager.GetStorage(), errorChan)
 	<-finishChan
 }
 

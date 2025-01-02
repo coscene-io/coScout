@@ -7,13 +7,12 @@ import (
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/mod"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
-	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/encoding/protojson"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,7 +35,7 @@ func NewTaskHandler(reqClient api.RequestClient, config config.AppConfig, storag
 }
 
 func (c CustomTaskHandler) Run() error {
-	deviceInfo := c.getDeviceInfo()
+	deviceInfo := core.GetDeviceInfo(c.storage)
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Info("Device info is not found, skipping task")
 		return nil
@@ -233,19 +232,4 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 	if err != nil {
 		log.Errorf("Failed to add task tags: %v", err)
 	}
-}
-
-func (c CustomTaskHandler) getDeviceInfo() *openDpsV1alpha1Resource.Device {
-	bytes, err := (*c.storage).Get([]byte(constant.DeviceMetadataBucket), []byte(constant.DeviceInfoKey))
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-
-	device := openDpsV1alpha1Resource.Device{}
-	err = protojson.Unmarshal(bytes, &device)
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-
-	return &device
 }

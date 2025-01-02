@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
-	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/coscene-io/coscout/internal/core"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -86,7 +86,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 }
 
 func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {
-	deviceInfo := getDeviceInfo(*storage)
+	deviceInfo := core.GetDeviceInfo(storage)
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Warn("device info not found, skip collecting")
 		return nil
@@ -351,20 +351,6 @@ func checkRecordCacheExpired(expiredHours int, timestamp int64, rcPath string) b
 		return utils.DeleteDir(parentFolder)
 	}
 	return false
-}
-
-func getDeviceInfo(storage storage.Storage) *openDpsV1alpha1Resource.Device {
-	bytes, err := (storage).Get([]byte(constant.DeviceMetadataBucket), []byte(constant.DeviceInfoKey))
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-
-	device := openDpsV1alpha1Resource.Device{}
-	err = protojson.Unmarshal(bytes, &device)
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-	return &device
 }
 
 func getDeviceExtraInfos(extraFiles []string) *structpb.Value {

@@ -2,6 +2,7 @@ package register
 
 import (
 	"errors"
+	"github.com/coscene-io/coscout/internal/core"
 	"strconv"
 	"time"
 
@@ -55,7 +56,7 @@ func NewRegister(reqClient api.RequestClient, config config.AppConfig, storage s
 
 func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 	for {
-		device := r.getDeviceInfo()
+		device := core.GetDeviceInfo(&r.storage)
 		// If device is not registered, register it
 		if device == nil || device.GetName() == "" {
 			modRegister, err := NewModRegister(r.config.Register)
@@ -244,21 +245,6 @@ func (r *Register) exchangeAuthToken(device string) (isSucceed bool) {
 	}
 
 	return true
-}
-
-func (r *Register) getDeviceInfo() *openDpsV1alpha1Resource.Device {
-	bytes, err := r.storage.Get([]byte(constant.DeviceMetadataBucket), []byte(constant.DeviceInfoKey))
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-
-	device := openDpsV1alpha1Resource.Device{}
-	err = protojson.Unmarshal(bytes, &device)
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-
-	return &device
 }
 
 func (r *Register) setDeviceInfo(device *openDpsV1alpha1Resource.Device, exchangeCode string) error {

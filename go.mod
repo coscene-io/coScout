@@ -3,8 +3,8 @@ module github.com/coscene-io/coscout
 go 1.23
 
 require (
-	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241226090445-73d1e298e46f.1
-	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.1-20241226090445-73d1e298e46f.1
+	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241231113146-2afb5c141deb.1
+	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.1-20241231113146-2afb5c141deb.1
 	connectrpc.com/connect v1.17.0
 	github.com/charmbracelet/bubbletea v1.2.4
 	github.com/coscene-io/x v0.0.0-20241217064456-1ad08bd128a7
