@@ -18,6 +18,7 @@ import (
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 	"path"
+	"sort"
 )
 
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan *model.RecordCache, errorChan chan error) {
@@ -53,7 +54,20 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		return fmt.Errorf("record name is empty")
 	}
 
+	toUploadFiles := make([]*model.FileInfo, 0)
 	for filePath, fileInfo := range recordCache.OriginalFiles {
+		if fileInfo.Path == "" {
+			fileInfo.Path = filePath
+		}
+		toUploadFiles = append(toUploadFiles, &fileInfo)
+	}
+	sort.Slice(toUploadFiles, func(i, j int) bool {
+		return toUploadFiles[i].Size < toUploadFiles[j].Size
+	})
+
+	for _, fileInfo := range toUploadFiles {
+		filePath := fileInfo.Path
+
 		recordCache, err := recordCache.Reload()
 		if err != nil {
 			log.Errorf("failed to reload record cache: %v", err)
@@ -73,7 +87,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			continue
 		}
 
-		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo); err != nil {
+		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, fileInfo); err != nil {
 			log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 
 			allCompleted = false
@@ -106,7 +120,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 	if allCompleted {
 		log.Infof("upload all files successfully")
-		//uploadFishedFile(reqClient, appConfig, getStorage, re)
+
 		_, err := reqClient.UpdateRecordLabels(recordCache.ProjectName, recordName, []string{constant.LabelUploadSuccess})
 		if err != nil {
 			log.Errorf("failed to update record labels: %v", err)
@@ -157,7 +171,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
 	cachedFileInfo := getCacheFileInfo(storage, fileInfo.Path)
-	if fileInfo.Size < 0 {
+	if fileInfo.Size <= 0 {
 		if cachedFileInfo.Size > 0 {
 			fileInfo.Size = cachedFileInfo.Size
 		} else {
@@ -194,7 +208,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 	}
 	if !appConfig.Collector.SkipCheckSameFile {
 		if reqClient.CheckCloneFile(recordName, fileResourceName.String(), fileInfo.Sha256) {
-			log.Infof("file %s has been uploaded, skip", fileInfo.Path)
+			log.Infof("file %s has been cloned, skip", fileInfo.Path)
 			return nil
 		}
 	}
