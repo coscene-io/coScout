@@ -130,5 +130,17 @@ func getCustomTags() map[string]string {
 			tags["colink_pubkey"] = s
 		}
 	}
+
+	// check virmesh
+	keyPath = "/etc/virmesh.pub"
+	if utils.CheckReadPath(keyPath) {
+		data, err := os.ReadFile(keyPath)
+		if err == nil {
+			s := string(data)
+			s = strings.TrimPrefix(s, "virmesh")
+			s = strings.TrimSpace(s)
+			tags["virmesh_pubkey"] = s
+		}
+	}
 	return tags
 }

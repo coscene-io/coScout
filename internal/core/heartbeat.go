@@ -5,6 +5,7 @@ import (
 	"context"
 	"github.com/coscene-io/coscout"
 	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
 	log "github.com/sirupsen/logrus"
 	"time"
@@ -34,7 +35,19 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 		}
 	}(errChan)
 
-	networkUsage := services.NetworkUsage{}
+	networkUsage := model.NetworkUsage{}
+	go func(networkChan chan *model.NetworkUsage) {
+		for {
+			select {
+			case nc := <-networkChan:
+				networkUsage.AddSent(nc.GetTotalSent())
+				networkUsage.AddReceived(nc.GetTotalReceived())
+			case <-ctx.Done():
+				return
+			}
+		}
+	}(reqClient.GetNetworkChan())
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -48,12 +61,22 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 				extraInfo["code"] = "OK"
 			}
 
+			sentBytes := networkUsage.GetTotalSent()
+			receivedBytes := networkUsage.GetTotalReceived()
+			nc := services.NetworkUsage{
+				UploadBytes:   sentBytes,
+				DownloadBytes: receivedBytes,
+			}
+
 			cosVersion := coscout.GetVersion()
-			_, err := reqClient.SendHeartbeat(deviceInfo.GetName(), cosVersion, &networkUsage, extraInfo)
+			_, err := reqClient.SendHeartbeat(deviceInfo.GetName(), cosVersion, &nc, extraInfo)
 			if err != nil {
 				log.Errorf("failed to send heartbeat: %v", err)
 			} else {
 				log.Infof("device %s heartbeat sent", deviceInfo.GetDisplayName())
+
+				networkUsage.ReduceSent(sentBytes)
+				networkUsage.ReduceReceived(receivedBytes)
 			}
 
 			time.Sleep(heartbeatInterval)

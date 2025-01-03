@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/coscene-io/coscout/internal/api/interceptor"
+	"github.com/coscene-io/coscout/internal/model"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -30,6 +32,7 @@ import (
 )
 
 type RequestClient struct {
+	networkChan      chan *model.NetworkUsage
 	storage          storage.Storage
 	deviceCli        openDpsV1alpha1Connect.DeviceServiceClient
 	configCli        openDpsV1alpha1Connect.ConfigMapServiceClient
@@ -42,17 +45,19 @@ type RequestClient struct {
 	labelCli         openDpsV1alpha1Connect.LabelServiceClient
 }
 
-func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *RequestClient {
+func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, networkChan chan *model.NetworkUsage) *RequestClient {
 	httpClient := http.DefaultClient
-	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL)
-	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL)
-	taskClient := openDpsV1alpha1Connect.NewTaskServiceClient(httpClient, apiConfig.ServerURL)
-	recordClient := openDpsV1alpha1Connect.NewRecordServiceClient(httpClient, apiConfig.ServerURL)
-	eventClient := openDpsV1alpha1Connect.NewEventServiceClient(httpClient, apiConfig.ServerURL)
-	deviceEventClient := openAnaV1alpha1Connect.NewDeviceEventServiceClient(httpClient, apiConfig.ServerURL)
-	securityTokenClient := openStorV1alpha1Connect.NewSecurityTokenServiceClient(httpClient, apiConfig.ServerURL)
-	fileClient := openDpsV1alpha1Connect.NewFileServiceClient(httpClient, apiConfig.ServerURL)
-	labelClient := openDpsV1alpha1Connect.NewLabelServiceClient(httpClient, apiConfig.ServerURL)
+	interceptors := connect.WithInterceptors(interceptor.NetworkUsageInterceptor(networkChan))
+
+	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	taskClient := openDpsV1alpha1Connect.NewTaskServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	recordClient := openDpsV1alpha1Connect.NewRecordServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	eventClient := openDpsV1alpha1Connect.NewEventServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	deviceEventClient := openAnaV1alpha1Connect.NewDeviceEventServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	securityTokenClient := openStorV1alpha1Connect.NewSecurityTokenServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	fileClient := openDpsV1alpha1Connect.NewFileServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	labelClient := openDpsV1alpha1Connect.NewLabelServiceClient(httpClient, apiConfig.ServerURL, interceptors)
 
 	return &RequestClient{
 		deviceCli:        deviceClient,
@@ -65,7 +70,12 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage) *Requ
 		fileCli:          fileClient,
 		labelCli:         labelClient,
 		storage:          storage,
+		networkChan:      networkChan,
 	}
+}
+
+func (r *RequestClient) GetNetworkChan() chan *model.NetworkUsage {
+	return r.networkChan
 }
 
 func (r *RequestClient) RegisterDevice(device *openDpsV1alpha1Resource.Device, orgSlug, projectSlug string) (*openDpsV1alpha1Resource.Device, string, error) {

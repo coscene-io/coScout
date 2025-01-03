@@ -11,6 +11,7 @@ import (
 	"github.com/coscene-io/coscout/internal/name"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -213,7 +214,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		log.Errorf("unable to create minio client: %v", err)
 		return err
 	}
-	um, err := utils.NewUploadManager(mc, storage, constant.MultiPartUploadBucket)
+	um, err := upload.NewUploadManager(mc, storage, constant.MultiPartUploadBucket, reqClient.GetNetworkChan())
 	if err != nil {
 		log.Errorf("unable to create upload manager: %v", err)
 		return err
@@ -226,13 +227,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		return err
 	}
 
-	um.Wait()
-	if um.Errs != nil {
-		for _, uploadErr := range um.Errs {
-			log.Errorf("Upload %v failed with: %v\n", uploadErr.Path, uploadErr.Err)
-		}
-	}
-	return err
+	return nil
 }
 
 func getCacheFileInfo(storage *storage.Storage, file string) *model.FileInfo {

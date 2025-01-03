@@ -4,6 +4,7 @@ import (
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/daemon"
+	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/register"
 	"github.com/coscene-io/coscout/internal/storage"
 	log "github.com/sirupsen/logrus"
@@ -24,7 +25,8 @@ func NewDaemonCommand(cfgPath *string) *cobra.Command {
 			appConf := confManager.LoadOnce()
 			log.Infof("Load config file from %s", *cfgPath)
 
-			reqClient := api.NewRequestClient(appConf.Api, storageDB)
+			networkChan := make(chan *model.NetworkUsage, 100)
+			reqClient := api.NewRequestClient(appConf.Api, storageDB, networkChan)
 
 			registerChan := make(chan register.DeviceStatusResponse, 1)
 			reg := register.NewRegister(*reqClient, appConf, storageDB)
