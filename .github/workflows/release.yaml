@@ -1,4 +1,4 @@
-name: Publish Public Cos Agent
+name: Publish Public coScout
 
 on:
   release:
@@ -56,6 +56,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up go
         uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.x
+          check-latest: true
+          cache: true
       - name: Set up CD tools
         uses: coscene-io/setup-cd-tools@v2.0.1
         env:
@@ -74,9 +78,9 @@ jobs:
           password: ${{ secrets.GH_PACKAGES_ORG_TOKEN }}
       - name: Install gzip
         run: sudo apt-get update && sudo apt-get install -y gzip
-      - name: Build cos agent
+      - name: Build coScout agent
         run: |
-          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o cos cmd/cos-agent/main.go
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o cos cmd/coscout/main.go
           chmod +x cos
       - name: Build metadata files
         env:
@@ -84,7 +88,7 @@ jobs:
         run: |
           SHA256SUM=$(sha256sum cos | awk '{print $1}' | xxd -r -p | base64) 
           echo "{\"Version\": \"$VERSION\", \"Sha256\": \"$SHA256SUM\"}" > ${{ matrix.os }}-${{ matrix.arch }}.json
-      - name: gzip cos agent
+      - name: gzip coscout
         run: gzip cos
       - name: Upload cos agent to oss
         uses: tvrcgo/oss-action@master
@@ -94,8 +98,8 @@ jobs:
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
-            cos.gz:/cos-agent/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.gz
-            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.json
+            cos.gz:/coscoutPro/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/coscoutPro/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.json
       - name: Upload coscli release metadata files to oss
         if: env.IS_RELEASE == 'true'
         uses: tvrcgo/oss-action@master
@@ -105,8 +109,8 @@ jobs:
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
-            cos.gz:/cos-agent/latest/${{ matrix.os }}-${{ matrix.arch }}.gz
-            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/latest/${{ matrix.os }}-${{ matrix.arch }}.json
+            cos.gz:/coscoutPro/latest/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/coscoutPro/latest/${{ matrix.os }}-${{ matrix.arch }}.json
       - name: Upload coscli beta metadata files to oss
         if: env.IS_RELEASE == 'false'
         uses: tvrcgo/oss-action@master
@@ -116,5 +120,5 @@ jobs:
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
-            cos.gz:/cos-agent/beta/${{ matrix.os }}-${{ matrix.arch }}.gz
-            ${{ matrix.os }}-${{ matrix.arch }}.json:/cos-agent/beta/${{ matrix.os }}-${{ matrix.arch }}.json
+            cos.gz:/coscoutPro/beta/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/coscoutPro/beta/${{ matrix.os }}-${{ matrix.arch }}.json

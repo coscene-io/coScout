@@ -12,15 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coscout
+package mod
 
-// Version information set by link flags during build. We fall back to these sane
-// default values when we build outside the Makefile context (e.g. go build or go test).
-var (
-	version = "v0.0.0" // value from VERSION file
+import (
+	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/storage"
 )
 
-// GetVersion returns the version information.
-func GetVersion() string {
-	return version
+type CustomHandler interface {
+	// Run the mod handler
+	Run() error
+}
+
+type Handler struct {
+	//nolint: unused // This is a placeholder for future use
+	reqClient api.RequestClient
+	//nolint: unused // This is a placeholder for future use
+	config config.AppConfig
+	//nolint: unused // This is a placeholder for future use
+	storage storage.Storage
 }

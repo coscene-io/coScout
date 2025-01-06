@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coscout
+package name
 
-// Version information set by link flags during build. We fall back to these sane
-// default values when we build outside the Makefile context (e.g. go build or go test).
-var (
-	version = "v0.0.0" // value from VERSION file
-)
+type FileResourceName struct {
+	RecordName string
+	FileName   string
+}
 
-// GetVersion returns the version information.
-func GetVersion() string {
-	return version
+func (n *FileResourceName) String() string {
+	return n.RecordName + "/files/" + n.FileName
 }

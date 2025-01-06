@@ -1,3 +1,17 @@
+// Copyright 2025 coScene
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package register
 
 import (
@@ -6,12 +20,18 @@ import (
 
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
-	"github.com/coscene-io/cos-agent/internal/api"
-	"github.com/coscene-io/cos-agent/internal/config"
-	"github.com/coscene-io/cos-agent/internal/storage"
-	"github.com/coscene-io/cos-agent/pkg/constant"
+	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
+)
+
+const (
+	deviceAuthCheckInterval = 60 * time.Second
 )
 
 type ModRegister interface {
@@ -19,15 +39,14 @@ type ModRegister interface {
 	GetDevice() *openDpsV1alpha1Resource.Device
 }
 
-func NewModRegister(conf config.RegisterConfig) ModRegister {
+func NewModRegister(conf config.RegisterConfig) (ModRegister, error) {
 	switch conf.Provider {
-	case constant.RegisterProviderAgi:
-		return NewAgiModRegister(conf.Conf)
 	case constant.RegisterProviderFile:
-		return NewFileModRegister(conf.Conf)
+		return NewFileModRegister(conf.Conf), nil
 	default:
-		return NewAutoModRegister(conf.Conf)
+		log.Errorf("Invalid register provider: %s", conf.Provider)
 	}
+	return nil, errors.New("invalid register provider")
 }
 
 type DeviceStatusResponse struct {
@@ -51,33 +70,34 @@ func NewRegister(reqClient api.RequestClient, config config.AppConfig, storage s
 
 func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 	for {
-		device := r.getDeviceInfo()
+		device := core.GetDeviceInfo(&r.storage)
 		// If device is not registered, register it
 		if device == nil || device.GetName() == "" {
-			isSucceed, localDevice := r.registerDevice(NewModRegister(r.config.Register).GetDevice())
+			modRegister, err := NewModRegister(r.config.Register)
+			if err != nil {
+				channel <- DeviceStatusResponse{
+					Authorized: false,
+					Exist:      false,
+				}
+
+				time.Sleep(deviceAuthCheckInterval)
+				continue
+			}
+
+			isSucceed, localDevice := r.registerDevice(modRegister.GetDevice())
 			if !isSucceed {
 				channel <- DeviceStatusResponse{
 					Authorized: false,
 					Exist:      false,
 				}
 
-				time.Sleep(60 * time.Second)
+				time.Sleep(deviceAuthCheckInterval)
 				continue
 			}
 			device = localDevice
 		}
 
-		// Check device auth token
-		valid := r.checkAuthToken()
-		if valid {
-			channel <- DeviceStatusResponse{
-				Authorized: true,
-				Exist:      true,
-			}
-
-			time.Sleep(60 * time.Second)
-			continue
-		}
+		log.Infof("Current device serial number: %s", device.GetSerialNumber())
 
 		// check device status
 		exist, state, err := r.getRemoteDeviceStatus(device.GetName())
@@ -87,7 +107,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 				Exist:      false,
 			}
 
-			time.Sleep(60 * time.Second)
+			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
 
@@ -98,7 +118,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s already deleted.", device.GetSerialNumber())
-			time.Sleep(5 * time.Minute)
+			time.Sleep(deviceAuthCheckInterval * 10)
 			continue
 		}
 
@@ -109,7 +129,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s already be rejected", device.GetSerialNumber())
-			time.Sleep(1 * time.Minute)
+			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
 
@@ -120,12 +140,24 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s is pending", device.GetSerialNumber())
-			time.Sleep(1 * time.Minute)
+			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
 
 		// If device is approved, exchange auth token
 		if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_APPROVED {
+			// Check device auth token
+			valid := r.checkAuthToken()
+			if valid {
+				channel <- DeviceStatusResponse{
+					Authorized: true,
+					Exist:      true,
+				}
+
+				time.Sleep(deviceAuthCheckInterval)
+				continue
+			}
+
 			isSucceed := r.exchangeAuthToken(device.GetName())
 			if !isSucceed {
 				channel <- DeviceStatusResponse{
@@ -140,12 +172,16 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 		}
 
-		time.Sleep(60 * time.Second)
+		time.Sleep(deviceAuthCheckInterval)
 		continue
 	}
 }
 
 func (r *Register) registerDevice(device *openDpsV1alpha1Resource.Device) (isSucceed bool, d *openDpsV1alpha1Resource.Device) {
+	if device == nil {
+		return false, &openDpsV1alpha1Resource.Device{}
+	}
+
 	remoteDevice, exchangeCode, err := r.reqClient.RegisterDevice(device, r.config.Api.OrgSlug, r.config.Api.ProjectSlug)
 	if err != nil {
 		log.Warnf("unable to register device: %v", err)
@@ -204,13 +240,13 @@ func (r *Register) getRemoteDeviceStatus(device string) (exist bool, state openD
 }
 
 func (r *Register) exchangeAuthToken(device string) (isSucceed bool) {
-	bytes, err := r.storage.Get([]byte(constant.DeviceAuthKey), []byte(constant.DeviceAuthExchangeCodeKey))
+	exchangeCodeBytes, err := r.storage.Get([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExchangeCodeKey))
 	if err != nil {
 		log.Warnf("unable to get device auth token: %v", err)
 		return false
 	}
 
-	token, expireTime, err := r.reqClient.ExchangeDeviceAuthToken(device, string(bytes))
+	token, expireTime, err := r.reqClient.ExchangeDeviceAuthToken(device, string(exchangeCodeBytes))
 	if err != nil {
 		log.Warnf("unable to exchange device auth token: %v", err)
 		return false
@@ -223,21 +259,6 @@ func (r *Register) exchangeAuthToken(device string) (isSucceed bool) {
 	}
 
 	return true
-}
-
-func (r *Register) getDeviceInfo() *openDpsV1alpha1Resource.Device {
-	bytes, err := r.storage.Get([]byte(constant.DeviceMetadataBucket), []byte(constant.DeviceInfoKey))
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-
-	device := openDpsV1alpha1Resource.Device{}
-	err = protojson.Unmarshal(bytes, &device)
-	if err != nil {
-		return &openDpsV1alpha1Resource.Device{}
-	}
-
-	return &device
 }
 
 func (r *Register) setDeviceInfo(device *openDpsV1alpha1Resource.Device, exchangeCode string) error {

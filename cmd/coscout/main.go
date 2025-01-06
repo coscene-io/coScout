@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coscout
+package main
 
-// Version information set by link flags during build. We fall back to these sane
-// default values when we build outside the Makefile context (e.g. go build or go test).
-var (
-	version = "v0.0.0" // value from VERSION file
+import (
+	"os"
+
+	"github.com/coscene-io/coscout/cmd/coscout/commands"
+	log "github.com/sirupsen/logrus"
 )
 
-// GetVersion returns the version information.
-func GetVersion() string {
-	return version
+func main() {
+	if err := commands.NewCommand().Execute(); err != nil {
+		log.Error(err.Error())
+		os.Exit(1)
+	}
 }

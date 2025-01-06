@@ -12,15 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coscout
+package commands
 
-// Version information set by link flags during build. We fall back to these sane
-// default values when we build outside the Makefile context (e.g. go build or go test).
-var (
-	version = "v0.0.0" // value from VERSION file
+import (
+	cosagent "github.com/coscene-io/coscout"
+	"github.com/spf13/cobra"
 )
 
-// GetVersion returns the version information.
-func GetVersion() string {
-	return version
+func NewVersionCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print version",
+		Run: func(cmd *cobra.Command, args []string) {
+			v := cosagent.GetVersion()
+
+			cmd.Println(v)
+		},
+	}
+
+	return cmd
 }
