@@ -18,6 +18,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/minio/minio-go/v7"
@@ -25,12 +32,6 @@ import (
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/exp/slices"
-	"io"
-	"mime"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 )
 
 const (
@@ -101,41 +102,38 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 func (u *Manager) handleUploadProgress() {
 	fileInfos := make(map[string]int64)
 
-	for {
-		select {
-		case progress := <-u.uploadProgressChan:
-			uploadKey := "upload:" + progress.Name
-			totalKey := "total:" + progress.Name
+	for progress := range u.uploadProgressChan {
+		uploadKey := "upload:" + progress.Name
+		totalKey := "total:" + progress.Name
 
-			if progress.Uploaded > 0 {
-				diff := progress.Uploaded - fileInfos[uploadKey]
-				if diff > 0 {
-					nc := model.NetworkUsage{}
-					nc.AddSent(diff)
-					u.networkChan <- &nc
-				}
-
-				fileInfos[uploadKey] = progress.Uploaded
+		if progress.Uploaded > 0 {
+			diff := progress.Uploaded - fileInfos[uploadKey]
+			if diff > 0 {
+				nc := model.NetworkUsage{}
+				nc.AddSent(diff)
+				u.networkChan <- &nc
 			}
 
-			if progress.TotalSize > 0 {
-				fileInfos[totalKey] = progress.TotalSize
-			}
+			fileInfos[uploadKey] = progress.Uploaded
+		}
 
-			if fileInfos[totalKey] <= 0 {
-				return
-			}
+		if progress.TotalSize > 0 {
+			fileInfos[totalKey] = progress.TotalSize
+		}
 
-			uploadedPercent := float64(fileInfos[uploadKey]) / float64(fileInfos[totalKey]) * 100
-			log.Infof("File: %s, uploaded: %d, total: %d, percent: %.1f", progress.Name, fileInfos[uploadKey], fileInfos[totalKey], uploadedPercent)
+		if fileInfos[totalKey] <= 0 {
+			return
+		}
 
-			if uploadedPercent >= 100 {
-				delete(fileInfos, uploadKey)
-				delete(fileInfos, totalKey)
+		uploadedPercent := float64(fileInfos[uploadKey]) / float64(fileInfos[totalKey]) * 100
+		log.Infof("File: %s, uploaded: %d, total: %d, percent: %.1f", progress.Name, fileInfos[uploadKey], fileInfos[totalKey], uploadedPercent)
 
-				log.Infof("File: %s uploaded", progress.Name)
-				return
-			}
+		if uploadedPercent >= 100 {
+			delete(fileInfos, uploadKey)
+			delete(fileInfos, totalKey)
+
+			log.Infof("File: %s uploaded", progress.Name)
+			return
 		}
 	}
 }

@@ -33,18 +33,18 @@ const (
 	DeviceMetadataBucket = "device_metadata"
 	DeviceInfoKey        = "device_info"
 
-	// DeviceRemoteCacheBucket Remote Config cache key
+	// DeviceRemoteCacheBucket Remote Config cache key.
 	DeviceRemoteCacheBucket = "device_remote_cache"
 
 	DeviceRemoteConfigBucket = "device_remote_config"
 
-	// FileInfoBucket File info bucket
+	// FileInfoBucket File info bucket.
 	FileInfoBucket = "file_info_bucket"
 
-	// MultiPartUploadBucket Multi part upload bucket
+	// MultiPartUploadBucket Multi part upload bucket.
 	MultiPartUploadBucket = "multi_part_upload_bucket"
 
 	UploadBucket = "default"
 
-	LabelUploadSuccess = "上传完成"
+	LabelUploadSuccess = "\u4E0A\u4F20\u5B8C\u6210"
 )

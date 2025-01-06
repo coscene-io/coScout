@@ -15,17 +15,17 @@
 package config
 
 import (
+	"strings"
+
+	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/coscene-io/coscout/pkg/utils"
+	"github.com/coscene-io/x/conf"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/rawbytes"
-	"strings"
-
-	"github.com/coscene-io/coscout/internal/storage"
-	"github.com/coscene-io/coscout/pkg/utils"
-	"github.com/coscene-io/x/conf"
 	log "github.com/sirupsen/logrus"
 )
 

@@ -15,9 +15,9 @@
 package storage
 
 import (
-	"errors"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"go.etcd.io/bbolt"
 )
@@ -40,13 +40,13 @@ func (bb *BoltDB) Put(bucket, key, value []byte) error {
 		createdBucket, err := tx.CreateBucketIfNotExists(bucket)
 		if err != nil {
 			log.Errorf("create bucket: %s", err)
-			return errors.New("create bucket")
+			return errors.Wrap(err, "create bucket")
 		}
 
 		err = createdBucket.Put(key, value)
 		if err != nil {
 			log.Errorf("put key: %s", err)
-			return errors.New("put key")
+			return errors.Wrap(err, "put key")
 		}
 		return err
 	})
@@ -78,7 +78,7 @@ func (bb *BoltDB) Delete(bucket, key []byte) error {
 
 		err := b.Delete(key)
 		if err != nil {
-			return errors.New("delete key")
+			return errors.Wrap(err, "delete key")
 		}
 		return nil
 	})

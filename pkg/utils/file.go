@@ -16,12 +16,13 @@ package utils
 
 import (
 	"crypto/sha256"
-	"fmt"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 func CheckReadPath(path string) bool {
@@ -41,10 +42,7 @@ func DeleteDir(dir string) bool {
 	}
 
 	err := os.RemoveAll(dir)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func GetParentFolder(path string) string {
@@ -56,8 +54,8 @@ func CalSha256AndSize(absPath string, sizeToRead int64) (string, int64, error) {
 	if err != nil {
 		return "", 0, errors.Wrapf(err, "open file")
 	}
-	defer func(f *os.File) {
-		err := f.Close()
+	defer func(osFile *os.File) {
+		err := osFile.Close()
 		if err != nil {
 			log.Error(err)
 		}
@@ -75,15 +73,15 @@ func CalSha256AndSize(absPath string, sizeToRead int64) (string, int64, error) {
 		sizeToRead = fileSize
 	}
 
-	h := sha256.New()
+	hash := sha256.New()
 
 	// Use io.LimitReader to read only the specified amount
 	limitedReader := io.LimitReader(f, sizeToRead)
-	if _, err := io.Copy(h, limitedReader); err != nil {
+	if _, err := io.Copy(hash, limitedReader); err != nil {
 		return "", 0, errors.Wrapf(err, "read file")
 	}
 
-	return fmt.Sprintf("%x", h.Sum(nil)), sizeToRead, nil
+	return hex.EncodeToString(hash.Sum(nil)), sizeToRead, nil
 }
 
 func GetFileSize(filepath string) (int64, error) {

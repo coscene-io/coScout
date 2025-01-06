@@ -15,12 +15,13 @@
 package commands
 
 import (
-	"github.com/coscene-io/coscout"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"path"
 	"runtime"
 	"strconv"
+
+	"github.com/coscene-io/coscout"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 )
 
 func NewCommand() *cobra.Command {

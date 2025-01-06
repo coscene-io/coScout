@@ -15,8 +15,9 @@
 package interceptor
 
 import (
-	"connectrpc.com/connect"
 	"context"
+
+	"connectrpc.com/connect"
 	"github.com/coscene-io/coscout/internal/model"
 	"google.golang.org/protobuf/proto"
 )

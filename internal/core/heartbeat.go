@@ -15,14 +15,15 @@
 package core
 
 import (
-	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
 	"context"
+	"time"
+
+	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
 	"github.com/coscene-io/coscout"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
 	log "github.com/sirupsen/logrus"
-	"time"
 )
 
 const heartbeatInterval = 60 * time.Second
@@ -40,12 +41,9 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 
 	lastError := ErrorInfo{}
 	go func(c chan error) {
-		for {
-			select {
-			case err := <-c:
-				lastError.Err = err
-				lastError.Timestamp = time.Now().Unix()
-			}
+		for err := range c {
+			lastError.Err = err
+			lastError.Timestamp = time.Now().Unix()
 		}
 	}(errChan)
 

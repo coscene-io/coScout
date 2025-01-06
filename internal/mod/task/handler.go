@@ -15,9 +15,15 @@
 package task
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
-	"encoding/json"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
@@ -27,11 +33,6 @@ import (
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
 )
 
 type CustomTaskHandler struct {
@@ -183,6 +184,11 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 		}
 
 		err := filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
+			if utils.CheckReadPath(path) {
+				log.Warnf("Path %s is not readable, skip!", path)
+				return nil
+			}
+
 			if err != nil {
 				log.Errorf("Failed to walk through folder %s", folder)
 				return nil

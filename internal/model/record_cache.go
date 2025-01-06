@@ -16,15 +16,15 @@ package model
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"github.com/coscene-io/coscout/internal/config"
-	"github.com/coscene-io/coscout/pkg/utils"
 	"os"
 	"path"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/pkg/utils"
+	"github.com/pkg/errors"
 )
 
 type FileInfo struct {
@@ -93,19 +93,19 @@ func (rc *RecordCache) Save() error {
 	dirPath := filepath.Join(baseFolder, ".cos")
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-			return errors.New("create cache directory failed")
+			return errors.Wrap(err, "create cache directory failed")
 		}
 	}
 
 	file := filepath.Join(dirPath, "state.json")
 	data, err := json.Marshal(rc)
 	if err != nil {
-		return errors.New(fmt.Sprint("marshal record cache failed: ", err))
+		return errors.Wrap(err, "marshal record cache failed")
 	}
 
-	err = os.WriteFile(file, data, 0644)
+	err = os.WriteFile(file, data, 0600)
 	if err != nil {
-		return errors.New(fmt.Sprint("write record cache failed: ", err))
+		return errors.Wrap(err, "write record cache failed")
 	}
 	return nil
 }
@@ -114,17 +114,17 @@ func (rc *RecordCache) Reload() (*RecordCache, error) {
 	baseFolder := rc.GetBaseFolder()
 	file := filepath.Join(baseFolder, ".cos", "state.json")
 	if _, err := os.Stat(file); os.IsNotExist(err) {
-		return nil, errors.New("record cache not exist")
+		return nil, errors.Wrap(err, "record cache file not exist")
 	}
 
 	data, err := os.ReadFile(file)
 	if err != nil {
-		return nil, errors.New(fmt.Sprint("read record cache failed: ", err))
+		return nil, errors.Wrap(err, "read record cache failed")
 	}
 
 	err = json.Unmarshal(data, rc)
 	if err != nil {
-		return nil, errors.New(fmt.Sprint("unmarshal record cache failed: ", err))
+		return nil, errors.Wrap(err, "unmarshal record cache failed")
 	}
 	return rc, nil
 }

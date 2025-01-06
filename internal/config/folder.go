@@ -15,11 +15,12 @@
 package config
 
 import (
-	log "github.com/sirupsen/logrus"
 	"os"
 	"os/user"
 	"path"
 	"path/filepath"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func GetUserBaseFolder() string {

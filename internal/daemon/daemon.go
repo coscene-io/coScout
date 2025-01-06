@@ -16,6 +16,9 @@ package daemon
 
 import (
 	"context"
+	"strings"
+	"time"
+
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
@@ -23,8 +26,6 @@ import (
 	"github.com/coscene-io/coscout/internal/mod/task"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
-	"strings"
-	"time"
 )
 
 const checkInterval = 60 * time.Second

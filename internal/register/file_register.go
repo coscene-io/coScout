@@ -15,16 +15,17 @@
 package register
 
 import (
-	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"encoding/json"
-	"fmt"
+	"os"
+	"strings"
+
+	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"github.com/coscene-io/coscout"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/pkg/utils"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
-	"os"
-	"strings"
 )
 
 type FileModRegister struct {
@@ -94,7 +95,7 @@ func (f *FileModRegister) GetDevice() *openDpsV1alpha1Resource.Device {
 func getDeviceFromStructuredFile(snFile, snField string) (string, error) {
 	data, err := os.ReadFile(snFile)
 	if err != nil {
-		return "", fmt.Errorf("failed to read device file: %v", err)
+		return "", errors.Wrap(err, "failed to read device file")
 	}
 
 	var result map[string]interface{}
@@ -105,12 +106,12 @@ func getDeviceFromStructuredFile(snFile, snField string) (string, error) {
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("failed to parse device file: %v", err)
+		return "", errors.Wrap(err, "failed to parse device file")
 	}
 
 	deviceID, ok := result[snField].(string)
 	if !ok {
-		return "", fmt.Errorf("field not found or not a string")
+		return "", errors.Wrap(err, "field not found or not a string")
 	}
 
 	return deviceID, nil
@@ -119,7 +120,7 @@ func getDeviceFromStructuredFile(snFile, snField string) (string, error) {
 func getDeviceFromText(snFile string) (string, error) {
 	data, err := os.ReadFile(snFile)
 	if err != nil {
-		return "", fmt.Errorf("failed to read device file: %v", err)
+		return "", errors.Wrap(err, "failed to read device file")
 	}
 
 	return string(data), nil

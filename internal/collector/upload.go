@@ -15,10 +15,14 @@
 package collector
 
 import (
-	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
+	"sort"
+	"strconv"
+
+	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/model"
@@ -29,10 +33,9 @@ import (
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
-	"path"
-	"sort"
 )
 
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan *model.RecordCache, errorChan chan error) {
@@ -65,7 +68,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	recordName, ok := recordCache.Record["name"].(string)
 	if !ok || len(recordName) == 0 {
 		log.Warn("record name is empty")
-		return fmt.Errorf("record name is empty")
+		return errors.New("record name is empty")
 	}
 
 	toUploadFiles := make([]*model.FileInfo, 0)
@@ -92,7 +95,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		}
 
 		if !utils.CheckReadPath(filePath) {
-			log.Warn("local file %s not exist", filePath)
+			log.Warn(fmt.Sprintf("local file %s not exist", filePath))
 			continue
 		}
 
@@ -121,7 +124,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			uploadTaskName, ok := recordCache.UploadTask["name"].(string)
 			if ok && len(uploadTaskName) > 0 {
 				tags := make(map[string]string)
-				tags["uploadedFiles"] = fmt.Sprintf("%d", len(recordCache.UploadedFilePaths))
+				tags["uploadedFiles"] = strconv.Itoa(len(recordCache.UploadedFilePaths))
 
 				_, err := reqClient.AddTaskTags(uploadTaskName, tags)
 				if err != nil {
@@ -145,7 +148,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			uploadTaskName, ok := recordCache.UploadTask["name"].(string)
 			if ok && len(uploadTaskName) > 0 {
 				tags := make(map[string]string)
-				tags["totalFiles"] = fmt.Sprintf("%d", len(recordCache.OriginalFiles))
+				tags["totalFiles"] = strconv.Itoa(len(recordCache.OriginalFiles))
 				tags["recordName"] = recordName
 
 				_, err := reqClient.AddTaskTags(uploadTaskName, tags)
@@ -233,7 +236,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		log.Errorf("unable to generate security token: %v", err)
 		return err
 	}
-	mc, err := minio.New(generateSecurityTokenRes.Endpoint, &minio.Options{
+	mc, err := minio.New(generateSecurityTokenRes.GetEndpoint(), &minio.Options{
 		Creds:  credentials.NewStaticV4(generateSecurityTokenRes.GetAccessKeyId(), generateSecurityTokenRes.GetAccessKeySecret(), generateSecurityTokenRes.GetSessionToken()),
 		Secure: true,
 		Region: "",

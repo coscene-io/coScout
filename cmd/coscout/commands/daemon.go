@@ -15,6 +15,10 @@
 package commands
 
 import (
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/daemon"
@@ -23,9 +27,6 @@ import (
 	"github.com/coscene-io/coscout/internal/storage"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"os"
-	"os/signal"
-	"syscall"
 )
 
 func NewDaemonCommand(cfgPath *string) *cobra.Command {

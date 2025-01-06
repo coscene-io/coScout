@@ -59,6 +59,10 @@ linters:
     - wrapcheck         # don't _always_ need to wrap errors
     - wsl               # generous whitespace violates house style
     - dupl              # covered by go-critic
+    - varnamelen
+    - tagalign
+    - tagliatelle
+    - mnd
 issues:
   exclude-rules:
     - linters:

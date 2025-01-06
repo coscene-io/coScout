@@ -17,28 +17,28 @@ package collector
 import (
 	"context"
 	"encoding/json"
-	"github.com/coscene-io/coscout/internal/api"
-	"github.com/coscene-io/coscout/internal/config"
-	"github.com/coscene-io/coscout/internal/core"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/structpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	"github.com/coscene-io/coscout/internal/model"
-	"github.com/coscene-io/coscout/internal/storage"
-	"github.com/coscene-io/coscout/pkg/utils"
-	log "github.com/sirupsen/logrus"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	openAnaV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/enums"
 	openAnaV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/resources"
 	openDpsV1alpha1Common "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/commons"
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
+	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/coscene-io/coscout/pkg/utils"
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const checkInterval = 60 * time.Second
@@ -103,7 +103,7 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 	deviceInfo := core.GetDeviceInfo(storage)
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Warn("device info not found, skip collecting")
-		return nil
+		return errors.New("device info not found")
 	}
 
 	// get all record caches
@@ -247,7 +247,6 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				log.Errorf("trigger device event failed: %v", err)
 			}
 		}
-
 	}
 
 	if rc.DiagnosisTask != nil {
@@ -265,20 +264,35 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				"recordName": recordName,
 			},
 		}
-		diaTask.SetDiagnosisTaskDetail(&openDpsV1alpha1Resource.DiagnosisTaskDetail{
-			Device: deviceInfo.GetName(),
-			StartTime: &timestamppb.Timestamp{
-				Seconds: rc.DiagnosisTask["start_time"].(int64),
-			},
-			EndTime: &timestamppb.Timestamp{
-				Seconds: rc.DiagnosisTask["end_time"].(int64),
-			},
-			RuleSpecId:  rc.DiagnosisTask["rule_id"].(string),
+		diagnosisTaskDetail := openDpsV1alpha1Resource.DiagnosisTaskDetail{
+			Device:      deviceInfo.GetName(),
 			DisplayName: recordTitle,
-			TriggerTime: &timestamppb.Timestamp{
-				Seconds: rc.DiagnosisTask["trigger_time"].(int64),
-			},
-		})
+		}
+		ruleId, ok := rc.DiagnosisTask["rule_id"].(string)
+		if ok && ruleId != "" {
+			diagnosisTaskDetail.RuleSpecId = ruleId
+		}
+
+		startTime, ok := rc.DiagnosisTask["start_time"].(int64)
+		if ok {
+			diagnosisTaskDetail.StartTime = &timestamppb.Timestamp{
+				Seconds: startTime,
+			}
+		}
+		endTime, ok := rc.DiagnosisTask["end_time"].(int64)
+		if ok {
+			diagnosisTaskDetail.EndTime = &timestamppb.Timestamp{
+				Seconds: endTime,
+			}
+		}
+		triggerTime, ok := rc.DiagnosisTask["trigger_time"].(int64)
+		if ok {
+			diagnosisTaskDetail.TriggerTime = &timestamppb.Timestamp{
+				Seconds: triggerTime,
+			}
+		}
+
+		diaTask.SetDiagnosisTaskDetail(&diagnosisTaskDetail)
 		task, err := reqClient.CreateTask(rc.ProjectName, &diaTask)
 		if err != nil {
 			log.Errorf("create task failed: %v", err)
@@ -292,16 +306,16 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 	}
 }
 
-func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient) {
-	if rc.Record["name"] != nil {
+func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model.RecordCache, reqClient *api.RequestClient) {
+	if recordCache.Record["name"] != nil {
 		return
 	}
 
-	title := getRecordTitle(rc)
-	description := getRecordDescription(title, rc)
+	title := getRecordTitle(recordCache)
+	description := getRecordDescription(title, recordCache)
 
 	labels := make([]*openDpsV1alpha1Resource.Label, 0)
-	for _, label := range rc.Labels {
+	for _, label := range recordCache.Labels {
 		labels = append(labels, &openDpsV1alpha1Resource.Label{
 			DisplayName: label,
 		})
@@ -313,7 +327,7 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCa
 		Labels:      labels,
 		Device:      deviceInfo,
 	}
-	ruleId, ok := rc.DiagnosisTask["rule_id"].(string)
+	ruleId, ok := recordCache.DiagnosisTask["rule_id"].(string)
 	if ok {
 		ruleSpec := &openDpsV1alpha1Common.RuleSpec{
 			Id: ruleId,
@@ -321,29 +335,31 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCa
 		record.Rules = []*openDpsV1alpha1Common.RuleSpec{ruleSpec}
 	}
 
-	record, err := reqClient.CreateRecord(rc.ProjectName, record)
+	record, err := reqClient.CreateRecord(recordCache.ProjectName, record)
 	if err != nil {
 		log.Errorf("create record failed: %v", err)
 	}
-	rc.Record = map[string]interface{}{
+	recordCache.Record = map[string]interface{}{
 		"name":        record.GetName(),
 		"title":       record.GetTitle(),
 		"description": record.GetDescription(),
 	}
 
-	err = rc.Save()
+	err = recordCache.Save()
 	if err != nil {
 		log.Errorf("save record cache failed: %v", err)
 	}
 }
 
 func getRecordTitle(rc *model.RecordCache) string {
-	if rc.Record["title"] != nil {
-		return rc.Record["title"].(string)
+	title, ok := rc.Record["title"].(string)
+	if ok && title != "" {
+		return title
 	}
 
-	if rc.UploadTask["title"] != nil {
-		return rc.UploadTask["title"].(string)
+	taskTitle, ok := rc.UploadTask["title"].(string)
+	if ok && taskTitle != "" {
+		return taskTitle
 	}
 
 	triggerTime := time.Unix(rc.Timestamp/1000, 0).Format(time.RFC3339)
@@ -351,8 +367,9 @@ func getRecordTitle(rc *model.RecordCache) string {
 }
 
 func getRecordDescription(title string, rc *model.RecordCache) string {
-	if rc.Record["description"] != nil {
-		return rc.Record["description"].(string)
+	desc, ok := rc.Record["description"].(string)
+	if ok && desc != "" {
+		return desc
 	}
 
 	return title

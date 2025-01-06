@@ -15,34 +15,33 @@
 package api
 
 import (
-	openAnaV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/resources"
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
-	"github.com/coscene-io/coscout/internal/api/interceptor"
-	"github.com/coscene-io/coscout/internal/model"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/emptypb"
-	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"net/http"
 	"time"
 
 	openAnaV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/analysis/v1alpha1/services/servicesconnect"
 	openDpsV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/dataplatform/v1alpha1/services/servicesconnect"
 	openStorV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/datastorage/v1alpha1/services/servicesconnect"
+	openAnaV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/resources"
 	openAnaV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/services"
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	openDpsV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
 	openStorV1alpha1Service "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/datastorage/v1alpha1/services"
-
 	"connectrpc.com/connect"
+	"github.com/coscene-io/coscout/internal/api/interceptor"
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 type RequestClient struct {
@@ -114,7 +113,7 @@ func (r *RequestClient) RegisterDevice(device *openDpsV1alpha1Resource.Device, o
 	apiRes, err := r.deviceCli.RegisterDevice(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to register device: %v", err)
-		return nil, "", connect.NewError(connect.CodeInternal, errors.New("unable to register device"))
+		return nil, "", connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to register device"))
 	}
 
 	return apiRes.Msg.GetDevice(), apiRes.Msg.GetExchangeCode(), nil
@@ -172,7 +171,7 @@ func (r *RequestClient) GetDevice(name string) (*openDpsV1alpha1Resource.Device,
 	apiRes, err := r.deviceCli.GetDevice(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to get device: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to get device"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to get device"))
 	}
 
 	return apiRes.Msg, nil
@@ -196,7 +195,7 @@ func (r *RequestClient) SendHeartbeat(deviceName string, cosVersion string, netw
 	apiRes, err := r.deviceCli.HeartbeatDevice(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to send device heartbeat: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to send device heartbeat"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to send device heartbeat"))
 	}
 
 	return apiRes.Msg, nil
@@ -226,7 +225,7 @@ func (r *RequestClient) GetConfigMapWithCache(name string) (*openDpsV1alpha1Reso
 		return &configMap, nil
 	}
 
-	if configMap.GetMetadata() != nil && (configMap.GetMetadata().CurrentVersion == metadata.Msg.GetCurrentVersion()) {
+	if configMap.GetMetadata() != nil && (configMap.GetMetadata().GetCurrentVersion() == metadata.Msg.GetCurrentVersion()) {
 		return &configMap, nil
 	}
 
@@ -268,10 +267,10 @@ func (r *RequestClient) ListDeviceTasks(deviceName string, state *openDpsV1alpha
 	apiRes, err := r.taskCli.ListDeviceTasks(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to list device tasks: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to list device tasks"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to list device tasks"))
 	}
 
-	return apiRes.Msg.DeviceTasks, nil
+	return apiRes.Msg.GetDeviceTasks(), nil
 }
 
 func (r *RequestClient) UpdateTaskState(name string, state *openDpsV1alpha1Enum.TaskStateEnum_TaskState) (*openDpsV1alpha1Resource.Task, error) {
@@ -293,7 +292,7 @@ func (r *RequestClient) UpdateTaskState(name string, state *openDpsV1alpha1Enum.
 	apiRes, err := r.taskCli.UpdateTask(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to update task state: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to update task state"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to update task state"))
 	}
 	return apiRes.Msg, nil
 }
@@ -312,7 +311,7 @@ func (r *RequestClient) AddTaskTags(task string, tags map[string]string) (*empty
 	apiRes, err := r.taskCli.AddTaskTags(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to add task tags: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to add task tags"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to add task tags"))
 	}
 	return apiRes.Msg, nil
 }
@@ -388,7 +387,7 @@ func (r *RequestClient) ObtainEvent(projectName string, event *openDpsV1alpha1Re
 	apiRes, err := r.eventCli.ObtainEvent(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to obtain event: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to obtain event"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to obtain event"))
 	}
 
 	return apiRes.Msg.GetEvent(), nil
@@ -463,7 +462,7 @@ func (r *RequestClient) UpdateRecordLabels(projectName, recordName string, label
 	apiRes, err := r.rcdCli.UpdateRecord(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to update record: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to update record"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to update record"))
 	}
 	return apiRes.Msg, nil
 }
@@ -473,7 +472,7 @@ func (r *RequestClient) ensureLabel(projectName string, displayName string) (*op
 	if err != nil {
 		return nil, err
 	}
-	if label != nil {
+	if label != nil && label.GetName() != "" {
 		return label, nil
 	}
 	label, err = r.addLabel(projectName, displayName)
@@ -486,7 +485,7 @@ func (r *RequestClient) getLabel(projectName string, displayName string) (*openD
 
 	req := openDpsV1alpha1Service.ListLabelsRequest{
 		Parent:   projectName,
-		Filter:   fmt.Sprintf("displayName=%s", displayName),
+		Filter:   "displayName=" + displayName,
 		PageSize: 10,
 	}
 	apiReq := connect.NewRequest(&req)
@@ -497,12 +496,12 @@ func (r *RequestClient) getLabel(projectName string, displayName string) (*openD
 		log.Errorf("unable to list labels: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to list labels"))
 	}
-	for _, label := range apiRes.Msg.Labels {
+	for _, label := range apiRes.Msg.GetLabels() {
 		if label.GetDisplayName() == displayName {
 			return label, nil
 		}
 	}
-	return nil, nil
+	return &openDpsV1alpha1Resource.Label{}, nil
 }
 
 func (r *RequestClient) addLabel(projectName string, displayName string) (*openDpsV1alpha1Resource.Label, error) {
@@ -521,7 +520,7 @@ func (r *RequestClient) addLabel(projectName string, displayName string) (*openD
 	apiRes, err := r.labelCli.CreateLabel(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to create label: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to create label"))
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to create label"))
 	}
 	return apiRes.Msg, nil
 }
