@@ -49,6 +49,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		for {
 			select {
 			case <-t.C:
+				//nolint: contextcheck // context is checked in the parent goroutine
 				refreshRemoteConfig(confManager, reqClient)
 				appConfig := confManager.LoadWithRemote()
 

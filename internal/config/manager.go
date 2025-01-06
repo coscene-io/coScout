@@ -100,6 +100,7 @@ func (c ConfManager) LoadWithRemote() *AppConfig {
 	k := koanf.New(".") // Create a new koanf instance.
 
 	for _, f := range appConf.Import {
+		//nolint: nestif // no need to nest if
 		if strings.HasPrefix(f, RemoteFilePrefix) {
 			name := strings.TrimPrefix(f, RemoteFilePrefix)
 			remoteCache, err := (*c.storage).Get([]byte(constant.DeviceRemoteConfigBucket), []byte(name))
@@ -108,6 +109,7 @@ func (c ConfManager) LoadWithRemote() *AppConfig {
 				log.Errorf("unable to get remote config: %v", err)
 				continue
 			}
+			//nolint: gosimple // no need to simplify
 			if remoteCache == nil || len(remoteCache) == 0 {
 				log.Errorf("remote config is empty")
 				continue

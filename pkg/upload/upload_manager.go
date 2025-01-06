@@ -22,6 +22,7 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -88,6 +88,7 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 		}
 
 		u.uploadProgressChan <- FileUploadProgress{Name: absPath, Uploaded: -1, TotalSize: filesize}
+		//nolint: gosec // we are not using user input
 		err = u.FMultipartPutObject(ctx, bucket, key,
 			absPath, filesize, minio.PutObjectOptions{UserTags: userTags, PartSize: uint64(partSize)})
 	} else {
@@ -138,6 +139,7 @@ func (u *Manager) handleUploadProgress() {
 	}
 }
 
+// FMultipartPutObject uploads a file to a bucket with a key and sha256..
 func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key string, filePath string, fileSize int64, opts minio.PutObjectOptions) (err error) {
 	// Check for largest object size allowed.
 	if fileSize > int64(maxSinglePutObjectSize) {
@@ -261,6 +263,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 	// Starts parallel uploads.
 	// Receive the part number to upload from the uploadPartsCh channel.
+	//nolint: gosec // we are not using user input
 	for w := 1; w <= int(opts.NumThreads); w++ {
 		go func() {
 			for {
@@ -309,6 +312,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 		case <-ctx.Done():
 			return ctx.Err()
 		case uploadRes := <-uploadedPartsCh:
+			//nolint: nestif // readability
 			if uploadRes.Error != nil {
 				if strings.Contains(strings.ToLower(uploadRes.Error.Error()), strings.ToLower("Invalid upload id")) {
 					err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
@@ -366,8 +370,8 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	}
 
 	// Sort all completed parts.
-	slices.SortFunc(parts, func(i, j minio.CompletePart) bool {
-		return i.PartNumber < j.PartNumber
+	slices.SortFunc(parts, func(i, j minio.CompletePart) int {
+		return i.PartNumber - j.PartNumber
 	})
 
 	_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)

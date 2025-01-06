@@ -26,7 +26,10 @@ type CustomHandler interface {
 }
 
 type Handler struct {
+	//nolint: unused // This is a placeholder for future use
 	reqClient api.RequestClient
-	config    config.AppConfig
-	storage   storage.Storage
+	//nolint: unused // This is a placeholder for future use
+	config config.AppConfig
+	//nolint: unused // This is a placeholder for future use
+	storage storage.Storage
 }

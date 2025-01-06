@@ -184,13 +184,14 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 		}
 
 		err := filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
-			if utils.CheckReadPath(path) {
+			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
 				return nil
 			}
 
 			if err != nil {
 				log.Errorf("Failed to walk through folder %s", folder)
+				//nolint: nilerr // skip file
 				return nil
 			}
 

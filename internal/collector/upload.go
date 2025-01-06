@@ -50,6 +50,7 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 				return
 			}
 
+			//nolint: contextcheck // context is checked in the parent goroutine
 			err := uploadFiles(reqClient, confManager, recordCache)
 			if err != nil {
 				errorChan <- err
@@ -71,12 +72,12 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		return errors.New("record name is empty")
 	}
 
-	toUploadFiles := make([]*model.FileInfo, 0)
+	toUploadFiles := make([]model.FileInfo, 0)
 	for filePath, fileInfo := range recordCache.OriginalFiles {
 		if fileInfo.Path == "" {
 			fileInfo.Path = filePath
 		}
-		toUploadFiles = append(toUploadFiles, &fileInfo)
+		toUploadFiles = append(toUploadFiles, fileInfo)
 	}
 	sort.Slice(toUploadFiles, func(i, j int) bool {
 		return toUploadFiles[i].Size < toUploadFiles[j].Size
@@ -104,7 +105,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			continue
 		}
 
-		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, fileInfo); err != nil {
+		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo); err != nil {
 			log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 
 			allCompleted = false
@@ -135,6 +136,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		}
 	}
 
+	//nolint: nestif // no need to nest if
 	if allCompleted {
 		log.Infof("upload all files successfully")
 

@@ -83,6 +83,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 				appConfig := confManager.LoadWithRemote()
 				getStorage := confManager.GetStorage()
 
+				//nolint: contextcheck // context is checked in the parent goroutine
 				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
 				if err != nil {
 					errorChan <- err
@@ -103,6 +104,7 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 	deviceInfo := core.GetDeviceInfo(storage)
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Warn("device info not found, skip collecting")
+		//nolint: err113 // we need to check if device info is found
 		return errors.New("device info not found")
 	}
 
@@ -170,6 +172,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 
 	for i := range rc.Moments {
 		moment := rc.Moments[i]
+		//nolint: nestif // we need to check if the moment is new
 		if moment.Name == "" {
 			displayName := recordTitle
 			description := recordTitle
@@ -249,6 +252,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 		}
 	}
 
+	//nolint: nestif // we need to check if the task is new
 	if rc.DiagnosisTask != nil {
 		taskName, ok := rc.DiagnosisTask["name"].(string)
 		if ok && taskName != "" {

@@ -81,6 +81,7 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 			}
 
 			cosVersion := coscout.GetVersion()
+			//nolint: contextcheck // context is checked in the parent goroutine
 			_, err := reqClient.SendHeartbeat(deviceInfo.GetName(), cosVersion, &nc, extraInfo)
 			if err != nil {
 				log.Errorf("failed to send heartbeat: %v", err)
