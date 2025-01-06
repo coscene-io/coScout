@@ -52,7 +52,7 @@ type DeviceConfig struct {
 }
 
 type RegisterConfig struct {
-	Provider string      `koanf:"type"   yaml:"type" json:"provider"`
+	Provider string      `koanf:"type"   yaml:"type" json:"type"`
 	Conf     interface{} `koanf:"config" yaml:"config" json:"config"`
 }
 
