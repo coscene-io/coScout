@@ -16,32 +16,28 @@ func TestValidateRulesSpec(t *testing.T) {
 			name: "success",
 			ruleSpec: map[string]interface{}{
 				"version": "v2",
-				"rules": []interface{}{
+				"conditions": []interface{}{
+					"msg['temperature'] > 20",
+					"msg['humidity'] > 20",
+				},
+				"actions": []interface{}{
 					map[string]interface{}{
-						"conditions": []interface{}{
-							"msg['temperature'] > 20",
-							"msg['humidity'] > 20",
+						"name": "serialize",
+						"kwargs": map[string]interface{}{
+							"str_arg": "{msg['item']}",
+							"int_arg": 1,
 						},
-						"actions": []interface{}{
-							map[string]interface{}{
-								"name": "serialize",
-								"kwargs": map[string]interface{}{
-									"str_arg": "{msg['item']}",
-									"int_arg": 1,
-								},
-							},
-							map[string]interface{}{
-								"name": "serialize",
-								"kwargs": map[string]interface{}{
-									"str_arg": "{msg['item']}",
-									"int_arg": 1,
-								},
-							},
+					},
+					map[string]interface{}{
+						"name": "serialize",
+						"kwargs": map[string]interface{}{
+							"str_arg": "{msg['item']}",
+							"int_arg": 1,
 						},
-						"scopes": []interface{}{},
-						"topics": []string{"test"},
 					},
 				},
+				"scopes": []interface{}{},
+				"topics": []string{"test"},
 			},
 			expected: ValidationResult{
 				Success: true,
@@ -51,23 +47,19 @@ func TestValidateRulesSpec(t *testing.T) {
 		{
 			name: "empty condition",
 			ruleSpec: map[string]interface{}{
-				"version": "v2",
-				"rules": []interface{}{
+				"version":    "v2",
+				"conditions": []interface{}{},
+				"actions": []interface{}{
 					map[string]interface{}{
-						"conditions": []interface{}{},
-						"actions": []interface{}{
-							map[string]interface{}{
-								"name": "serialize",
-								"kwargs": map[string]interface{}{
-									"str_arg": "{msg['item']}",
-									"int_arg": 1,
-								},
-							},
+						"name": "serialize",
+						"kwargs": map[string]interface{}{
+							"str_arg": "{msg['item']}",
+							"int_arg": 1,
 						},
-						"scopes": []interface{}{},
-						"topics": []string{"test"},
 					},
 				},
+				"scopes": []interface{}{},
+				"topics": []string{"test"},
 			},
 			expected: ValidationResult{
 				Success: false,
@@ -75,7 +67,6 @@ func TestValidateRulesSpec(t *testing.T) {
 					{
 						Location: &ValidationErrorLocation{
 							Section:   ConditionSection,
-							RuleIndex: 0,
 							ItemIndex: 0,
 						},
 						EmptySection: &struct{}{},
@@ -87,17 +78,13 @@ func TestValidateRulesSpec(t *testing.T) {
 			name: "empty action",
 			ruleSpec: map[string]interface{}{
 				"version": "v2",
-				"rules": []interface{}{
-					map[string]interface{}{
-						"conditions": []interface{}{
-							"msg['temperature'] > 20",
-							"msg['humidity'] > 20",
-						},
-						"actions": []interface{}{},
-						"scopes":  []interface{}{},
-						"topics":  []string{"test"},
-					},
+				"conditions": []interface{}{
+					"msg['temperature'] > 20",
+					"msg['humidity'] > 20",
 				},
+				"actions": []interface{}{},
+				"scopes":  []interface{}{},
+				"topics":  []string{"test"},
 			},
 			expected: ValidationResult{
 				Success: false,
@@ -105,7 +92,6 @@ func TestValidateRulesSpec(t *testing.T) {
 					{
 						Location: &ValidationErrorLocation{
 							Section:   ActionSection,
-							RuleIndex: 0,
 							ItemIndex: 0,
 						},
 						EmptySection: &struct{}{},
@@ -117,39 +103,35 @@ func TestValidateRulesSpec(t *testing.T) {
 			name: "multiple errors",
 			ruleSpec: map[string]interface{}{
 				"version": "v2",
-				"rules": []interface{}{
+				"conditions": []interface{}{
+					"msg['temperature'] > 20",
+					"msg['humidity'] > ",
+				},
+				"actions": []interface{}{
 					map[string]interface{}{
-						"conditions": []interface{}{
-							"msg['temperature'] > 20",
-							"msg['humidity'] > ",
+						"name": "serialize",
+						"kwargs": map[string]interface{}{
+							"str_arg": "{msg['item']}",
+							"int_arg": 1,
 						},
-						"actions": []interface{}{
-							map[string]interface{}{
-								"name": "serialize",
-								"kwargs": map[string]interface{}{
-									"str_arg": "{msg['item']}",
-									"int_arg": 1,
-								},
-							},
-							map[string]interface{}{
-								"name": "serialize",
-								"kwargs": map[string]interface{}{
-									"str_arg": "{msg[}",
-									"int_arg": 1,
-								},
-							},
-							map[string]interface{}{
-								"name": "serialize",
-								"kwargs": map[string]interface{}{
-									"str_arg": "{msg['item']}",
-									"int_arg": 1,
-								},
-							},
+					},
+					map[string]interface{}{
+						"name": "serialize",
+						"kwargs": map[string]interface{}{
+							"str_arg": "{msg[}",
+							"int_arg": 1,
 						},
-						"scopes": []interface{}{},
-						"topics": []string{"test"},
+					},
+					map[string]interface{}{
+						"name": "serialize",
+						"kwargs": map[string]interface{}{
+							"str_arg": "{msg['item']}",
+							"int_arg": 1,
+						},
 					},
 				},
+				"scopes": []interface{}{},
+				"topics": []string{"test"},
 			},
 			expected: ValidationResult{
 				Success: false,
@@ -157,7 +139,6 @@ func TestValidateRulesSpec(t *testing.T) {
 					{
 						Location: &ValidationErrorLocation{
 							Section:   ConditionSection,
-							RuleIndex: 0,
 							ItemIndex: 1,
 						},
 						SyntaxError: &struct{}{},
@@ -165,7 +146,6 @@ func TestValidateRulesSpec(t *testing.T) {
 					{
 						Location: &ValidationErrorLocation{
 							Section:   ActionSection,
-							RuleIndex: 0,
 							ItemIndex: 1,
 						},
 						SyntaxError: &struct{}{},
@@ -179,7 +159,7 @@ func TestValidateRulesSpec(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, result := ValidateRulesSpec(tc.ruleSpec, map[string]interface{}{
+			_, result := ValidateRuleSpec(tc.ruleSpec, map[string]interface{}{
 				"serialize": func(map[string]interface{}) error {
 					return nil
 				},

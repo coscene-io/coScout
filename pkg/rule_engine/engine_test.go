@@ -9,8 +9,9 @@ func TestEngineComprehensiveSingleCondition(t *testing.T) {
 	t.Parallel()
 
 	var result map[string]interface{}
-	engine := createTestEngine(t, []interface{}{
+	engine := createTestEngine(t,
 		map[string]interface{}{
+			"version": "v2",
 			"conditions": []interface{}{
 				"msg.code > 20",
 			},
@@ -25,8 +26,7 @@ func TestEngineComprehensiveSingleCondition(t *testing.T) {
 			},
 			"scopes": []interface{}{},
 			"topics": []string{"test_topic"},
-		},
-	}, &result)
+		}, &result)
 
 	testCases := []struct {
 		msg      map[string]interface{}
@@ -79,24 +79,23 @@ func TestEngineComprehensiveMultipleCondition(t *testing.T) {
 	t.Parallel()
 
 	var result map[string]interface{}
-	engine := createTestEngine(t, []interface{}{
-		map[string]interface{}{
-			"conditions": []interface{}{
-				"msg.code > 20",
-				"int(msg.level) <= int(3)",
-			},
-			"actions": []interface{}{
-				map[string]interface{}{
-					"name": "serialize",
-					"kwargs": map[string]interface{}{
-						"str_arg": "{msg.code}",
-						"int_arg": 1,
-					},
+	engine := createTestEngine(t, map[string]interface{}{
+		"version": "v2",
+		"conditions": []interface{}{
+			"msg.code > 20",
+			"int(msg.level) <= int(3)",
+		},
+		"actions": []interface{}{
+			map[string]interface{}{
+				"name": "serialize",
+				"kwargs": map[string]interface{}{
+					"str_arg": "{msg.code}",
+					"int_arg": 1,
 				},
 			},
-			"scopes": []interface{}{},
-			"topics": []string{"test_topic"},
 		},
+		"scopes": []interface{}{},
+		"topics": []string{"test_topic"},
 	}, &result)
 
 	testCases := []struct {
@@ -172,29 +171,28 @@ func TestEngineScope(t *testing.T) {
 	t.Parallel()
 
 	var result map[string]interface{}
-	engine := createTestEngine(t, []interface{}{
-		map[string]interface{}{
-			"conditions": []interface{}{
-				"msg.code > 20",
-				"int(scope.level) <= int(3)",
-			},
-			"actions": []interface{}{
-				map[string]interface{}{
-					"name": "serialize",
-					"kwargs": map[string]interface{}{
-						"str_arg": "{scope.code}",
-						"int_arg": 1,
-					},
-				},
-			},
-			"scopes": []interface{}{
-				map[string]interface{}{
-					"code":  "77",
-					"level": "1",
-				},
-			},
-			"topics": []string{"test_topic"},
+	engine := createTestEngine(t, map[string]interface{}{
+		"version": "v2",
+		"conditions": []interface{}{
+			"msg.code > 20",
+			"int(scope.level) <= int(3)",
 		},
+		"actions": []interface{}{
+			map[string]interface{}{
+				"name": "serialize",
+				"kwargs": map[string]interface{}{
+					"str_arg": "{scope.code}",
+					"int_arg": 1,
+				},
+			},
+		},
+		"scopes": []interface{}{
+			map[string]interface{}{
+				"code":  "77",
+				"level": "1",
+			},
+		},
+		"topics": []string{"test_topic"},
 	}, &result)
 
 	testCases := []struct {
@@ -226,13 +224,8 @@ func TestEngineScope(t *testing.T) {
 	}
 }
 
-func createTestEngine(t *testing.T, rulesSpec []interface{}, result *map[string]interface{}) *Engine {
+func createTestEngine(t *testing.T, rulesSpec map[string]interface{}, result *map[string]interface{}) *Engine {
 	t.Helper()
-
-	spec := map[string]interface{}{
-		"version": "v2",
-		"rules":   rulesSpec,
-	}
 
 	actionImpls := map[string]interface{}{
 		"serialize": func(kwargs map[string]interface{}) error {
@@ -241,7 +234,7 @@ func createTestEngine(t *testing.T, rulesSpec []interface{}, result *map[string]
 		},
 	}
 
-	rules, validationResult := ValidateRulesSpec(spec, actionImpls)
+	rules, validationResult := ValidateRuleSpec(rulesSpec, actionImpls)
 	if !validationResult.Success {
 		t.Fatalf("Failed to validate rules: %v", validationResult.Errors)
 	}

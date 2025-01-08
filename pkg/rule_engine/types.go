@@ -12,7 +12,6 @@ const (
 
 // ValidationErrorLocation represents where the validation error occurred.
 type ValidationErrorLocation struct {
-	RuleIndex int          `json:"ruleIndex"`
 	Section   ErrorSection `json:"section"`
 	ItemIndex int          `json:"itemIndex,omitempty"`
 }
@@ -89,8 +88,7 @@ func (e ValidationError) Equal(other ValidationError) bool {
 
 // Add this helper method for ValidationErrorLocation.
 func (l ValidationErrorLocation) Equal(other ValidationErrorLocation) bool {
-	return l.RuleIndex == other.RuleIndex &&
-		l.Section == other.Section &&
+	return l.Section == other.Section &&
 		l.ItemIndex == other.ItemIndex
 }
 

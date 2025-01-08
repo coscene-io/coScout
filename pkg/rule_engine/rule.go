@@ -75,91 +75,19 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) b
 	return activated
 }
 
-// ValidateRulesSpec validates a rule specification and returns the compiled rules.
-//
-//	 Example rules specification as follows:
-//
-//		{
-//		       "version": "v2",
-//		       "rules": [
-//		           {
-//		               "conditions": [
-//		                   "msg['temperature'] > 20",
-//		                   "int(msg['humidity']) < int(30)"
-//		               ],
-//		               "actions: [
-//		                   {
-//		                       "name": "action_1",
-//		                       "kwargs": {
-//		                           "arg1_1": "{msg['item']}",
-//		                           "arg1_2": 1
-//		                       }
-//		                   },
-//		                   {
-//		                       "name": "action_2",
-//		                       "kwargs": {
-//		                           "arg2_1": "{msg.code}",
-//		                           "arg2_2": 1
-//		                       }
-//		                   }
-//		               ],
-//		               "scopes": [
-//		                   {
-//		                       "scope_key_a": "scope_value_a_1"
-//		                       "scope_key_b": "scope_value_b_1"
-//		                   },
-//		                   {
-//		                       "scope_key_a": "scope_value_a_2"
-//		                       "scope_key_b": "scope_value_b_2"
-//		                   }
-//		               ],
-//		               "topics": ["topic_1", "topic_2"]
-//		           }
-//		       ]
-//		   }
-func ValidateRulesSpec(rulesSpec map[string]interface{}, actionImpls map[string]interface{}) ([]*Rule, ValidationResult) {
-	var allRules []*Rule
+// ValidateRuleSpec validates a single rule specification.
+func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]interface{}) ([]*Rule, ValidationResult) {
 	var errors []ValidationError
 
-	version, ok := rulesSpec["version"].(string)
-	if !ok || !lo.Contains(AllowedVersions(), version) {
+	if version, ok := ruleSpec["version"].(string); !ok || !lo.Contains(AllowedVersions(), version) {
 		return nil, ValidationResult{
 			Success: false,
 			Errors: []ValidationError{{
+				Location:          nil,
 				UnexpectedVersion: &ValidationErrorUnexpectedVersion{AllowedVersions: AllowedVersions()},
 			}},
 		}
 	}
-
-	rulesArray, ok := rulesSpec["rules"].([]interface{})
-	if !ok {
-		return nil, ValidationResult{
-			Success: false,
-			Errors: []ValidationError{{
-				EmptySection: &struct{}{},
-			}},
-		}
-	}
-
-	for ruleIdx, ruleInterface := range rulesArray {
-		ruleSpec, ok := ruleInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		rules, errs := validateRuleSpec(ruleSpec, actionImpls, ruleIdx)
-		allRules = append(allRules, rules...)
-		errors = append(errors, errs...)
-	}
-
-	return allRules, ValidationResult{
-		Success: len(errors) == 0,
-		Errors:  errors,
-	}
-}
-
-// validateRuleSpec validates a single rule specification.
-func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]interface{}, ruleIdx int) ([]*Rule, []ValidationError) {
-	var errors []ValidationError
 
 	// Validate conditions
 	conditions := make([]Condition, 0)
@@ -167,8 +95,7 @@ func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 	if !ok || len(conditionsArray) == 0 {
 		errors = append(errors, ValidationError{
 			Location: &ValidationErrorLocation{
-				RuleIndex: ruleIdx,
-				Section:   ConditionSection,
+				Section: ConditionSection,
 			},
 			EmptySection: &struct{}{},
 		})
@@ -183,7 +110,6 @@ func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 		if err != nil {
 			errors = append(errors, ValidationError{
 				Location: &ValidationErrorLocation{
-					RuleIndex: ruleIdx,
 					Section:   ConditionSection,
 					ItemIndex: condIdx,
 				},
@@ -200,8 +126,7 @@ func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 	if !ok || len(actionsArray) == 0 {
 		errors = append(errors, ValidationError{
 			Location: &ValidationErrorLocation{
-				RuleIndex: ruleIdx,
-				Section:   ActionSection,
+				Section: ActionSection,
 			},
 			EmptySection: &struct{}{},
 		})
@@ -221,7 +146,6 @@ func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 		if err != nil {
 			errors = append(errors, ValidationError{
 				Location: &ValidationErrorLocation{
-					RuleIndex: ruleIdx,
 					Section:   ActionSection,
 					ItemIndex: actionIdx,
 				},
@@ -233,7 +157,10 @@ func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 	}
 
 	if len(errors) > 0 {
-		return nil, errors
+		return nil, ValidationResult{
+			Success: false,
+			Errors:  errors,
+		}
 	}
 
 	// Get scopes and topics
@@ -279,5 +206,8 @@ func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 		))
 	}
 
-	return rules, nil
+	return rules, ValidationResult{
+		Success: true,
+		Errors:  nil,
+	}
 }
