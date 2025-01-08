@@ -1,11 +1,17 @@
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.1-20240508200655-46a4cf4ba109.1 h1:OuLzd9r3QZbJo++fL7cvsAhmdzRaYwAF7MtjeVkgA6g=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.1-20240508200655-46a4cf4ba109.1/go.mod h1:/zlFuuECgFgewxwW6qQKgvMJ07YZkWlVkcSxEhJprJw=
+buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.2-20240508200655-46a4cf4ba109.1 h1:IQ7h10cY5brtPWVllkhiEd2wa6S6vmbQMbmY717Ptv0=
+buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.2-20240508200655-46a4cf4ba109.1/go.mod h1:JnMVLi3qrNYPODVpEKG7UjHLl/d2zR221e66YCSmP2Q=
 buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241231113146-2afb5c141deb.1 h1:yG8g/T1Y8/7oFY1qrVeSdulCpdB4epgrQ5UenNWeSmc=
 buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241231113146-2afb5c141deb.1/go.mod h1:BYuzhOxcxWb1BhlquRfpm7DoRAhUFPKhi1k8gQ0tZ6k=
 buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.1-20241231113146-2afb5c141deb.1 h1:VOIHcbEhP0PHMqn7Hglk5blCwISGQm/8FEKe0NXDA2k=
 buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.1-20241231113146-2afb5c141deb.1/go.mod h1:A1TwseZtu60Z6BLJJVCT9H0GlPMODnuGNEbpkS9AE88=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.2-20250108073155-ac5cadaf1607.1 h1:hYm4kcORI8sN7dKQpe0XBAayyMgSr8Rc7qHl1ry8XxA=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.2-20250108073155-ac5cadaf1607.1/go.mod h1:1FNQwunxn2Sy2OcmepGJw9Uvx+TX0lMRfmn0owWyxMg=
 buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.1-20230414000709-087bc8072ce4.1 h1:qUJDgB3eTRW9LYq7NLaJWOJJcBxlBJ5EmpMPJeMrYwY=
 buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.1-20230414000709-087bc8072ce4.1/go.mod h1:kFksAQ7cwek/7/gxk4fKLVAGy2Bk9w0UKa3qgAp4hxY=
+buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.2-20230414000709-087bc8072ce4.1 h1:u0ijoDkqJE5DCCxYM6b+wk7HyJNH83nfSLBRHg+rphk=
+buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.2-20230414000709-087bc8072ce4.1/go.mod h1:x0qgfUufQg3z1zrbZOwxoVwL7s8KcSA7+7n3IsiKCrc=
 cel.dev/expr v0.18.0 h1:CJ6drgk+Hf96lkLikr4rFf19WrU0BOWEihyZnI2TAzo=
 cel.dev/expr v0.18.0/go.mod h1:MrpN08Q+lEBs+bGYdLxxHkZoUSsCp0nSKTs0nTymJgw=
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
@@ -63,6 +69,7 @@ github.com/envoyproxy/go-control-plane v0.9.9-0.20210217033140-668b12f5399d/go.m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/fatih/color v1.9.0/go.mod h1:eQcE1qtQxscV5RaZvpXrrb8Drkc3/DdQ+uUYCNjL+zU=
+github.com/fatih/structs v1.1.0 h1:Q7juDM0QtcnhCpeyLGQKyg4TOIghuNXrkL32pHAUMxo=
 github.com/fatih/structs v1.1.0/go.mod h1:9NiDSp5zOcgEDl+j00MP/WkGVPOlPRLejGD8Ga6PJ7M=
 github.com/fsnotify/fsnotify v1.4.9/go.mod h1:znqG4EE+3YCdAaPaxE2ZRY/06pZUdp0tY4IgpuI1SZQ=
 github.com/fsnotify/fsnotify v1.6.0 h1:n+5WquG0fcWoWp6xPWfHdbskMCQaFnG6PfBrh1Ky4HY=
@@ -451,6 +458,8 @@ google.golang.org/protobuf v1.26.0-rc.1/go.mod h1:jlhhOSvTdKEhbULTjvd4ARK9grFBp0
 google.golang.org/protobuf v1.26.0/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQnmE0givc=
 google.golang.org/protobuf v1.36.1 h1:yBPeRvTftaleIgM3PZ/WBIZ7XM/eEYAaEyCwvyjq/gk=
 google.golang.org/protobuf v1.36.1/go.mod h1:9fA7Ob0pmnwhb644+1+CVWFRbNajQ6iRojtC/QF5bRE=
+google.golang.org/protobuf v1.36.2 h1:R8FeyR1/eLmkutZOM5CWghmo5itiG9z0ktFlTVLuTmU=
+google.golang.org/protobuf v1.36.2/go.mod h1:9fA7Ob0pmnwhb644+1+CVWFRbNajQ6iRojtC/QF5bRE=
 gopkg.in/alecthomas/kingpin.v2 v2.2.6/go.mod h1:FMv+mEhP44yOT+4EoQTLFTRgOQ1FBLkstjWtayDeSgw=
 gopkg.in/asn1-ber.v1 v1.0.0-20181015200546-f715ec2f112d/go.mod h1:cuepJuh7vyXfUyUwEgHQXw849cJrilpS5NeIjOWESAw=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=

@@ -16,19 +16,19 @@ func TestValidateRulesSpec(t *testing.T) {
 			name: "success",
 			ruleSpec: map[string]interface{}{
 				"version": "v2",
-				"conditions": []interface{}{
+				"conditions": []string{
 					"msg['temperature'] > 20",
 					"msg['humidity'] > 20",
 				},
-				"actions": []interface{}{
-					map[string]interface{}{
+				"actions": []map[string]interface{}{
+					{
 						"name": "serialize",
 						"kwargs": map[string]interface{}{
 							"str_arg": "{msg['item']}",
 							"int_arg": 1,
 						},
 					},
-					map[string]interface{}{
+					{
 						"name": "serialize",
 						"kwargs": map[string]interface{}{
 							"str_arg": "{msg['item']}",
@@ -36,7 +36,7 @@ func TestValidateRulesSpec(t *testing.T) {
 						},
 					},
 				},
-				"scopes": []interface{}{},
+				"scopes": []map[string]string{},
 				"topics": []string{"test"},
 			},
 			expected: ValidationResult{
@@ -48,9 +48,9 @@ func TestValidateRulesSpec(t *testing.T) {
 			name: "empty condition",
 			ruleSpec: map[string]interface{}{
 				"version":    "v2",
-				"conditions": []interface{}{},
-				"actions": []interface{}{
-					map[string]interface{}{
+				"conditions": []string{},
+				"actions": []map[string]interface{}{
+					{
 						"name": "serialize",
 						"kwargs": map[string]interface{}{
 							"str_arg": "{msg['item']}",
@@ -58,7 +58,7 @@ func TestValidateRulesSpec(t *testing.T) {
 						},
 					},
 				},
-				"scopes": []interface{}{},
+				"scopes": []map[string]string{},
 				"topics": []string{"test"},
 			},
 			expected: ValidationResult{
@@ -78,12 +78,12 @@ func TestValidateRulesSpec(t *testing.T) {
 			name: "empty action",
 			ruleSpec: map[string]interface{}{
 				"version": "v2",
-				"conditions": []interface{}{
+				"conditions": []string{
 					"msg['temperature'] > 20",
 					"msg['humidity'] > 20",
 				},
-				"actions": []interface{}{},
-				"scopes":  []interface{}{},
+				"actions": []map[string]interface{}{},
+				"scopes":  []map[string]interface{}{},
 				"topics":  []string{"test"},
 			},
 			expected: ValidationResult{
@@ -103,26 +103,26 @@ func TestValidateRulesSpec(t *testing.T) {
 			name: "multiple errors",
 			ruleSpec: map[string]interface{}{
 				"version": "v2",
-				"conditions": []interface{}{
+				"conditions": []string{
 					"msg['temperature'] > 20",
 					"msg['humidity'] > ",
 				},
-				"actions": []interface{}{
-					map[string]interface{}{
+				"actions": []map[string]interface{}{
+					{
 						"name": "serialize",
 						"kwargs": map[string]interface{}{
 							"str_arg": "{msg['item']}",
 							"int_arg": 1,
 						},
 					},
-					map[string]interface{}{
+					{
 						"name": "serialize",
 						"kwargs": map[string]interface{}{
 							"str_arg": "{msg[}",
 							"int_arg": 1,
 						},
 					},
-					map[string]interface{}{
+					{
 						"name": "serialize",
 						"kwargs": map[string]interface{}{
 							"str_arg": "{msg['item']}",
@@ -130,7 +130,7 @@ func TestValidateRulesSpec(t *testing.T) {
 						},
 					},
 				},
-				"scopes": []interface{}{},
+				"scopes": []map[string]string{},
 				"topics": []string{"test"},
 			},
 			expected: ValidationResult{

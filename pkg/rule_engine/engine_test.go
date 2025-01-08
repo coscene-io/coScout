@@ -12,11 +12,11 @@ func TestEngineComprehensiveSingleCondition(t *testing.T) {
 	engine := createTestEngine(t,
 		map[string]interface{}{
 			"version": "v2",
-			"conditions": []interface{}{
+			"conditions": []string{
 				"msg.code > 20",
 			},
-			"actions": []interface{}{
-				map[string]interface{}{
+			"actions": []map[string]interface{}{
+				{
 					"name": "serialize",
 					"kwargs": map[string]interface{}{
 						"str_arg": "{msg.code}",
@@ -24,7 +24,7 @@ func TestEngineComprehensiveSingleCondition(t *testing.T) {
 					},
 				},
 			},
-			"scopes": []interface{}{},
+			"scopes": []map[string]string{},
 			"topics": []string{"test_topic"},
 		}, &result)
 
@@ -81,12 +81,12 @@ func TestEngineComprehensiveMultipleCondition(t *testing.T) {
 	var result map[string]interface{}
 	engine := createTestEngine(t, map[string]interface{}{
 		"version": "v2",
-		"conditions": []interface{}{
+		"conditions": []string{
 			"msg.code > 20",
 			"int(msg.level) <= int(3)",
 		},
-		"actions": []interface{}{
-			map[string]interface{}{
+		"actions": []map[string]interface{}{
+			{
 				"name": "serialize",
 				"kwargs": map[string]interface{}{
 					"str_arg": "{msg.code}",
@@ -94,7 +94,7 @@ func TestEngineComprehensiveMultipleCondition(t *testing.T) {
 				},
 			},
 		},
-		"scopes": []interface{}{},
+		"scopes": []map[string]string{},
 		"topics": []string{"test_topic"},
 	}, &result)
 
@@ -173,12 +173,12 @@ func TestEngineScope(t *testing.T) {
 	var result map[string]interface{}
 	engine := createTestEngine(t, map[string]interface{}{
 		"version": "v2",
-		"conditions": []interface{}{
+		"conditions": []string{
 			"msg.code > 20",
 			"int(scope.level) <= int(3)",
 		},
-		"actions": []interface{}{
-			map[string]interface{}{
+		"actions": []map[string]interface{}{
+			{
 				"name": "serialize",
 				"kwargs": map[string]interface{}{
 					"str_arg": "{scope.code}",
@@ -186,8 +186,8 @@ func TestEngineScope(t *testing.T) {
 				},
 			},
 		},
-		"scopes": []interface{}{
-			map[string]interface{}{
+		"scopes": []map[string]string{
+			{
 				"code":  "77",
 				"level": "1",
 			},

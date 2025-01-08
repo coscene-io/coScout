@@ -4,9 +4,10 @@ go 1.23
 
 require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241231113146-2afb5c141deb.1
-	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.1-20241231113146-2afb5c141deb.1
+	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.2-20250108073155-ac5cadaf1607.1
 	connectrpc.com/connect v1.17.0
 	github.com/coscene-io/x v0.0.0-20241217064456-1ad08bd128a7
+	github.com/fatih/structs v1.1.0
 	github.com/google/cel-go v0.22.1
 	github.com/knadh/koanf v1.5.0
 	github.com/minio/minio-go/v7 v7.0.61
@@ -15,13 +16,13 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
 	go.etcd.io/bbolt v1.3.11
-	google.golang.org/protobuf v1.36.1
+	google.golang.org/protobuf v1.36.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.1-20240508200655-46a4cf4ba109.1 // indirect
-	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.1-20230414000709-087bc8072ce4.1 // indirect
+	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.2-20240508200655-46a4cf4ba109.1 // indirect
+	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.2-20230414000709-087bc8072ce4.1 // indirect
 	cel.dev/expr v0.18.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

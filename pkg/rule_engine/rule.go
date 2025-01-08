@@ -3,6 +3,7 @@ package rule_engine
 import (
 	"time"
 
+	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/samber/lo"
 )
 
@@ -17,7 +18,7 @@ type Rule struct {
 	Actions            []Action
 	Scope              map[string]string
 	Topics             []string
-	DebounceTime       int
+	DebounceTime       time.Duration
 	prevActivationTime *time.Time
 	Metadata           map[string]interface{}
 }
@@ -29,7 +30,7 @@ func NewRule(
 	actions []Action,
 	scope map[string]string,
 	topics []string,
-	debounceTime int,
+	debounceTime time.Duration,
 	metadata map[string]interface{},
 ) *Rule {
 	if metadata == nil {
@@ -65,7 +66,7 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) b
 	switch {
 	case r.prevActivationTime == nil:
 		activated = true
-	case ts.Sub(*r.prevActivationTime) > time.Duration(r.DebounceTime)*time.Second:
+	case ts.Sub(*r.prevActivationTime) > r.DebounceTime:
 		activated = true
 	default:
 		activated = false
@@ -128,7 +129,7 @@ func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 
 	// Validate conditions
 	conditions := make([]Condition, 0)
-	conditionsArray, ok := ruleSpec["conditions"].([]interface{})
+	conditionsArray, ok := ruleSpec["conditions"].([]string)
 	if !ok || len(conditionsArray) == 0 {
 		errors = append(errors, ValidationError{
 			Location: &ValidationErrorLocation{
@@ -138,11 +139,7 @@ func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 		})
 	}
 
-	for condIdx, condInterface := range conditionsArray {
-		condStr, ok := condInterface.(string)
-		if !ok {
-			continue
-		}
+	for condIdx, condStr := range conditionsArray {
 		condition, err := NewCondition(condStr)
 		if err != nil {
 			errors = append(errors, ValidationError{
@@ -159,7 +156,7 @@ func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 
 	// Validate actions
 	actions := make([]Action, 0)
-	actionsArray, ok := ruleSpec["actions"].([]interface{})
+	actionsArray, ok := ruleSpec["actions"].([]map[string]interface{})
 	if !ok || len(actionsArray) == 0 {
 		errors = append(errors, ValidationError{
 			Location: &ValidationErrorLocation{
@@ -169,12 +166,7 @@ func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 		})
 	}
 
-	for actionIdx, actionInterface := range actionsArray {
-		actionSpec, ok := actionInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
+	for actionIdx, actionSpec := range actionsArray {
 		actionName, _ := actionSpec["name"].(string)
 		actionKwargs, _ := actionSpec["kwargs"].(map[string]interface{})
 		actionImpl, _ := actionImpls[actionName].(func(map[string]interface{}) error)
@@ -201,20 +193,7 @@ func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 	}
 
 	// Get scopes and topics
-	scopes := make([]map[string]string, 0)
-	if scopesArray, ok := ruleSpec["scopes"].([]interface{}); ok {
-		for _, scopeInterface := range scopesArray {
-			if scopeMap, ok := scopeInterface.(map[string]interface{}); ok {
-				scope := make(map[string]string)
-				for k, v := range scopeMap {
-					if strVal, ok := v.(string); ok {
-						scope[k] = strVal
-					}
-				}
-				scopes = append(scopes, scope)
-			}
-		}
-	}
+	scopes := ruleSpec["scopes"].([]map[string]string)
 	if len(scopes) == 0 {
 		scopes = append(scopes, make(map[string]string))
 	}
@@ -225,9 +204,9 @@ func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 	}
 
 	// Create rules for each scope
-	debounceTime := 0
-	if dt, ok := ruleSpec["condition_debounce"].(int); ok {
-		debounceTime = dt
+	var debounceTime time.Duration = 0
+	if dt, ok := ruleSpec["condition_debounce"].(string); ok {
+		debounceTime, _ = utils.ParseISODuration(dt)
 	}
 
 	rules := make([]*Rule, 0)
