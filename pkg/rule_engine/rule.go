@@ -76,6 +76,43 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) b
 }
 
 // ValidateRuleSpec validates a single rule specification.
+//
+//	Example rules specification as follows:
+//
+//	{
+//	  "version": "v2",
+//	  "conditions": [
+//		   "msg['temperature'] > 20",
+//		   "int(msg['humidity']) < int(30)"
+//	  ],
+//	  "actions: [
+//		   {
+//			   "name": "action_1",
+//			   "kwargs": {
+//				   "arg1_1": "{msg['item']}",
+//				   "arg1_2": 1
+//			   }
+//		   },
+//		   {
+//			   "name": "action_2",
+//			   "kwargs": {
+//				   "arg2_1": "{msg.code}",
+//				   "arg2_2": 1
+//			   }
+//		   }
+//	  ],
+//	  "scopes": [
+//		   {
+//			   "scope_key_a": "scope_value_a_1"
+//			   "scope_key_b": "scope_value_b_1"
+//		   },
+//		   {
+//			   "scope_key_a": "scope_value_a_2"
+//			   "scope_key_b": "scope_value_b_2"
+//		   }
+//	  ],
+//	  "topics": ["topic_1", "topic_2"]
+//	}
 func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]interface{}) ([]*Rule, ValidationResult) {
 	var errors []ValidationError
 
