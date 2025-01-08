@@ -6,9 +6,11 @@ import (
 	"github.com/samber/lo"
 )
 
-var AllowedVersions = []string{"v2"}
+func AllowedVersions() []string {
+	return []string{"v2"}
+}
 
-// Rule represents a rule with conditions and actions
+// Rule represents a rule with conditions and actions.
 type Rule struct {
 	Raw                map[string]interface{}
 	Conditions         []Condition
@@ -20,7 +22,7 @@ type Rule struct {
 	Metadata           map[string]interface{}
 }
 
-// NewRule creates a new Rule instance
+// NewRule creates a new Rule instance.
 func NewRule(
 	raw map[string]interface{},
 	conditions []Condition,
@@ -44,7 +46,7 @@ func NewRule(
 	}
 }
 
-// EvalConditions evaluates all conditions of the rule
+// EvalConditions evaluates all conditions of the rule.
 func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) bool {
 	// Check all conditions
 	for _, cond := range r.Conditions {
@@ -59,12 +61,13 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) b
 	}
 
 	// Handle debouncing
-	activated := false
-	if r.prevActivationTime == nil {
+	var activated bool
+	switch {
+	case r.prevActivationTime == nil:
 		activated = true
-	} else if ts.Sub(*r.prevActivationTime) > time.Duration(r.DebounceTime)*time.Second {
+	case ts.Sub(*r.prevActivationTime) > time.Duration(r.DebounceTime)*time.Second:
 		activated = true
-	} else {
+	default:
 		activated = false
 	}
 
@@ -72,17 +75,17 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) b
 	return activated
 }
 
-// ValidateRulesSpec validates a rule specification and returns the compiled rules
+// ValidateRulesSpec validates a rule specification and returns the compiled rules.
 func ValidateRulesSpec(rulesSpec map[string]interface{}, actionImpls map[string]interface{}) ([]*Rule, ValidationResult) {
 	var allRules []*Rule
 	var errors []ValidationError
 
 	version, ok := rulesSpec["version"].(string)
-	if !ok || !lo.Contains(AllowedVersions, version) {
+	if !ok || !lo.Contains(AllowedVersions(), version) {
 		return nil, ValidationResult{
 			Success: false,
 			Errors: []ValidationError{{
-				UnexpectedVersion: &ValidationErrorUnexpectedVersion{AllowedVersions: AllowedVersions},
+				UnexpectedVersion: &ValidationErrorUnexpectedVersion{AllowedVersions: AllowedVersions()},
 			}},
 		}
 	}
@@ -113,7 +116,7 @@ func ValidateRulesSpec(rulesSpec map[string]interface{}, actionImpls map[string]
 	}
 }
 
-// validateRuleSpec validates a single rule specification
+// validateRuleSpec validates a single rule specification.
 func validateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]interface{}, ruleIdx int) ([]*Rule, []ValidationError) {
 	var errors []ValidationError
 

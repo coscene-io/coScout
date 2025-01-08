@@ -5,6 +5,8 @@ import (
 )
 
 func TestValidateRulesSpec(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name     string
 		ruleSpec map[string]interface{}
@@ -175,6 +177,8 @@ func TestValidateRulesSpec(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			_, result := ValidateRulesSpec(tc.ruleSpec, map[string]interface{}{
 				"serialize": func(map[string]interface{}) error {
 					return nil

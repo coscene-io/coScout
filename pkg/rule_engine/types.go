@@ -2,7 +2,7 @@ package rule_engine
 
 import "github.com/google/cel-go/cel"
 
-// ErrorSection represents the section where validation error occurred
+// ErrorSection represents the section where validation error occurred.
 type ErrorSection int
 
 const (
@@ -10,19 +10,19 @@ const (
 	ActionSection
 )
 
-// ValidationErrorLocation represents where the validation error occurred
+// ValidationErrorLocation represents where the validation error occurred.
 type ValidationErrorLocation struct {
 	RuleIndex int          `json:"ruleIndex"`
 	Section   ErrorSection `json:"section"`
 	ItemIndex int          `json:"itemIndex,omitempty"`
 }
 
-// ValidationErrorUnexpectedVersion represents version validation error
+// ValidationErrorUnexpectedVersion represents version validation error.
 type ValidationErrorUnexpectedVersion struct {
 	AllowedVersions []string `json:"allowedVersions"`
 }
 
-// ValidationError represents a validation error
+// ValidationError represents a validation error.
 type ValidationError struct {
 	Location          *ValidationErrorLocation          `json:"location,omitempty"`
 	UnexpectedVersion *ValidationErrorUnexpectedVersion `json:"unexpectedVersion,omitempty"`
@@ -30,7 +30,7 @@ type ValidationError struct {
 	EmptySection      *struct{}                         `json:"emptySection,omitempty"`
 }
 
-// ValidationResult represents the result of validation
+// ValidationResult represents the result of validation.
 type ValidationResult struct {
 	Success bool              `json:"success"`
 	Errors  []ValidationError `json:"errors"`
@@ -45,7 +45,7 @@ func CompareValidationResult(result1, result2 ValidationResult) bool {
 	}
 
 	// Compare error counts
-	for idx, _ := range result1.Errors {
+	for idx := range result1.Errors {
 		if !result1.Errors[idx].Equal(result2.Errors[idx]) {
 			return false
 		}
@@ -54,7 +54,7 @@ func CompareValidationResult(result1, result2 ValidationResult) bool {
 	return true
 }
 
-// Add this helper method to make ValidationError comparable
+// Add this helper method to make ValidationError comparable.
 func (e ValidationError) Equal(other ValidationError) bool {
 	// Compare Location
 	if (e.Location == nil) != (other.Location == nil) {
@@ -87,14 +87,14 @@ func (e ValidationError) Equal(other ValidationError) bool {
 	return true
 }
 
-// Add this helper method for ValidationErrorLocation
+// Add this helper method for ValidationErrorLocation.
 func (l ValidationErrorLocation) Equal(other ValidationErrorLocation) bool {
 	return l.RuleIndex == other.RuleIndex &&
 		l.Section == other.Section &&
 		l.ItemIndex == other.ItemIndex
 }
 
-// Helper function to compare string slices
+// Helper function to compare string slices.
 func sliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

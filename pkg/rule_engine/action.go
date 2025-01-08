@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/cel"
+	"github.com/pkg/errors"
 )
 
-// Action represents an action with a name and parameters
+// Action represents an action with a name and parameters.
 type Action struct {
 	Name      string
 	RawKwargs map[string]interface{}
@@ -16,17 +17,17 @@ type Action struct {
 	impl      func(map[string]interface{}) error
 }
 
-// expressionEvaluator is a function that evaluates an expression with given activation
+// expressionEvaluator is a function that evaluates an expression with given activation.
 type expressionEvaluator func(activation map[string]interface{}) (interface{}, error)
 
-// NewAction creates a new action with compiled CEL expressions
+// NewAction creates a new action with compiled CEL expressions.
 func NewAction(
 	name string,
 	rawKwargs map[string]interface{},
 	impl func(map[string]interface{}) error,
 ) (*Action, error) {
 	if impl == nil {
-		return nil, fmt.Errorf("implementation function cannot be nil")
+		return nil, errors.New("implementation function cannot be nil")
 	}
 
 	env, err := cel.NewEnv(
@@ -36,7 +37,7 @@ func NewAction(
 		cel.Variable("ts", cel.DoubleType),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create CEL environment: %v", err)
+		return nil, errors.Errorf("failed to create CEL environment: %v", err)
 	}
 
 	kwargs := make(map[string]expressionEvaluator)
@@ -45,13 +46,13 @@ func NewAction(
 		case string:
 			evaluator, err := compileEmbeddedExpr(env, val)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile argument %s: %v", k, err)
+				return nil, errors.Errorf("failed to compile argument %s: %v", k, err)
 			}
 			kwargs[k] = evaluator
 		case map[string]interface{}:
 			evaluator, err := compileDictExpr(env, val)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile dict argument %s: %v", k, err)
+				return nil, errors.Errorf("failed to compile dict argument %s: %v", k, err)
 			}
 			kwargs[k] = evaluator
 		default:
@@ -70,14 +71,14 @@ func NewAction(
 	}, nil
 }
 
-// Run executes the action with the given activation context
+// Run executes the action with the given activation context.
 func (a *Action) Run(activation map[string]interface{}) error {
 	evaluatedKwargs := make(map[string]interface{})
 
 	for k, evaluator := range a.kwargs {
 		value, err := evaluator(activation)
 		if err != nil {
-			return fmt.Errorf("failed to evaluate argument %s: %v", k, err)
+			return errors.Errorf("failed to evaluate argument %s: %v", k, err)
 		}
 		evaluatedKwargs[k] = value
 	}
@@ -85,7 +86,7 @@ func (a *Action) Run(activation map[string]interface{}) error {
 	return a.impl(evaluatedKwargs)
 }
 
-// compileEmbeddedExpr compiles a string containing embedded CEL expressions
+// compileEmbeddedExpr compiles a string containing embedded CEL expressions.
 func compileEmbeddedExpr(env *cel.Env, expr string) (expressionEvaluator, error) {
 	pattern := regexp.MustCompile(`\{\s*(.*?)\s*}`)
 	matches := pattern.FindAllStringSubmatch(expr, -1)
@@ -97,15 +98,15 @@ func compileEmbeddedExpr(env *cel.Env, expr string) (expressionEvaluator, error)
 		}, nil
 	}
 
-	var programs []cel.Program
+	programs := make([]cel.Program, 0)
 	for _, match := range matches {
 		ast, issues := env.Compile(match[1])
 		if issues != nil && issues.Err() != nil {
-			return nil, fmt.Errorf("failed to compile expression '%s': %v", match[1], issues.Err())
+			return nil, errors.Errorf("failed to compile expression '%s': %v", match[1], issues.Err())
 		}
 		program, err := env.Program(ast)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create program for '%s': %v", match[1], err)
+			return nil, errors.Errorf("failed to create program for '%s': %v", match[1], err)
 		}
 		programs = append(programs, program)
 	}
@@ -125,7 +126,7 @@ func compileEmbeddedExpr(env *cel.Env, expr string) (expressionEvaluator, error)
 	}, nil
 }
 
-// compileDictExpr compiles expressions in a dictionary
+// compileDictExpr compiles expressions in a dictionary.
 func compileDictExpr(env *cel.Env, dict map[string]interface{}) (expressionEvaluator, error) {
 	compiledDict := make(map[string]expressionEvaluator)
 
@@ -134,11 +135,11 @@ func compileDictExpr(env *cel.Env, dict map[string]interface{}) (expressionEvalu
 		case string:
 			evaluator, err := compileEmbeddedExpr(env, val)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile dict value for key %s: %v", k, err)
+				return nil, errors.Errorf("failed to compile dict value for key %s: %v", k, err)
 			}
 			compiledDict[k] = evaluator
 		case map[string]interface{}:
-			return nil, fmt.Errorf("nested dictionaries are not supported")
+			return nil, errors.Errorf("nested dictionaries are not supported")
 		default:
 			// For non-string values, create a simple evaluator that returns the constant
 			compiledDict[k] = func(map[string]interface{}) (interface{}, error) {
@@ -152,7 +153,7 @@ func compileDictExpr(env *cel.Env, dict map[string]interface{}) (expressionEvalu
 		for k, evaluator := range compiledDict {
 			value, err := evaluator(activation)
 			if err != nil {
-				return nil, fmt.Errorf("failed to evaluate dict value for key %s: %v", k, err)
+				return nil, errors.Errorf("failed to evaluate dict value for key %s: %v", k, err)
 			}
 			result[k] = value
 		}

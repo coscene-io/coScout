@@ -4,25 +4,29 @@ import (
 	"testing"
 )
 
-var testActivation = map[string]interface{}{
-	"msg": map[string]interface{}{
-		"message": map[string]interface{}{
+func getTestActivation() map[string]interface{} {
+	return map[string]interface{}{
+		"msg": map[string]interface{}{
+			"message": map[string]interface{}{
+				"code": 200,
+			},
+			"lst": []interface{}{
+				map[string]interface{}{"code": 1},
+				map[string]interface{}{"code": 2},
+				map[string]interface{}{"code": 3},
+			},
+		},
+		"scope": map[string]interface{}{
 			"code": 200,
 		},
-		"lst": []interface{}{
-			map[string]interface{}{"code": 1},
-			map[string]interface{}{"code": 2},
-			map[string]interface{}{"code": 3},
-		},
-	},
-	"scope": map[string]interface{}{
-		"code": 200,
-	},
-	"topic": "/TestTopic",
-	"ts":    1234567890.123456,
+		"topic": "/TestTopic",
+		"ts":    1234567890.123456,
+	}
 }
 
 func TestConditionIntInt(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		condition string
 		expected  bool
@@ -36,13 +40,15 @@ func TestConditionIntInt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create condition: %v", err)
 		}
-		if condition.Evaluate(testActivation) != test.expected {
+		if condition.Evaluate(getTestActivation()) != test.expected {
 			t.Errorf("Expected %v for %s", test.expected, test.condition)
 		}
 	}
 }
 
 func TestConditionMsgCastOther(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		condition string
 		expected  bool
@@ -58,13 +64,15 @@ func TestConditionMsgCastOther(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create condition: %v", err)
 		}
-		if condition.Evaluate(testActivation) != test.expected {
+		if condition.Evaluate(getTestActivation()) != test.expected {
 			t.Errorf("Expected %v for %s", test.expected, test.condition)
 		}
 	}
 }
 
 func TestConditionMsgScope(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		condition string
 		expected  bool
@@ -78,13 +86,15 @@ func TestConditionMsgScope(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create condition: %v", err)
 		}
-		if condition.Evaluate(testActivation) != test.expected {
+		if condition.Evaluate(getTestActivation()) != test.expected {
 			t.Errorf("Expected %v for %s", test.expected, test.condition)
 		}
 	}
 }
 
 func TestConditionMapContains(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		condition string
 		expected  bool
@@ -100,13 +110,15 @@ func TestConditionMapContains(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create condition: %v", err)
 		}
-		if condition.Evaluate(testActivation) != test.expected {
+		if condition.Evaluate(getTestActivation()) != test.expected {
 			t.Errorf("Expected %v for %s", test.expected, test.condition)
 		}
 	}
 }
 
 func TestConditionExists(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		condition string
 		expected  bool
@@ -122,13 +134,15 @@ func TestConditionExists(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create condition: %v", err)
 		}
-		if condition.Evaluate(testActivation) != test.expected {
+		if condition.Evaluate(getTestActivation()) != test.expected {
 			t.Errorf("Expected %v for %s", test.expected, test.condition)
 		}
 	}
 }
 
 func TestConditionInvalid(t *testing.T) {
+	t.Parallel()
+
 	tests := []string{
 		`mmm.message.code == 200`,
 		`msg.message.code ==`,

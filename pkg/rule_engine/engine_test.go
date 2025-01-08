@@ -6,6 +6,8 @@ import (
 )
 
 func TestEngineComprehensiveSingleCondition(t *testing.T) {
+	t.Parallel()
+
 	var result map[string]interface{}
 	engine := createTestEngine(t, []interface{}{
 		map[string]interface{}{
@@ -74,6 +76,8 @@ func TestEngineComprehensiveSingleCondition(t *testing.T) {
 }
 
 func TestEngineComprehensiveMultipleCondition(t *testing.T) {
+	t.Parallel()
+
 	var result map[string]interface{}
 	engine := createTestEngine(t, []interface{}{
 		map[string]interface{}{
@@ -165,6 +169,8 @@ func TestEngineComprehensiveMultipleCondition(t *testing.T) {
 }
 
 func TestEngineScope(t *testing.T) {
+	t.Parallel()
+
 	var result map[string]interface{}
 	engine := createTestEngine(t, []interface{}{
 		map[string]interface{}{
@@ -221,6 +227,8 @@ func TestEngineScope(t *testing.T) {
 }
 
 func createTestEngine(t *testing.T, rulesSpec []interface{}, result *map[string]interface{}) *Engine {
+	t.Helper()
+
 	spec := map[string]interface{}{
 		"version": "v2",
 		"rules":   rulesSpec,
