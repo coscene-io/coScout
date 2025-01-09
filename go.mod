@@ -1,13 +1,12 @@
 module github.com/coscene-io/coscout
 
-go 1.23
+go 1.22.2
 
 require (
-	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.17.0-20241231113146-2afb5c141deb.1
+	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250108073155-ac5cadaf1607.1
 	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.2-20250108073155-ac5cadaf1607.1
-	connectrpc.com/connect v1.17.0
+	connectrpc.com/connect v1.18.1
 	github.com/coscene-io/x v0.0.0-20241217064456-1ad08bd128a7
-	github.com/fatih/structs v1.1.0
 	github.com/google/cel-go v0.22.1
 	github.com/knadh/koanf v1.5.0
 	github.com/minio/minio-go/v7 v7.0.61

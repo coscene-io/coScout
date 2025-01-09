@@ -3,7 +3,6 @@ package rule_engine
 import (
 	"time"
 
-	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/samber/lo"
 )
 
@@ -206,7 +205,7 @@ func ValidateRuleSpec(ruleSpec map[string]interface{}, actionImpls map[string]in
 	// Create rules for each scope
 	var debounceTime time.Duration = 0
 	if dt, ok := ruleSpec["condition_debounce"].(string); ok {
-		debounceTime, _ = utils.ParseISODuration(dt)
+		debounceTime, _ = time.ParseDuration(dt)
 	}
 
 	rules := make([]*Rule, 0)

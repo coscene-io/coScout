@@ -2,6 +2,7 @@ package rule_engine
 
 import (
 	"fmt"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
@@ -22,10 +23,19 @@ type V2Rule struct {
 	ConditionDebounce string              `json:"condition_debounce"`
 }
 
+func ApiRuleStrToRuleSpec(apiRuleStr string) (map[string]interface{}, error) {
+	apiRule := &resources.DiagnosisRule{}
+	err := protojson.Unmarshal([]byte(apiRuleStr), apiRule)
+	if err != nil {
+		return nil, err
+	}
+	return ApiRuleToRuleSpec(apiRule), nil
+}
+
 func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} {
 	result := make(map[string]interface{})
 
-	conditions := []string{}
+	var conditions []string
 	for _, conditionSpec := range apiRule.ConditionSpecs {
 		switch conditionSpec.GetCondition().(type) {
 		case *resources.ConditionSpec_Raw:

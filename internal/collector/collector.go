@@ -25,7 +25,6 @@ import (
 
 	openAnaV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/enums"
 	openAnaV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/resources"
-	openDpsV1alpha1Common "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/commons"
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"github.com/coscene-io/coscout/internal/api"
@@ -205,8 +204,8 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				Device: deviceInfo,
 			}
 			if moment.RuleId != "" {
-				event.Rule = &openDpsV1alpha1Common.RuleSpec{
-					Id: moment.RuleId,
+				event.Rule = &openDpsV1alpha1Resource.DiagnosisRule{
+					Name: moment.RuleId,
 				}
 			}
 			obtainEvent, err := reqClient.ObtainEvent(rc.ProjectName, &event)
@@ -333,10 +332,10 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 	}
 	ruleId, ok := recordCache.DiagnosisTask["rule_id"].(string)
 	if ok {
-		ruleSpec := &openDpsV1alpha1Common.RuleSpec{
-			Id: ruleId,
+		ruleSpec := &openDpsV1alpha1Resource.DiagnosisRule{
+			Name: ruleId,
 		}
-		record.Rules = []*openDpsV1alpha1Common.RuleSpec{ruleSpec}
+		record.Rules = []*openDpsV1alpha1Resource.DiagnosisRule{ruleSpec}
 	}
 
 	record, err := reqClient.CreateRecord(recordCache.ProjectName, record)
