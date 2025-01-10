@@ -2,11 +2,11 @@ package rule_engine
 
 import (
 	"fmt"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -36,7 +36,7 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 	result := make(map[string]interface{})
 
 	var conditions []string
-	for _, conditionSpec := range apiRule.ConditionSpecs {
+	for _, conditionSpec := range apiRule.GetConditionSpecs() {
 		switch conditionSpec.GetCondition().(type) {
 		case *resources.ConditionSpec_Raw:
 			conditions = append(conditions, conditionSpec.GetRaw())
@@ -46,6 +46,7 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 			scPath := sc.GetPath()
 
 			scType := ""
+			//nolint: exhaustive // we only have two types
 			switch sc.GetType() {
 			case enums.RuleConditionTypeEnum_STRING:
 				scType = "string"
@@ -54,6 +55,7 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 			}
 
 			scOp := ""
+			//nolint: exhaustive // we only have two ops
 			switch sc.GetOp() {
 			case enums.RuleConditionOpEnum_CONTAINS:
 				scOp = "contains"
@@ -70,7 +72,7 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 				scValue = fmt.Sprintf("%q", sc.GetUserInput())
 			}
 
-			conditionExpr := ""
+			var conditionExpr string
 			if scOp == "contains" {
 				conditionExpr = fmt.Sprintf("%s(%s).contains(%s(%s))", scType, scPath, scType, scValue)
 			} else {
@@ -82,30 +84,30 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 	result["conditions"] = conditions
 
 	var actions []map[string]interface{}
-	for _, actionSpec := range apiRule.ActionSpecs {
+	for _, actionSpec := range apiRule.GetActionSpecs() {
 		switch actionSpecValue := actionSpec.GetSpec().(type) {
 		case *resources.ActionSpec_Upload:
 			actions = append(actions, map[string]interface{}{
 				"name": "upload",
 				"kwargs": map[string]interface{}{
-					"before":      actionSpecValue.Upload.PreTrigger,
-					"after":       actionSpecValue.Upload.PostTrigger,
-					"title":       actionSpecValue.Upload.Title,
-					"description": actionSpecValue.Upload.Description,
-					"labels":      actionSpecValue.Upload.Labels,
-					"extra_files": actionSpecValue.Upload.ExtraFiles,
-					"white_list":  actionSpecValue.Upload.WhiteList,
+					"before":      actionSpecValue.Upload.GetPreTrigger,
+					"after":       actionSpecValue.Upload.GetPostTrigger,
+					"title":       actionSpecValue.Upload.GetTitle,
+					"description": actionSpecValue.Upload.GetDescription,
+					"labels":      actionSpecValue.Upload.GetLabels,
+					"extra_files": actionSpecValue.Upload.GetExtraFiles,
+					"white_list":  actionSpecValue.Upload.GetWhiteList,
 				},
 			})
 		case *resources.ActionSpec_CreateMoment:
 			actions = append(actions, map[string]interface{}{
 				"name": "create_moment",
 				"kwargs": map[string]interface{}{
-					"title":         actionSpecValue.CreateMoment.Title,
-					"description":   actionSpecValue.CreateMoment.Description,
-					"create_task":   actionSpecValue.CreateMoment.CreateTask,
-					"assign_to":     actionSpecValue.CreateMoment.Assignee,
-					"custom_fields": actionSpecValue.CreateMoment.CustomFields,
+					"title":         actionSpecValue.CreateMoment.GetTitle,
+					"description":   actionSpecValue.CreateMoment.GetDescription,
+					"create_task":   actionSpecValue.CreateMoment.GetCreateTask,
+					"assign_to":     actionSpecValue.CreateMoment.GetAssignee,
+					"custom_fields": actionSpecValue.CreateMoment.GetCustomFields,
 				},
 			})
 		}
@@ -121,9 +123,9 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 		return vs
 	})
 
-	result["topics"] = []string{apiRule.ActiveTopics}
-	result["condition_debounce"] = apiRule.DebounceDuration
-	result["version"] = apiRule.Version
+	result["topics"] = []string{apiRule.GetActiveTopics()}
+	result["condition_debounce"] = apiRule.GetDebounceDuration
+	result["version"] = apiRule.GetVersion
 
 	return result
 }

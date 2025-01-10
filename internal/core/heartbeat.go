@@ -41,9 +41,14 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 
 	lastError := ErrorInfo{}
 	go func(c chan error) {
-		for err := range c {
-			lastError.Err = err
-			lastError.Timestamp = time.Now().Unix()
+		for {
+			select {
+			case err := <-c:
+				lastError.Err = err
+				lastError.Timestamp = time.Now().Unix()
+			case <-ctx.Done():
+				return
+			}
 		}
 	}(errChan)
 

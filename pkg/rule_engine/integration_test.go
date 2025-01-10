@@ -10,6 +10,8 @@ import (
 )
 
 func TestApiRuleToRuleSpec(t *testing.T) {
+	t.Parallel()
+
 	apiRule := &resources.DiagnosisRule{
 		Name:         "test",
 		DisplayName:  "test display",

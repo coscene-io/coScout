@@ -23,7 +23,8 @@ import (
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
-	"github.com/coscene-io/coscout/internal/mod/task"
+	"github.com/coscene-io/coscout/internal/mod"
+	"github.com/coscene-io/coscout/pkg/constant"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -34,7 +35,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	<-startChan
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // This will signal all goroutines to exit gracefully
+	defer cancel()
 
 	go func() {
 		err := collector.Collect(ctx, reqClient, confManager, errorChan)
@@ -51,13 +52,8 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 			case <-t.C:
 				//nolint: contextcheck // context is checked in the parent goroutine
 				refreshRemoteConfig(confManager, reqClient)
-				appConfig := confManager.LoadWithRemote()
-
-				err := task.NewTaskHandler(*reqClient, *appConfig, confManager.GetStorage()).Run()
-				if err != nil {
-					errorChan <- err
-				}
 			case <-ctx.Done():
+				log.Infof("Daemon context done")
 				return
 			}
 
@@ -65,7 +61,10 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		}
 	}(ticker)
 
+	go mod.NewModHandler(*reqClient, *confManager, errorChan, constant.TaskModType).Run(ctx)
+	go mod.NewModHandler(*reqClient, *confManager, errorChan, constant.RuleModType).Run(ctx)
 	go core.SendHeartbeat(ctx, reqClient, confManager.GetStorage(), errorChan)
+
 	<-finishChan
 }
 

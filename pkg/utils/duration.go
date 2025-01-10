@@ -1,10 +1,11 @@
 package utils
 
 import (
-	"fmt"
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 func ParseISODuration(duration string) (time.Duration, error) {
@@ -12,7 +13,7 @@ func ParseISODuration(duration string) (time.Duration, error) {
 	re := regexp.MustCompile(`P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?`)
 	matches := re.FindStringSubmatch(duration)
 	if matches == nil {
-		return 0, fmt.Errorf("invalid ISO 8601 duration format")
+		return 0, errors.New("invalid ISO 8601 duration format")
 	}
 
 	// Parse components
@@ -37,7 +38,7 @@ func ParseISODuration(duration string) (time.Duration, error) {
 	return time.Duration(totalSeconds) * time.Second, nil
 }
 
-// Helper function to parse an integer from a string, defaulting to 0 if empty
+// Helper function to parse an integer from a string, defaulting to 0 if empty.
 func parseInt(str string) int {
 	if str == "" {
 		return 0

@@ -15,21 +15,27 @@
 package mod
 
 import (
+	"context"
+
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
-	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/coscene-io/coscout/internal/mod/rule"
+	"github.com/coscene-io/coscout/internal/mod/task"
+	"github.com/coscene-io/coscout/pkg/constant"
 )
 
 type CustomHandler interface {
 	// Run the mod handler
-	Run() error
+	Run(ctx context.Context)
 }
 
-type Handler struct {
-	//nolint: unused // This is a placeholder for future use
-	reqClient api.RequestClient
-	//nolint: unused // This is a placeholder for future use
-	config config.AppConfig
-	//nolint: unused // This is a placeholder for future use
-	storage storage.Storage
+func NewModHandler(reqClient api.RequestClient, confManager config.ConfManager, errChan chan error, mod string) CustomHandler {
+	switch mod {
+	case constant.TaskModType:
+		return task.NewTaskHandler(reqClient, confManager, errChan)
+	case constant.RuleModType:
+		return rule.NewRuleHandler(reqClient, confManager, errChan)
+	default:
+		return nil
+	}
 }

@@ -47,4 +47,7 @@ const (
 	UploadBucket = "default"
 
 	LabelUploadSuccess = "\u4E0A\u4F20\u5B8C\u6210"
+
+	TaskModType = "task"
+	RuleModType = "rule"
 )

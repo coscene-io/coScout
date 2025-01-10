@@ -129,6 +129,15 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s already be rejected", device.GetSerialNumber())
+			err := r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExpireKey))
+			if err != nil {
+				log.Warnf("unable to delete device auth token expireTime: %v", err)
+			}
+
+			err = r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthKey))
+			if err != nil {
+				log.Warnf("unable to delete device auth token: %v", err)
+			}
 			time.Sleep(deviceAuthCheckInterval)
 			continue
 		}
