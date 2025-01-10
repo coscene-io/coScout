@@ -67,7 +67,6 @@ type ModConfConfig struct {
 }
 
 type DefaultModConfConfig struct {
-	Enabled               bool     `koanf:"enabled" yaml:"enabled" json:"enabled"`
 	ListenDirs            []string `koanf:"listen_dirs" yaml:"listen_dirs" json:"listen_dirs"`
 	CollectDirs           []string `koanf:"collect_dirs" yaml:"collect_dirs" json:"collect_dirs"`
 	Topics                []string `koanf:"topics" yaml:"topics" json:"topics"`

@@ -99,4 +99,5 @@ func refreshRemoteConfig(confManager *config.ConfManager, reqClient *api.Request
 
 		confManager.SetRemote(name, string(value))
 	}
+	log.Infof("Remote config refreshed")
 }
