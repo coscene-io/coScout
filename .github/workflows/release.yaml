@@ -111,6 +111,7 @@ jobs:
           assets: |
             cos.gz:/coscoutPro/latest/${{ matrix.os }}-${{ matrix.arch }}.gz
             ${{ matrix.os }}-${{ matrix.arch }}.json:/coscoutPro/latest/${{ matrix.os }}-${{ matrix.arch }}.json
+            script/install.sh:/coscoutPro/install.sh
       - name: Upload coscli beta metadata files to oss
         if: env.IS_RELEASE == 'false'
         uses: tvrcgo/oss-action@master
@@ -122,3 +123,4 @@ jobs:
           assets: |
             cos.gz:/coscoutPro/beta/${{ matrix.os }}-${{ matrix.arch }}.gz
             ${{ matrix.os }}-${{ matrix.arch }}.json:/coscoutPro/beta/${{ matrix.os }}-${{ matrix.arch }}.json
+            script/install.sh:/coscoutPro/install-beta.sh
