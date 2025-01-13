@@ -76,6 +76,24 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) b
 	return activated
 }
 
+func ValidateRuleSpecStr(ruleSpecStr string) ([]*Rule, ValidationResult) {
+	ruleSpec, err := ApiRuleStrToRuleSpec(ruleSpecStr)
+	if err != nil {
+		return nil, ValidationResult{
+			Success: false,
+			Errors: []ValidationError{{
+				Location:    nil,
+				SyntaxError: &struct{}{},
+			}},
+		}
+	}
+	actionImpls := make(map[string]interface{})
+	actionImpls["upload"] = func(map[string]interface{}) error { return nil }
+	actionImpls["create_moment"] = func(map[string]interface{}) error { return nil }
+
+	return ValidateRuleSpec(ruleSpec, actionImpls)
+}
+
 // ValidateRuleSpec validates a single rule specification.
 //
 //	Example rules specification as follows:
