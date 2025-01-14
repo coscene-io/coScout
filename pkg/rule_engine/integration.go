@@ -24,12 +24,12 @@ type V2Rule struct {
 }
 
 func ApiRuleStrToRuleSpec(apiRuleStr string) (map[string]interface{}, error) {
-	apiRule := &resources.DiagnosisRule{}
-	err := protojson.Unmarshal([]byte(apiRuleStr), apiRule)
+	apiRule := resources.DiagnosisRule{}
+	err := protojson.Unmarshal([]byte(apiRuleStr), &apiRule)
 	if err != nil {
 		return nil, err
 	}
-	return ApiRuleToRuleSpec(apiRule), nil
+	return ApiRuleToRuleSpec(&apiRule), nil
 }
 
 func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} {
@@ -90,24 +90,24 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 			actions = append(actions, map[string]interface{}{
 				"name": "upload",
 				"kwargs": map[string]interface{}{
-					"before":      actionSpecValue.Upload.GetPreTrigger,
-					"after":       actionSpecValue.Upload.GetPostTrigger,
-					"title":       actionSpecValue.Upload.GetTitle,
-					"description": actionSpecValue.Upload.GetDescription,
-					"labels":      actionSpecValue.Upload.GetLabels,
-					"extra_files": actionSpecValue.Upload.GetExtraFiles,
-					"white_list":  actionSpecValue.Upload.GetWhiteList,
+					"before":      actionSpecValue.Upload.GetPreTrigger(),
+					"after":       actionSpecValue.Upload.GetPostTrigger(),
+					"title":       actionSpecValue.Upload.GetTitle(),
+					"description": actionSpecValue.Upload.GetDescription(),
+					"labels":      actionSpecValue.Upload.GetLabels(),
+					"extra_files": actionSpecValue.Upload.GetExtraFiles(),
+					"white_list":  actionSpecValue.Upload.GetWhiteList(),
 				},
 			})
 		case *resources.ActionSpec_CreateMoment:
 			actions = append(actions, map[string]interface{}{
 				"name": "create_moment",
 				"kwargs": map[string]interface{}{
-					"title":         actionSpecValue.CreateMoment.GetTitle,
-					"description":   actionSpecValue.CreateMoment.GetDescription,
-					"create_task":   actionSpecValue.CreateMoment.GetCreateTask,
-					"assign_to":     actionSpecValue.CreateMoment.GetAssignee,
-					"custom_fields": actionSpecValue.CreateMoment.GetCustomFields,
+					"title":         actionSpecValue.CreateMoment.GetTitle(),
+					"description":   actionSpecValue.CreateMoment.GetDescription(),
+					"create_task":   actionSpecValue.CreateMoment.GetCreateTask(),
+					"assign_to":     actionSpecValue.CreateMoment.GetAssignee(),
+					"custom_fields": actionSpecValue.CreateMoment.GetCustomFields(),
 				},
 			})
 		}
@@ -124,8 +124,8 @@ func ApiRuleToRuleSpec(apiRule *resources.DiagnosisRule) map[string]interface{} 
 	})
 
 	result["topics"] = []string{apiRule.GetActiveTopics()}
-	result["condition_debounce"] = apiRule.GetDebounceDuration
-	result["version"] = apiRule.GetVersion
+	result["condition_debounce"] = apiRule.GetDebounceDuration()
+	result["version"] = apiRule.GetVersion()
 
 	return result
 }
