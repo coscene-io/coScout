@@ -53,7 +53,7 @@ func CompareValidationResult(result1, result2 ValidationResult) bool {
 	return true
 }
 
-// Add this helper method to make ValidationError comparable.
+// Equal Add this helper method to make ValidationError comparable.
 func (e ValidationError) Equal(other ValidationError) bool {
 	// Compare Location
 	if (e.Location == nil) != (other.Location == nil) {
@@ -86,7 +86,7 @@ func (e ValidationError) Equal(other ValidationError) bool {
 	return true
 }
 
-// Add this helper method for ValidationErrorLocation.
+// Equal Add this helper method for ValidationErrorLocation.
 func (l ValidationErrorLocation) Equal(other ValidationErrorLocation) bool {
 	return l.Section == other.Section &&
 		l.ItemIndex == other.ItemIndex
@@ -112,4 +112,11 @@ func NewEnv() (*cel.Env, error) {
 		cel.Variable("topic", cel.StringType),
 		cel.Variable("ts", cel.DoubleType),
 	)
+}
+
+type RuleItem struct {
+	Msg   map[string]interface{}
+	Scope map[string]string
+	Topic string
+	Ts    float64
 }

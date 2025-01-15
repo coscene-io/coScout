@@ -35,32 +35,41 @@ import (
 const checkInterval = 60 * time.Second
 
 type CustomRuleHandler struct {
-	reqClient   api.RequestClient
-	confManager config.ConfManager
-	errChan     chan error
+	reqClient        api.RequestClient
+	confManager      config.ConfManager
+	errChan          chan error
+	fileStateHandler file_state_handler.FileStateHandler
 }
 
 func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, errChan chan error) *CustomRuleHandler {
+	fileStateHandler, err := file_state_handler.New()
+	if err != nil {
+		log.Errorf("create file state handler: %v", err)
+		errChan <- errors.Wrap(err, "create file state handler")
+	}
 	return &CustomRuleHandler{
-		reqClient:   reqClient,
-		confManager: confManager,
-		errChan:     errChan,
+		reqClient:        reqClient,
+		confManager:      confManager,
+		errChan:          errChan,
+		fileStateHandler: fileStateHandler,
 	}
 }
 
 func (c CustomRuleHandler) Run(ctx context.Context) {
+	if c.fileStateHandler == nil {
+		log.Errorf("file state handler is nil")
+		return
+	}
+
 	listenChan := make(chan string, 1000)
-	modConfig := &config.DefaultModConfConfig{SkipPeriodHours: 2}
+	modConfig := &config.DefaultModConfConfig{}
 
-	// Create a channel to signal when fileStateHandler is ready
-	handlerReady := make(chan file_state_handler.FileStateHandler)
 
-	// start a periodic goroutine to
-	// 1. load the config
-	// 2. update the file state handler
-	// 3. send files to be processed
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+	// start a periodic goroutine to load the config
+	var modFirstUpdated sync.WaitGroup // wait for the first config to be loaded to start the remaining goroutines
+	modFirstUpdated.Add(1)
+	configTicker := time.NewTicker(1 * time.Second)
+	defer configTicker.Stop()
 	go func(t *time.Ticker) {
 		for {
 			select {
@@ -71,33 +80,33 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 					*modConfig = confConfig
 				}
 
-				fileStateHandler, err := file_state_handler.New()
-				if err != nil {
-					log.Errorf("create file state handler: %v", err)
-					c.errChan <- errors.Wrap(err, "create file state handler")
-					break
-				}
-
-				// Send the initialized handler through the channel on first creation
-				select {
-				case handlerReady <- fileStateHandler:
-				default:
-				}
-
-				c.sendFilesToBeProcessed(listenChan, fileStateHandler, modConfig)
+				modFirstUpdated.Done()
 			case <-ctx.Done():
 				return
 			}
 
-			ticker.Reset(checkInterval)
+			configTicker.Reset(checkInterval)
 		}
-	}(ticker)
+	}(configTicker)
+	modFirstUpdated.Wait()
 
-	// Wait for the initial fileStateHandler to be ready
-	fileStateHandler := <-handlerReady
+	// start a periodic goroutine to search for files to be processed and send to listenChan
+	listenTicker := time.NewTicker(1 * time.Second)
+	defer listenTicker.Stop()
+	go func(t *time.Ticker) {
+		for {
+			select {
+			case <-t.C:
+				c.sendFilesToBeProcessed(listenChan, modConfig)
+			case <-ctx.Done():
+				return
+			}
+			listenTicker.Reset(checkInterval)
+		}
+	}(listenTicker)
 
 	// Now start other goroutines with the initialized handler
-	go c.handleListenFiles(ctx, fileStateHandler, listenChan)
+	go c.handleListenFiles(ctx, listenChan)
 
 	// Now start the collect info handler periodic goroutine
 	collectTicker := time.NewTicker(1 * time.Second)
@@ -106,7 +115,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
-				c.scanCollectInfosAndHandle(fileStateHandler)
+				c.scanCollectInfosAndHandle()
 			case <-ctx.Done():
 				return
 			}
@@ -120,31 +129,29 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 
 func (c CustomRuleHandler) sendFilesToBeProcessed(
 	listenChan chan string,
-	fileStateHandler file_state_handler.FileStateHandler,
 	modConfig *config.DefaultModConfConfig,
 ) {
 	if len(modConfig.CollectDirs) == 0 {
 		return
 	}
 
-	if err := fileStateHandler.UpdateDirs(*modConfig); err != nil {
+	if err := c.fileStateHandler.UpdateDirs(*modConfig); err != nil {
 		log.Errorf("file state handler update dirs: %v", err)
 		return
 	}
 
-	if err := fileStateHandler.UpdateFilesProcessState(); err != nil {
+	if err := c.fileStateHandler.UpdateFilesProcessState(); err != nil {
 		log.Errorf("file state handler update process state: %v", err)
 		return
 	}
 
-	for _, fileState := range fileStateHandler.Files(file_state_handler.StateReadyToProcessFilter()) {
+	for _, fileState := range c.fileStateHandler.Files(file_state_handler.StateReadyToProcessFilter()) {
 		listenChan <- fileState.Pathname
 	}
 }
 
 func (c CustomRuleHandler) handleListenFiles(
 	ctx context.Context,
-	fileStateHandler file_state_handler.FileStateHandler,
 	listenChan chan string,
 ) {
 	// semaphore is used to control the number of concurrent processing files
@@ -169,7 +176,7 @@ func (c CustomRuleHandler) handleListenFiles(
 				c.processFileWithRule(filename)
 				log.Infof("Finished processing file: %v", filename)
 
-				err := fileStateHandler.MarkProcessedFile(filename)
+				err := c.fileStateHandler.MarkProcessedFile(filename)
 				if err != nil {
 					log.Errorf("mark processed file: %v", err)
 				}
@@ -188,8 +195,8 @@ func (c CustomRuleHandler) processFileWithRule(
 	// todo(shuhao): handle file with rule
 }
 
-// scanCollectInfosAndHandle periodically checks the collect info dir and handles the collect info.
-func (c CustomRuleHandler) scanCollectInfosAndHandle(fileStateHandler file_state_handler.FileStateHandler) {
+// scanCollectInfosAndHandle handles all collect info files within the collect info dir.
+func (c CustomRuleHandler) scanCollectInfosAndHandle() {
 	log.Infof("Starts to scan collect info dir")
 
 	// Search for files under the collect info dir and handles them
@@ -217,13 +224,12 @@ func (c CustomRuleHandler) scanCollectInfosAndHandle(fileStateHandler file_state
 			continue
 		}
 
-		// todo(shuhao): handle collect info
-		c.handleCollectInfo(fileStateHandler, *collectInfo)
+		c.handleCollectInfo(*collectInfo)
 	}
 }
 
-// handleCollectInfo handles the collect info.
-func (c CustomRuleHandler) handleCollectInfo(fileStateHandler file_state_handler.FileStateHandler, info model.CollectInfo) {
+// handleCollectInfo handles a single the collect info.
+func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 	if info.Cut == nil || time.Unix(info.Cut.End, 0).After(time.Now()) {
 		return
 	}
@@ -243,7 +249,7 @@ func (c CustomRuleHandler) handleCollectInfo(fileStateHandler file_state_handler
 		}
 		return false
 	}
-	uploadFileStates := fileStateHandler.Files(
+	uploadFileStates := c.fileStateHandler.Files(
 		file_state_handler.StateIsCollectingFilter(),
 		file_state_handler.StateTimestampFilter(info.Cut.Start, info.Cut.End),
 		uploadWhiteListFilter,
