@@ -15,12 +15,12 @@
 package handlers
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/foxglove/mcap/go/mcap"
+	"github.com/pkg/errors"
 )
 
 type mcapHandler struct {
@@ -31,7 +31,7 @@ func NewMcapHandler() Interface {
 	return &mcapHandler{}
 }
 
-// CheckFilePath checks if the file path is supported by the handler
+// CheckFilePath checks if the file path is supported by the handler.
 func (h *mcapHandler) CheckFilePath(filePath string) bool {
 	// Check if file exists and has .mcap extension
 	info, err := os.Stat(filePath)
@@ -44,23 +44,25 @@ func (h *mcapHandler) CheckFilePath(filePath string) bool {
 func (h *mcapHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Time, error) {
 	mcapFileReader, err := os.Open(filePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open mcap file [%s] failed: %w", filePath, err)
+		return nil, nil, errors.Errorf("open mcap file [%s] failed: %v", filePath, err)
 	}
 	defer mcapFileReader.Close()
 
 	reader, err := mcap.NewReader(mcapFileReader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create mcap reader for mcap file %s: %w", filePath, err)
+		return nil, nil, errors.Errorf("failed to create mcap reader for mcap file %s: %v", filePath, err)
 	}
 
 	info, err := reader.Info()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get info for mcap file %s: %w", filePath, err)
+		return nil, nil, errors.Errorf("failed to get info for mcap file %s: %v", filePath, err)
 	}
 
 	startNano := info.Statistics.MessageStartTime
 	endNano := info.Statistics.MessageEndTime
+	//nolint: gosec // ignore uint64 to int64 conversion
 	start := time.Unix(int64(startNano/1e9), int64(startNano%1e9))
+	//nolint: gosec // ignore uint64 to int64 conversion
 	end := time.Unix(int64(endNano/1e9), int64(endNano%1e9))
 
 	return &start, &end, nil

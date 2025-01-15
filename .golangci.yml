@@ -71,6 +71,6 @@ issues:
       text: "ST1003:"
   exclude-dirs-use-default: false
   exclude:
-    # Don't ban use of fmt.Errorf to create new errors, but the remaining
+    # Don't ban use of errors.Errorf to create new errors, but the remaining
     # checks from err113 are useful.
     - "err113: do not define dynamic errors.*"

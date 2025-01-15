@@ -19,22 +19,22 @@ import (
 	"time"
 )
 
-// Interface defines the interface for handling different file types
+// Interface defines the interface for handling different file types.
 type Interface interface {
-	// CheckFilePath checks if the file path is supported by the handler
+	// CheckFilePath checks if the file path is supported by the handler.
 	CheckFilePath(filePath string) bool
 
-	// GetStartTimeEndTime computes the start and end time of the log file
+	// GetStartTimeEndTime computes the start and end time of the log file.
 	GetStartTimeEndTime(filePath string) (*time.Time, *time.Time, error)
 
-	// GetFileSize returns the file size
+	// GetFileSize returns the file size.
 	GetFileSize(filePath string) (int64, error)
 }
 
-// defaultGetFileSize provides default implementations for some methods
+// defaultGetFileSize provides default implementations for some methods.
 type defaultGetFileSize struct{}
 
-// GetFileSize is a default implementation that can be used by handlers
+// GetFileSize is a default implementation that can be used by handlers.
 func (h *defaultGetFileSize) GetFileSize(filePath string) (int64, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {

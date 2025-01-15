@@ -98,12 +98,13 @@ func (rc *RecordCache) Save() error {
 	}
 
 	file := filepath.Join(dirPath, "state.json")
-	data, err := json.Marshal(rc)
+	data, err := json.MarshalIndent(rc, "", "  ")
 	if err != nil {
 		return errors.Wrap(err, "marshal record cache failed")
 	}
 
-	err = os.WriteFile(file, data, 0600)
+	//nolint: gosec // 0644 is the standard permission for files
+	err = os.WriteFile(file, data, 0644)
 	if err != nil {
 		return errors.Wrap(err, "write record cache failed")
 	}

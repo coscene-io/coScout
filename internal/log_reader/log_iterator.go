@@ -21,7 +21,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// LogIterator iterates over StampedLogs in order
+// LogIterator iterates over StampedLogs in order.
 type LogIterator struct {
 	lr        *LogReader
 	scanner   *bufio.Scanner
@@ -31,7 +31,7 @@ type LogIterator struct {
 	offset    int64
 }
 
-// NewLogIterator creates a new LogIterator instance
+// NewLogIterator creates a new LogIterator instance.
 func NewLogIterator(lr *LogReader) (*LogIterator, error) {
 	if _, err := lr.reader.Seek(0, io.SeekStart); err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func NewLogIterator(lr *LogReader) (*LogIterator, error) {
 	}, nil
 }
 
-// Next returns the next StampedLog
+// Next returns the next StampedLog.
 func (it *LogIterator) Next() (*StampedLog, bool) {
 	// Process each line
 	for it.scanner.Scan() {

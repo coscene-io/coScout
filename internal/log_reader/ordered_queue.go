@@ -18,7 +18,7 @@ import (
 	"container/heap"
 )
 
-// OrderedQueue maintains order of StampedLog elements
+// OrderedQueue maintains order of StampedLog elements.
 type OrderedQueue struct {
 	size       int
 	k          int
@@ -26,7 +26,7 @@ type OrderedQueue struct {
 	sortedLogs *TimestampHeap // Replace slice with priority queue
 }
 
-// TimestampHeap implements heap.Interface for StampedLog
+// TimestampHeap implements heap.Interface for StampedLog.
 type TimestampHeap []*StampedLog
 
 func (h *TimestampHeap) Len() int { return len(*h) }
@@ -41,7 +41,11 @@ func (h *TimestampHeap) Swap(i, j int) {
 }
 
 func (h *TimestampHeap) Push(x interface{}) {
-	*h = append(*h, x.(*StampedLog))
+	stampedLog, ok := x.(*StampedLog)
+	if !ok {
+		return
+	}
+	*h = append(*h, stampedLog)
 }
 
 func (h *TimestampHeap) Pop() interface{} {
@@ -52,7 +56,7 @@ func (h *TimestampHeap) Pop() interface{} {
 	return item
 }
 
-// NewOrderedQueue creates a new OrderedQueue instance
+// NewOrderedQueue creates a new OrderedQueue instance.
 func NewOrderedQueue(size int) *OrderedQueue {
 	h := &TimestampHeap{}
 	heap.Init(h)
@@ -64,7 +68,7 @@ func NewOrderedQueue(size int) *OrderedQueue {
 	}
 }
 
-// Consume adds a new log to the queue and returns the oldest log if queue is full
+// Consume adds a new log to the queue and returns the oldest log if queue is full.
 func (oq *OrderedQueue) Consume(log *StampedLog) *StampedLog {
 	if log.Timestamp == nil {
 		// Merge with last log if present
@@ -88,7 +92,7 @@ func (oq *OrderedQueue) Consume(log *StampedLog) *StampedLog {
 		// Find position in sorted order
 		pos := 0
 		h := *oq.sortedLogs
-		for i := 0; i < len(h); i++ {
+		for i := range h {
 			if h[i] == sl {
 				pos = i
 				break
@@ -99,37 +103,38 @@ func (oq *OrderedQueue) Consume(log *StampedLog) *StampedLog {
 		heap.Remove(oq.sortedLogs, pos)
 
 		// Check if within k-th order
-		if pos <= oq.k {
-			// Merge all logs with smaller timestamps
-			for len(oq.queue) > 0 {
-				// Peek at the next log
-				nextLog := oq.queue[0]
-				if nextLog.Timestamp.Before(*sl.Timestamp) {
-					// Remove from queue and heap
-					oq.queue = oq.queue[1:]
-					sl.Line += nextLog.Line
+		if pos > oq.k {
+			return &StampedLog{Timestamp: nil, Line: sl.Line}
+		}
 
-					// Find and remove from heap
-					for i := 0; i < oq.sortedLogs.Len(); i++ {
-						if (*oq.sortedLogs)[i] == nextLog {
-							heap.Remove(oq.sortedLogs, i)
-							break
-						}
-					}
-				} else {
+		// Merge all logs with smaller timestamps
+		for len(oq.queue) > 0 {
+			// Peek at the next log
+			nextLog := oq.queue[0]
+
+			if !nextLog.Timestamp.Before(*sl.Timestamp) {
+				break
+			}
+
+			// Remove from queue and heap
+			oq.queue = oq.queue[1:]
+			sl.Line += nextLog.Line
+
+			// Find and remove from heap
+			for i, curLog := range *oq.sortedLogs {
+				if curLog == nextLog {
+					heap.Remove(oq.sortedLogs, i)
 					break
 				}
 			}
-			return sl
 		}
-
-		return &StampedLog{Timestamp: nil, Line: sl.Line}
+		return sl
 	}
 
 	return nil
 }
 
-// DumpRemaining returns all remaining logs in order
+// DumpRemaining returns all remaining logs in order.
 func (oq *OrderedQueue) DumpRemaining() []*StampedLog {
 	var remaining []*StampedLog
 
@@ -140,7 +145,7 @@ func (oq *OrderedQueue) DumpRemaining() []*StampedLog {
 		// Find position in sorted order
 		pos := 0
 		h := *oq.sortedLogs
-		for i := 0; i < len(h); i++ {
+		for i := range h {
 			if h[i] == sl {
 				pos = i
 				break
@@ -150,29 +155,29 @@ func (oq *OrderedQueue) DumpRemaining() []*StampedLog {
 		// Remove from heap
 		heap.Remove(oq.sortedLogs, pos)
 
-		if pos <= oq.k {
-			// Merge all logs with smaller timestamps
-			for len(oq.queue) > 0 {
-				nextLog := oq.queue[0]
-				if nextLog.Timestamp.Before(*sl.Timestamp) {
-					oq.queue = oq.queue[1:]
-					sl.Line += nextLog.Line
+		if pos > oq.k {
+			remaining = append(remaining, &StampedLog{Timestamp: nil, Line: sl.Line})
+			continue
+		}
 
-					// Find and remove from heap
-					for i := 0; i < oq.sortedLogs.Len(); i++ {
-						if (*oq.sortedLogs)[i] == nextLog {
-							heap.Remove(oq.sortedLogs, i)
-							break
-						}
-					}
-				} else {
+		// Merge all logs with smaller timestamps
+		for len(oq.queue) > 0 {
+			nextLog := oq.queue[0]
+			if !nextLog.Timestamp.Before(*sl.Timestamp) {
+				break
+			}
+			oq.queue = oq.queue[1:]
+			sl.Line += nextLog.Line
+
+			// Find and remove from heap
+			for i, curLog := range *oq.sortedLogs {
+				if curLog == nextLog {
+					heap.Remove(oq.sortedLogs, i)
 					break
 				}
 			}
-			remaining = append(remaining, sl)
-		} else {
-			remaining = append(remaining, &StampedLog{Timestamp: nil, Line: sl.Line})
 		}
+		remaining = append(remaining, sl)
 	}
 
 	return remaining

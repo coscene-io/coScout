@@ -16,14 +16,15 @@ package log_reader
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"regexp"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 const (
-	// ChunkSize is used to predict the timestamp schema and timestamps
+	// ChunkSize is used to predict the timestamp schema and timestamps.
 	ChunkSize = 32 * 1024 // 32KB
 )
 
@@ -34,16 +35,18 @@ type TimestampFormat struct {
 	hasDay  bool
 }
 
-var (
-	// HintOptions defines the timestamp hint formats for filename or first line
-	HintOptions = []TimestampFormat{
+// hintOptions defines the timestamp hint formats for filename or first line.
+func hintOptions() []TimestampFormat {
+	return []TimestampFormat{
 		{regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}`), "2006-01-02 15:04:05", true, true},
 		{regexp.MustCompile(`\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}`), "2006/01/02 15:04:05", true, true},
 		{regexp.MustCompile(`\d{10}`), "2006010215", true, true},
 	}
+}
 
-	// TSSchema defines the timestamp formats to extract from log lines
-	TSSchema = []TimestampFormat{
+// tsSchemas defines the timestamp formats to extract from log lines.
+func tsSchemas() []TimestampFormat {
+	return []TimestampFormat{
 		{regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}`), "2006-01-02 15:04:05.000", true, true},
 		{regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3}`), "2006-01-02 15:04:05.000", true, true},
 		{regexp.MustCompile(`\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}`), "2006/01/02 15:04:05", true, true},
@@ -51,9 +54,9 @@ var (
 		{regexp.MustCompile(`[a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}`), "Jan 2 15:04:05", false, true},
 		{regexp.MustCompile(`\d{2}:\d{2}:\d{2}\.\d{3}`), "15:04:05.000", false, false},
 	}
-)
+}
 
-// StampedLog represents a log line with its timestamp
+// StampedLog represents a log line with its timestamp.
 type StampedLog struct {
 	Timestamp *time.Time
 	Line      string
@@ -61,16 +64,16 @@ type StampedLog struct {
 	Length    int64
 }
 
-// LogReader reads and parses log files
+// LogReader reads and parses log files.
 type LogReader struct {
 	reader     io.ReadSeeker
 	bufferSize int
-	hint     *time.Time
-	tsFormat TimestampFormat
-	name     string
+	hint       *time.Time
+	tsFormat   TimestampFormat
+	name       string
 }
 
-// NewLogReader creates a new LogReader instance
+// NewLogReader creates a new LogReader instance.
 func NewLogReader(reader io.ReadSeeker, name string) (*LogReader, error) {
 	lr := &LogReader{
 		reader:     reader,
@@ -95,12 +98,12 @@ func NewLogReader(reader io.ReadSeeker, name string) (*LogReader, error) {
 	return lr, nil
 }
 
-// GetTimestampFormat returns the timestamp format used in the log file
+// GetTimestampFormat returns the timestamp format used in the log file.
 func (lr *LogReader) GetTimestampFormat() TimestampFormat {
 	return lr.tsFormat
 }
 
-// GetStartTimestamp returns the first timestamp in the log file
+// GetStartTimestamp returns the first timestamp in the log file.
 func (lr *LogReader) GetStartTimestamp() (*time.Time, error) {
 	if _, err := lr.reader.Seek(0, io.SeekStart); err != nil {
 		return nil, err
@@ -127,10 +130,10 @@ func (lr *LogReader) GetStartTimestamp() (*time.Time, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("no timestamp found in the first %d bytes", ChunkSize)
+	return nil, errors.Errorf("no timestamp found in the first %d bytes", ChunkSize)
 }
 
-// GetEndTimestamp returns the last timestamp in the log file
+// GetEndTimestamp returns the last timestamp in the log file.
 func (lr *LogReader) GetEndTimestamp() (*time.Time, error) {
 	// Get current size by seeking to end
 	size, err := lr.reader.Seek(0, io.SeekEnd)
@@ -166,7 +169,7 @@ func (lr *LogReader) GetEndTimestamp() (*time.Time, error) {
 		return remainingLogs[len(remainingLogs)-1].Timestamp, nil
 	}
 
-	return nil, fmt.Errorf("no timestamp found in the last %d bytes", ChunkSize)
+	return nil, errors.Errorf("no timestamp found in the last %d bytes", ChunkSize)
 }
 
 func (lr *LogReader) getTimestampHint() (*time.Time, error) {
@@ -187,11 +190,12 @@ func (lr *LogReader) getTimestampHint() (*time.Time, error) {
 		}
 	}
 
+	//nolint: nilnil // Ignore nil check
 	return nil, nil
 }
 
 func (lr *LogReader) getHintFromText(text string) *time.Time {
-	for _, opt := range HintOptions {
+	for _, opt := range hintOptions() {
 		if match := opt.regex.FindString(text); match != "" {
 			if t, err := time.ParseInLocation(opt.layout, match, time.FixedZone("UTC+8", 8*60*60)); err == nil {
 				return &t
@@ -206,10 +210,11 @@ func (lr *LogReader) analyzeTimestampSchema() (TimestampFormat, error) {
 		return TimestampFormat{}, err
 	}
 
+	schemas := tsSchemas()
 	// Create queues for each schema
-	queues := make([]*OrderedQueue, len(TSSchema))
-	counts := make([]int, len(TSSchema))
-	for i := range TSSchema {
+	queues := make([]*OrderedQueue, len(schemas))
+	counts := make([]int, len(schemas))
+	for i := range schemas {
 		queues[i] = NewOrderedQueue(lr.bufferSize)
 	}
 
@@ -218,7 +223,7 @@ func (lr *LogReader) analyzeTimestampSchema() (TimestampFormat, error) {
 
 	for scanner.Scan() && bytesRead < ChunkSize {
 		line := scanner.Text()
-		for i, schema := range TSSchema {
+		for i, schema := range schemas {
 			if match := schema.regex.FindString(line); match != "" {
 				if t, err := time.ParseInLocation(schema.layout, match, time.FixedZone("UTC+8", 8*60*60)); err == nil {
 					stampedLog := &StampedLog{
@@ -247,7 +252,7 @@ func (lr *LogReader) analyzeTimestampSchema() (TimestampFormat, error) {
 		}
 	}
 
-	return TSSchema[maxIdx], nil
+	return schemas[maxIdx], nil
 }
 
 func (lr *LogReader) parseLogLine(line string, offset int64) *StampedLog {
@@ -269,6 +274,7 @@ func (lr *LogReader) parseLogLine(line string, offset int64) *StampedLog {
 }
 
 func (lr *LogReader) adjustTimestamp(t *time.Time) *time.Time {
+	//nolint: nestif // Keep nested if statements
 	if lr.hint == nil {
 		now := time.Now()
 		if !lr.tsFormat.hasDay {

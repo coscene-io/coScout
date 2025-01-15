@@ -16,7 +16,6 @@ package file_state_handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -27,33 +26,34 @@ import (
 	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler/handlers"
 	"github.com/coscene-io/coscout/pkg/utils"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 )
 
 const (
-	// relative file state handler path
+	// relative file state handler path.
 	relFileStatePath = "file.state.json"
 )
 
-// FileStateHandler is the interface for the file state handler
+// FileStateHandler is the interface for the file state handler.
 type FileStateHandler interface {
-	// UpdateDirs updates the directories being monitored
+	// UpdateDirs updates the directories being monitored.
 	UpdateDirs(conf config.DefaultModConfConfig) error
 
-	// Files returns files matching the given filters
-	Files(filters ...FileFilter) []string
+	// Files returns filename and filestate pairs that match the given filters.
+	Files(filters ...FileFilter) []FileState
 
-	// UpdateFilesProcessState updates the state of files that are ready to process
+	// UpdateFilesProcessState updates the state of files that are ready to process.
 	// This should be called before processing files
 	UpdateFilesProcessState() error
 
 	// MarkProcessedFile updates the state of files that were ready to process
-	// to mark them as processed
+	// to mark them as processed.
 	MarkProcessedFile(filename string) error
 }
 
-// processState represents the state of a file in the processing pipeline
+// processState represents the state of a file in the processing pipeline.
 type processState int
 
 const (
@@ -63,7 +63,7 @@ const (
 	processStateProcessed
 )
 
-// FileState represents the state of a file in the system
+// FileState represents the state of a file in the system.
 type FileState struct {
 	Size         int64        `json:"size"`
 	StartTime    int64        `json:"start_time,omitempty"`
@@ -74,16 +74,17 @@ type FileState struct {
 	IsCollecting bool         `json:"is_collecting,omitempty"`
 	ProcessState processState `json:"process_state,omitempty"`
 	TooOld       bool         `json:"too_old,omitempty"`
+	Pathname     string       `json:"-"` // Pathname is not stored in the state file
 }
 
-// SavedState represents the complete state to be saved to disk
+// SavedState represents the complete state to be saved to disk.
 type SavedState struct {
 	State      map[string]FileState `json:"state"`
 	SrcDirs    []string             `json:"src_dirs"`
 	ListenDirs []string             `json:"listen_dirs"`
 }
 
-// fileStateHandler is used to keep track of the state of files in directories
+// fileStateHandler is used to keep track of the state of files in directories.
 type fileStateHandler struct {
 	state        map[string]FileState
 	updateLock   sync.Mutex
@@ -92,16 +93,16 @@ type fileStateHandler struct {
 	activeTopics mapset.Set[string]
 	statePath    string
 	handlers     []handlers.Interface
-
-	instance *fileStateHandler
 }
 
 var (
+	//nolint: gochecknoglobals // singleton instance
 	instance *fileStateHandler
-	once     sync.Once
+	//nolint: gochecknoglobals // singleton once
+	once sync.Once
 )
 
-// New returns the singleton instance of fileStateHandler
+// New returns the singleton instance of fileStateHandler.
 func New() (FileStateHandler, error) {
 	var err error
 	once.Do(func() {
@@ -116,14 +117,14 @@ func New() (FileStateHandler, error) {
 		instance.registerHandlers()
 
 		if loadErr := instance.loadState(); loadErr != nil {
-			err = fmt.Errorf("failed to initialize file state handler: %w", loadErr)
+			err = errors.Errorf("failed to initialize file state handler: %v", loadErr)
 			instance = nil
 		}
 	})
 
 	if instance == nil {
 		if err == nil {
-			err = fmt.Errorf("failed to create file state handler instance")
+			err = errors.Errorf("failed to create file state handler instance")
 		}
 		return nil, err
 	}
@@ -131,7 +132,7 @@ func New() (FileStateHandler, error) {
 	return instance, nil
 }
 
-// registerHandlers registers the handlers for different file types
+// registerHandlers registers the handlers for different file types.
 func (f *fileStateHandler) registerHandlers() {
 	// Register handlers here
 	f.handlers = []handlers.Interface{
@@ -141,7 +142,7 @@ func (f *fileStateHandler) registerHandlers() {
 	}
 }
 
-// getFileHandler returns the handler for a given file path
+// getFileHandler returns the handler for a given file path.
 func (f *fileStateHandler) getFileHandler(filePath string) handlers.Interface {
 	for _, handler := range f.handlers {
 		if handler.CheckFilePath(filePath) {
@@ -151,19 +152,19 @@ func (f *fileStateHandler) getFileHandler(filePath string) handlers.Interface {
 	return nil
 }
 
-// LoadState loads the file state from disk
+// LoadState loads the file state from disk.
 func (f *fileStateHandler) loadState() error {
 	data, err := os.ReadFile(f.statePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return fmt.Errorf("failed to read state file: %w", err)
+		return errors.Errorf("failed to read state file: %v", err)
 	}
 
 	var savedState SavedState
 	if err := json.Unmarshal(data, &savedState); err != nil {
-		return fmt.Errorf("failed to unmarshal state: %w", err)
+		return errors.Errorf("failed to unmarshal state: %v", err)
 	}
 
 	f.state = savedState.State
@@ -180,7 +181,7 @@ func (f *fileStateHandler) loadState() error {
 	return nil
 }
 
-// SaveState saves the current state to disk
+// SaveState saves the current state to disk.
 func (f *fileStateHandler) saveState() error {
 	savedState := SavedState{
 		State:      f.state,
@@ -190,21 +191,21 @@ func (f *fileStateHandler) saveState() error {
 
 	data, err := json.MarshalIndent(savedState, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
+		return errors.Errorf("failed to marshal state: %v", err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(f.statePath), 0755); err != nil {
-		return fmt.Errorf("failed to create state directory: %w", err)
+		return errors.Errorf("failed to create state directory: %v", err)
 	}
 
-	if err := os.WriteFile(f.statePath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write state file: %w", err)
+	if err := os.WriteFile(f.statePath, data, 0600); err != nil {
+		return errors.Errorf("failed to write state file: %v", err)
 	}
 
 	return nil
 }
 
-// setFileState updates the state for a given file path
+// setFileState updates the state for a given file path.
 func (f *fileStateHandler) setFileState(filePath string, state FileState) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
@@ -217,11 +218,11 @@ func (f *fileStateHandler) setFileState(filePath string, state FileState) {
 	f.state[absPath] = state
 }
 
-// delFileState removes the state for a given file path
+// delFileState removes the state for a given file path.
 func (f *fileStateHandler) delFileState(filePath string) error {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to get absolute path for %s: %w", filePath, err)
+		return errors.Errorf("failed to get absolute path for %s: %v", filePath, err)
 	}
 
 	f.updateLock.Lock()
@@ -230,7 +231,7 @@ func (f *fileStateHandler) delFileState(filePath string) error {
 	return nil
 }
 
-// getFileState retrieves the state for a given file path
+// getFileState retrieves the state for a given file path.
 func (f *fileStateHandler) getFileState(filePath string) (FileState, bool) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
@@ -242,15 +243,15 @@ func (f *fileStateHandler) getFileState(filePath string) (FileState, bool) {
 	return state, exists
 }
 
-// updateDeletedFileState removes state entries for files that no longer exist
+// updateDeletedFileState removes state entries for files that no longer exist.
 func (f *fileStateHandler) updateDeletedFileState() error {
 	for _, filename := range lo.Keys(f.state) {
 		if _, err := os.Stat(filename); os.IsNotExist(err) {
 			if err = f.delFileState(filename); err != nil {
-				return fmt.Errorf("failed to delete file state for %s: %w", filename, err)
+				return errors.Errorf("failed to delete file state for %s: %v", filename, err)
 			}
 		} else if err != nil {
-			return fmt.Errorf("failed to stat file %s: %w", filename, err)
+			return errors.Errorf("failed to stat file %s: %v", filename, err)
 		}
 	}
 	return nil
@@ -347,7 +348,7 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 			// Check if file needs to skip process
 			curFileSize, err := handler.GetFileSize(entryPath)
 			if err != nil {
-				return fmt.Errorf("error getting file size for %s: %w", entryPath, err)
+				return errors.Errorf("error getting file size for %s: %v", entryPath, err)
 			}
 
 			// Update state
@@ -386,12 +387,12 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 
 	// Clean up deleted files
 	if err := f.updateDeletedFileState(); err != nil {
-		return fmt.Errorf("failed to update deleted file state: %w", err)
+		return errors.Errorf("failed to update deleted file state: %v", err)
 	}
 
 	// Save state to disk
 	if err := f.saveState(); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
+		return errors.Errorf("failed to save state: %v", err)
 	}
 
 	log.Infof("Finished updating directories")
@@ -409,14 +410,14 @@ func (f *fileStateHandler) UpdateFilesProcessState() error {
 			state.ProcessState = processStateSeenOnce
 		case processStateSeenOnce:
 			state.ProcessState = processStateReadyToProcess
-		default:
+		case processStateReadyToProcess, processStateProcessed:
 			continue
 		}
 
 		f.setFileState(filename, state)
 	}
 	if err := f.saveState(); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
+		return errors.Errorf("failed to save state: %v", err)
 	}
 
 	return nil
@@ -425,7 +426,7 @@ func (f *fileStateHandler) UpdateFilesProcessState() error {
 func (f *fileStateHandler) MarkProcessedFile(filename string) error {
 	state, exists := f.getFileState(filename)
 	if !exists {
-		return fmt.Errorf("file state for %s does not exist", filename)
+		return errors.Errorf("file state for %s does not exist", filename)
 	}
 
 	state.ProcessState = processStateProcessed
@@ -433,18 +434,18 @@ func (f *fileStateHandler) MarkProcessedFile(filename string) error {
 	f.setFileState(filename, state)
 
 	if err := f.saveState(); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
+		return errors.Errorf("failed to save state: %v", err)
 	}
 
 	return nil
 }
 
-// FileFilter type for file filtering
+// FileFilter type for file filtering.
 type FileFilter func(string, FileState) bool
 
-// Files returns files matching the given filters
-func (f *fileStateHandler) Files(filters ...FileFilter) []string {
-	var result []string
+// Files returns files matching the given filters.
+func (f *fileStateHandler) Files(filters ...FileFilter) []FileState {
+	var result []FileState
 	for filename, state := range f.state {
 		if state.Unsupported {
 			continue
@@ -459,13 +460,14 @@ func (f *fileStateHandler) Files(filters ...FileFilter) []string {
 		}
 
 		if matches {
-			result = append(result, filename)
+			state.Pathname = filename
+			result = append(result, state)
 		}
 	}
 	return result
 }
 
-// Filter factory functions
+// Filter factory functions.
 
 func StateReadyToProcessFilter() FileFilter {
 	return func(_ string, state FileState) bool {

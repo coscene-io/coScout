@@ -35,6 +35,19 @@ func GetUserBaseFolder() string {
 	return path.Join(homeDir, baseRelativePath)
 }
 
+func GetCollectInfoFolder() string {
+	collectInfoRelPath := "collect_info"
+
+	collectInfoPath := path.Join(GetUserBaseFolder(), collectInfoRelPath)
+
+	if _, err := os.Stat(collectInfoPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(collectInfoPath, os.ModePerm); err != nil {
+			log.Panicf("Create collect_info directory failed: %v", err)
+		}
+	}
+	return collectInfoPath
+}
+
 func GetRecordCacheFolder() string {
 	cacheRelativePath := "records"
 

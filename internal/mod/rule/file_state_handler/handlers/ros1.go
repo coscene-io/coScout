@@ -15,12 +15,12 @@
 package handlers
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/foxglove/go-rosbag"
+	"github.com/pkg/errors"
 )
 
 type ros1Handler struct {
@@ -31,7 +31,7 @@ func NewRos1Handler() Interface {
 	return &ros1Handler{}
 }
 
-// CheckFilePath checks if the file path is supported by the handler
+// CheckFilePath checks if the file path is supported by the handler.
 func (h *ros1Handler) CheckFilePath(filePath string) bool {
 	// Check if file exists and has .ros1 extension
 	info, err := os.Stat(filePath)
@@ -44,23 +44,25 @@ func (h *ros1Handler) CheckFilePath(filePath string) bool {
 func (h *ros1Handler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Time, error) {
 	ros1FileReader, err := os.Open(filePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open ros1 file [%s] failed: %w", filePath, err)
+		return nil, nil, errors.Errorf("open ros1 file [%s] failed: %v", filePath, err)
 	}
 	defer ros1FileReader.Close()
 
 	reader, err := rosbag.NewReader(ros1FileReader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create ros1 reader for ros1 file %s: %w", filePath, err)
+		return nil, nil, errors.Errorf("failed to create ros1 reader for ros1 file %s: %v", filePath, err)
 	}
 
 	info, err := reader.Info()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get info for ros1 file %s: %w", filePath, err)
+		return nil, nil, errors.Errorf("failed to get info for ros1 file %s: %v", filePath, err)
 	}
 
 	startNano := info.MessageStartTime
 	endNano := info.MessageEndTime
+	//nolint: gosec // ignore uint64 to int64 conversion
 	start := time.Unix(int64(startNano/1e9), int64(startNano%1e9))
+	//nolint: gosec // ignore uint64 to int64 conversion
 	end := time.Unix(int64(endNano/1e9), int64(endNano%1e9))
 
 	return &start, &end, nil

@@ -15,12 +15,12 @@
 package handlers
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/coscene-io/coscout/internal/log_reader"
+	"github.com/pkg/errors"
 )
 
 type logHandler struct {
@@ -31,9 +31,9 @@ func NewLogHandler() Interface {
 	return &logHandler{}
 }
 
-// CheckFilePath checks if the file path is supported by the handler
+// CheckFilePath checks if the file path is supported by the handler.
 func (h *logHandler) CheckFilePath(filePath string) bool {
-	// Check if file exists and has .log extension
+	// Check if file exists and has .log extension.
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return false
@@ -44,23 +44,23 @@ func (h *logHandler) CheckFilePath(filePath string) bool {
 func (h *logHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Time, error) {
 	logFileReader, err := os.Open(filePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open log file [%s] failed: %w", filePath, err)
+		return nil, nil, errors.Errorf("open log file [%s] failed: %v", filePath, err)
 	}
 	defer logFileReader.Close()
 
 	reader, err := log_reader.NewLogReader(logFileReader, filePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create log reader for log file %s: %w", filePath, err)
+		return nil, nil, errors.Errorf("failed to create log reader for log file %s: %v", filePath, err)
 	}
 
 	startTime, err := reader.GetStartTimestamp()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get start timestamp for log file %s: %w", filePath, err)
+		return nil, nil, errors.Errorf("failed to get start timestamp for log file %s: %v", filePath, err)
 	}
 
 	endTime, err := reader.GetEndTimestamp()
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get end timestamp for log file %s: %w", filePath, err)
+		return nil, nil, errors.Errorf("failed to get end timestamp for log file %s: %v", filePath, err)
 	}
 
 	return startTime, endTime, nil
