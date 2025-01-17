@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package handlers
+package file_handlers
 
 import (
 	"os"
 	"time"
+
+	"github.com/coscene-io/coscout/pkg/rule_engine"
+	mapset "github.com/deckarep/golang-set/v2"
 )
 
 // Interface defines the interface for handling different file types.
@@ -29,6 +32,9 @@ type Interface interface {
 
 	// GetFileSize returns the file size.
 	GetFileSize(filePath string) (int64, error)
+
+	// SendRuleItems sends rule items to the rule engine.
+	SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem)
 }
 
 // defaultGetFileSize provides default implementations for some methods.
@@ -42,3 +48,9 @@ func (h *defaultGetFileSize) GetFileSize(filePath string) (int64, error) {
 	}
 	return fileInfo.Size(), nil
 }
+
+// dummySendRuleItems is a dummy implementation of SendRuleItems.
+type dummySendRuleItems struct{}
+
+// SendRuleItems is a dummy implementation of SendRuleItems.
+func (h *dummySendRuleItems) SendRuleItems(_ string, _ chan rule_engine.RuleItem) {}

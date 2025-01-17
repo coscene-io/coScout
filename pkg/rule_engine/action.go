@@ -1,3 +1,17 @@
+// Copyright 2025 coScene
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package rule_engine
 
 import (
@@ -14,17 +28,24 @@ type Action struct {
 	Name      string
 	RawKwargs map[string]interface{}
 	kwargs    map[string]expressionEvaluator
-	impl      func(map[string]interface{}) error
+	impl      ActionImpl
 }
 
 // expressionEvaluator is a function that evaluates an expression with given activation.
 type expressionEvaluator func(activation map[string]interface{}) (interface{}, error)
 
+// ActionImpl is the alias for the action implementation function type.
+type ActionImpl = func(map[string]interface{}) error
+
+func EmptyActionImpl(_ map[string]interface{}) error {
+	return nil
+}
+
 // NewAction creates a new action with compiled CEL expressions.
 func NewAction(
 	name string,
 	rawKwargs map[string]interface{},
-	impl func(map[string]interface{}) error,
+	impl ActionImpl,
 ) (*Action, error) {
 	if impl == nil {
 		return nil, errors.New("implementation function cannot be nil")
@@ -41,6 +62,8 @@ func NewAction(
 	}
 
 	kwargs := make(map[string]expressionEvaluator)
+
+	rawKwargs["ts"] = "{ts}"
 	for k, v := range rawKwargs {
 		switch val := v.(type) {
 		case string:
@@ -71,8 +94,10 @@ func NewAction(
 	}, nil
 }
 
-// Run executes the action with the given activation context.
-func (a *Action) Run(activation map[string]interface{}) error {
+// Run executes the action with the given activation context as well as additional kwargs.
+// Note that it's user's responsibility to ensure that the additional kwargs do not conflict
+// with fixed kwargs.
+func (a *Action) Run(activation map[string]interface{}, kwargs map[string]interface{}) error {
 	evaluatedKwargs := make(map[string]interface{})
 
 	for k, evaluator := range a.kwargs {
@@ -83,7 +108,17 @@ func (a *Action) Run(activation map[string]interface{}) error {
 		evaluatedKwargs[k] = value
 	}
 
+	// Add additional kwargs
+	for k, v := range kwargs {
+		evaluatedKwargs[k] = v
+	}
+
 	return a.impl(evaluatedKwargs)
+}
+
+// RunDirect executes the action with the given activation context.
+func (a *Action) RunDirect(activation map[string]interface{}) error {
+	return a.Run(activation, nil)
 }
 
 // compileEmbeddedExpr compiles a string containing embedded CEL expressions.

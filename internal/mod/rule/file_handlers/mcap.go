@@ -1,0 +1,226 @@
+// Copyright 2025 coScene
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package file_handlers
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/coscene-io/coscout/pkg/rule_engine"
+	"github.com/coscene-io/coscout/pkg/utils"
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/foxglove/go-rosbag/ros1msg"
+	"github.com/foxglove/mcap/go/mcap"
+	"github.com/pkg/errors"
+	"github.com/samber/lo"
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
+)
+
+type mcapHandler struct {
+	defaultGetFileSize
+	dummySendRuleItems
+}
+
+func NewMcapHandler() Interface {
+	return &mcapHandler{}
+}
+
+// CheckFilePath checks if the file path is supported by the handler.
+func (h *mcapHandler) CheckFilePath(filePath string) bool {
+	// Check if file exists and has .mcap extension
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir() && strings.HasSuffix(filePath, ".mcap")
+}
+
+func (h *mcapHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Time, error) {
+	mcapFileReader, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, errors.Errorf("open mcap file [%s] failed: %v", filePath, err)
+	}
+	defer mcapFileReader.Close()
+
+	reader, err := mcap.NewReader(mcapFileReader)
+	if err != nil {
+		return nil, nil, errors.Errorf("failed to create mcap reader for mcap file %s: %v", filePath, err)
+	}
+
+	info, err := reader.Info()
+	if err != nil {
+		return nil, nil, errors.Errorf("failed to get info for mcap file %s: %v", filePath, err)
+	}
+
+	startNano := info.Statistics.MessageStartTime
+	endNano := info.Statistics.MessageEndTime
+	//nolint: gosec // ignore uint64 to int64 conversion
+	start := time.Unix(int64(startNano/1e9), int64(startNano%1e9))
+	//nolint: gosec // ignore uint64 to int64 conversion
+	end := time.Unix(int64(endNano/1e9), int64(endNano%1e9))
+
+	return &start, &end, nil
+}
+
+func (h *mcapHandler)SendRuleItems(filepath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		log.Errorf("failed to open MCAP file [%s]: %v", filepath, err)
+		return
+	}
+	defer file.Close()
+
+	reader, err := mcap.NewReader(file)
+	if err != nil {
+		log.Errorf("failed to create MCAP reader: %v", err)
+		return
+	}
+	defer reader.Close()
+
+	info, err := reader.Info()
+	if err != nil {
+		log.Errorf("failed to get info for MCAP file [%s]: %v", filepath, err)
+		return
+	}
+
+	var targetTopics []string
+	for _, conn := range lo.Values(info.Channels) {
+		if activeTopics.Contains(conn.Topic) {
+			targetTopics = append(targetTopics, conn.Topic)
+		}
+	}
+
+	iter, err := reader.Messages(mcap.UsingIndex(false), mcap.WithTopics(targetTopics))
+	if err != nil {
+		log.Errorf("failed to create message iterator: %v", err)
+		return
+	}
+
+	// Create reusable buffers and transcoders
+	msg := &mcap.Message{}
+	msgBuf := &bytes.Buffer{}
+	msgReader := &bytes.Reader{}
+	transcoders := make(map[uint16]*ros1msg.JSONTranscoder)
+	descriptors := make(map[uint16]protoreflect.MessageDescriptor)
+
+	for {
+		schema, channel, message, err := iter.NextInto(msg)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				log.Infof("finished sending rule items for MCAP file %s", filepath)
+			} else {
+				log.Errorf("error reading message: %v", err)
+			}
+			return
+		}
+
+		msgBuf.Reset()
+
+		// Handle messages based on schema and encoding
+		if schema == nil || schema.Encoding == "" {
+			switch channel.MessageEncoding {
+			case "json":
+				msgBuf.Write(message.Data)
+			default:
+				log.Errorf("unsupported message encoding for schema-less channel: %s", channel.MessageEncoding)
+				continue
+			}
+		} else {
+			switch schema.Encoding {
+			case "ros1msg":
+				transcoder, ok := transcoders[channel.SchemaID]
+				if !ok {
+					packageName := strings.Split(schema.Name, "/")[0]
+					transcoder, err = ros1msg.NewJSONTranscoder(packageName, schema.Data)
+					if err != nil {
+						log.Errorf("failed to create JSON transcoder: %v", err)
+						continue
+					}
+					transcoders[channel.SchemaID] = transcoder
+				}
+				msgReader.Reset(message.Data)
+				err = transcoder.Transcode(msgBuf, msgReader)
+				if err != nil {
+					log.Errorf("failed to transcode: %v", err)
+					continue
+				}
+
+			case "protobuf":
+				messageDescriptor, ok := descriptors[channel.SchemaID]
+				if !ok {
+					fileDescriptorSet := &descriptorpb.FileDescriptorSet{}
+					if err := proto.Unmarshal(schema.Data, fileDescriptorSet); err != nil {
+						log.Errorf("failed to build file descriptor set: %v", err)
+						continue
+					}
+					files, err := protodesc.FileOptions{}.NewFiles(fileDescriptorSet)
+					if err != nil {
+						log.Errorf("failed to create file descriptor: %v", err)
+						continue
+					}
+					descriptor, err := files.FindDescriptorByName(protoreflect.FullName(schema.Name))
+					if err != nil {
+						log.Errorf("failed to find descriptor: %v", err)
+						continue
+					}
+					messageDescriptor = descriptor.(protoreflect.MessageDescriptor)
+					descriptors[channel.SchemaID] = messageDescriptor
+				}
+				protoMsg := dynamicpb.NewMessage(messageDescriptor)
+				if err := proto.Unmarshal(message.Data, protoMsg); err != nil {
+					log.Errorf("failed to parse protobuf message: %v", err)
+					continue
+				}
+				marshalledBytes, err := protojson.Marshal(protoMsg)
+				if err != nil {
+					log.Errorf("failed to marshal protobuf to JSON: %v", err)
+					continue
+				}
+				msgBuf.Write(marshalledBytes)
+
+			case "jsonschema":
+				msgBuf.Write(message.Data)
+
+			default:
+				log.Errorf("unsupported schema encoding: %s", schema.Encoding)
+				continue
+			}
+		}
+
+		// Parse JSON into map
+		var decoded map[string]interface{}
+		if err := json.NewDecoder(msgBuf).Decode(&decoded); err != nil {
+			log.Errorf("failed to decode JSON: %v", err)
+			continue
+		}
+
+		sec, nsec := utils.NormalizeFloatTimestamp(float64(msg.PublishTime))
+		ruleItemChan <- rule_engine.RuleItem{
+			Msg: decoded,
+			Ts: float64(sec) + float64(nsec)/1e9,
+			Topic: channel.Topic,
+		}
+	}
+}

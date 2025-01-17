@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/coscene-io/coscout/internal/config"
-	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler/handlers"
+	"github.com/coscene-io/coscout/internal/mod/rule/file_handlers"
 	"github.com/coscene-io/coscout/pkg/utils"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
@@ -51,6 +51,9 @@ type FileStateHandler interface {
 	// MarkProcessedFile updates the state of files that were ready to process
 	// to mark them as processed.
 	MarkProcessedFile(filename string) error
+
+	// GetFileHandler returns the handler for a given file path.
+	GetFileHandler(filePath string) file_handlers.Interface
 }
 
 // processState represents the state of a file in the processing pipeline.
@@ -74,7 +77,7 @@ type FileState struct {
 	IsCollecting bool         `json:"is_collecting,omitempty"`
 	ProcessState processState `json:"process_state,omitempty"`
 	TooOld       bool         `json:"too_old,omitempty"`
-	Pathname     string       `json:"-"` // Pathname is not stored in the state file
+	Pathname     string       `json:"-"` // Pathname is output only for the Files method
 }
 
 // SavedState represents the complete state to be saved to disk.
@@ -92,7 +95,7 @@ type fileStateHandler struct {
 	listenDirs   mapset.Set[string]
 	activeTopics mapset.Set[string]
 	statePath    string
-	handlers     []handlers.Interface
+	handlers     []file_handlers.Interface
 }
 
 var (
@@ -135,15 +138,15 @@ func New() (FileStateHandler, error) {
 // registerHandlers registers the handlers for different file types.
 func (f *fileStateHandler) registerHandlers() {
 	// Register handlers here
-	f.handlers = []handlers.Interface{
-		handlers.NewLogHandler(),
-		handlers.NewMcapHandler(),
-		handlers.NewRos1Handler(),
+	f.handlers = []file_handlers.Interface{
+		file_handlers.NewLogHandler(),
+		file_handlers.NewMcapHandler(),
+		file_handlers.NewRos1Handler(),
 	}
 }
 
-// getFileHandler returns the handler for a given file path.
-func (f *fileStateHandler) getFileHandler(filePath string) handlers.Interface {
+// GetFileHandler returns the handler for a given file path.
+func (f *fileStateHandler) GetFileHandler(filePath string) file_handlers.Interface {
 	for _, handler := range f.handlers {
 		if handler.CheckFilePath(filePath) {
 			return handler
@@ -307,7 +310,7 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 				continue
 			}
 
-			handler := f.getFileHandler(entryPath)
+			handler := f.GetFileHandler(entryPath)
 			if handler == nil {
 				// No handler supported for file, mark as unsupported if not already
 				if !hasFileState || !fileState.Unsupported {
@@ -469,31 +472,29 @@ func (f *fileStateHandler) Files(filters ...FileFilter) []FileState {
 
 // Filter factory functions.
 
-func StateReadyToProcessFilter() FileFilter {
+// FilterReadyToProcess returns a filter that matches files that are ready to process.
+func FilterReadyToProcess() FileFilter {
 	return func(_ string, state FileState) bool {
 		return state.IsListening && state.ProcessState == processStateReadyToProcess
 	}
 }
 
-func StateTimestampFilter(startTime, endTime int64) FileFilter {
+// FilterTime returns a filter that matches files that have intervals overlapping with the given time.
+func FilterTime(startTime, endTime int64) FileFilter {
 	return func(_ string, state FileState) bool {
 		return state.StartTime <= endTime && state.EndTime >= startTime
 	}
 }
 
-func StateDirFilter(getDir bool) FileFilter {
-	return func(_ string, state FileState) bool {
-		return state.IsDir == getDir
-	}
-}
-
-func StateIsListeningFilter() FileFilter {
+// FilterIsListening returns a filter that matches files that are being listened to.
+func FilterIsListening() FileFilter {
 	return func(_ string, state FileState) bool {
 		return state.IsListening
 	}
 }
 
-func StateIsCollectingFilter() FileFilter {
+// FilterIsCollecting returns a filter that matches files that are being collected.
+func FilterIsCollecting() FileFilter {
 	return func(_ string, state FileState) bool {
 		return state.IsCollecting
 	}

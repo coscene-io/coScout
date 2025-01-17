@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package handlers
+package file_handlers
 
 import (
 	"os"
@@ -20,7 +20,10 @@ import (
 	"time"
 
 	"github.com/coscene-io/coscout/internal/log_reader"
+	"github.com/coscene-io/coscout/pkg/rule_engine"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 type logHandler struct {
@@ -64,4 +67,70 @@ func (h *logHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Tim
 	}
 
 	return startTime, endTime, nil
+}
+
+func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
+	if !activeTopics.Contains("/external_log") {
+		return
+	}
+
+	logFileReader, err := os.Open(filePath)
+	if err != nil {
+		log.Errorf("open log file [%s] failed: %v", filePath, err)
+		return
+	}
+	defer logFileReader.Close()
+
+	reader, err := log_reader.NewLogReader(logFileReader, filePath)
+	if err != nil {
+		log.Errorf("failed to create log reader for log file %s: %v", filePath, err)
+		return
+	}
+
+	iter, err := log_reader.NewLogIterator(reader)
+	if err != nil {
+		log.Errorf("failed to create log iterator for log file %s: %v", filePath, err)
+		return
+	}
+
+	for {
+		stampedLog, hasNext := iter.Next()
+		if !hasNext {
+			log.Infof("finished sending rule items for log file %s", filePath)
+			break
+		}
+
+		sec := stampedLog.Timestamp.Unix()
+		nsec := stampedLog.Timestamp.Nanosecond()
+		tsFloat := float64(sec) + float64(nsec)/1e9
+
+		ruleItemChan <- rule_engine.RuleItem{
+			Msg: map[string]interface{}{
+				"timestamp": map[string]interface{}{
+					"sec":  sec,
+					"nsec": nsec,
+				},
+				"message": stampedLog.Line,
+				"file":    filePath,
+				"level":   getLogLevel(stampedLog.Line),
+			},
+			Topic: "/external_log",
+			Ts:    tsFloat,
+		}
+	}
+}
+
+func getLogLevel(line string) int {
+	switch {
+	case strings.Contains(line, "DEBUG"):
+		return 1
+	case strings.Contains(line, "WARN"):
+		return 3
+	case strings.Contains(line, "ERROR"):
+		return 4
+	case strings.Contains(line, "FATAL"):
+		return 5
+	default:
+		return 2
+	}
 }
