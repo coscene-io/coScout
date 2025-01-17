@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
@@ -294,7 +295,7 @@ func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			return true
 		}
 		for _, pattern := range info.Cut.WhiteList {
-			matched, err := filepath.Match(pattern, filename)
+			matched, err := doublestar.PathMatch(pattern, filename)
 			if err == nil && matched {
 				return true
 			}

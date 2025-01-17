@@ -29,6 +29,7 @@ require (
 	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.2-20230414000709-087bc8072ce4.1 // indirect
 	cel.dev/expr v0.18.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.8.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
