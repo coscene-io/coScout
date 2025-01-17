@@ -40,7 +40,6 @@ import (
 
 type mcapHandler struct {
 	defaultGetFileSize
-	dummySendRuleItems
 }
 
 func NewMcapHandler() Interface {
@@ -84,7 +83,7 @@ func (h *mcapHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Ti
 	return &start, &end, nil
 }
 
-func (h *mcapHandler)SendRuleItems(filepath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
+func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
 	file, err := os.Open(filepath)
 	if err != nil {
 		log.Errorf("failed to open MCAP file [%s]: %v", filepath, err)
@@ -139,6 +138,7 @@ func (h *mcapHandler)SendRuleItems(filepath string, activeTopics mapset.Set[stri
 		msgBuf.Reset()
 
 		// Handle messages based on schema and encoding
+		//nolint: nestif // reduce nesting
 		if schema == nil || schema.Encoding == "" {
 			switch channel.MessageEncoding {
 			case "json":
@@ -185,7 +185,7 @@ func (h *mcapHandler)SendRuleItems(filepath string, activeTopics mapset.Set[stri
 						log.Errorf("failed to find descriptor: %v", err)
 						continue
 					}
-					messageDescriptor = descriptor.(protoreflect.MessageDescriptor)
+					messageDescriptor, _ = descriptor.(protoreflect.MessageDescriptor)
 					descriptors[channel.SchemaID] = messageDescriptor
 				}
 				protoMsg := dynamicpb.NewMessage(messageDescriptor)
@@ -218,8 +218,8 @@ func (h *mcapHandler)SendRuleItems(filepath string, activeTopics mapset.Set[stri
 
 		sec, nsec := utils.NormalizeFloatTimestamp(float64(msg.PublishTime))
 		ruleItemChan <- rule_engine.RuleItem{
-			Msg: decoded,
-			Ts: float64(sec) + float64(nsec)/1e9,
+			Msg:   decoded,
+			Ts:    float64(sec) + float64(nsec)/1e9,
 			Topic: channel.Topic,
 		}
 	}

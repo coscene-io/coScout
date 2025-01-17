@@ -48,9 +48,3 @@ func (h *defaultGetFileSize) GetFileSize(filePath string) (int64, error) {
 	}
 	return fileInfo.Size(), nil
 }
-
-// dummySendRuleItems is a dummy implementation of SendRuleItems.
-type dummySendRuleItems struct{}
-
-// SendRuleItems is a dummy implementation of SendRuleItems.
-func (h *dummySendRuleItems) SendRuleItems(_ string, _ chan rule_engine.RuleItem) {}
