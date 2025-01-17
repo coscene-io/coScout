@@ -35,6 +35,6 @@ func TimeFromFloat(timestamp float64) time.Time {
 }
 
 // FloatSecFromTime converts a time.Time instance to a floating-point timestamp in seconds.
-func FloatSecFromTime(t *time.Time) float64 {
+func FloatSecFromTime(t time.Time) float64 {
 	return float64(t.UnixNano()) / 1_000_000_000
 }

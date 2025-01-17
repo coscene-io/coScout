@@ -102,6 +102,11 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 			targetTopics.Add(conn.Topic)
 		}
 	}
+	if targetTopics.Cardinality() == 0 {
+		log.Infof("no active topics found in ros1 file %s, skipping", filePath)
+		return
+	}
+	log.Infof("sending rule items for ros1 file %s with topics: %v", filePath, targetTopics)
 
 	// Create message iterator
 	it, err := bagReader.Messages()

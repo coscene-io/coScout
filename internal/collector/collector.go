@@ -280,22 +280,28 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			diagnosisTaskDetail.DisplayName = ruleDisplayName
 		}
 
-		startTime, ok := rc.DiagnosisTask["start_time"].(int64)
+		startTime, ok := rc.DiagnosisTask["start_time"].(float64)
 		if ok {
+			sec, nsec := utils.NormalizeFloatTimestamp(startTime)
 			diagnosisTaskDetail.StartTime = &timestamppb.Timestamp{
-				Seconds: startTime,
+				Seconds: sec,
+				Nanos:   int32(nsec),
 			}
 		}
-		endTime, ok := rc.DiagnosisTask["end_time"].(int64)
+		endTime, ok := rc.DiagnosisTask["end_time"].(float64)
 		if ok {
+			sec, nsec := utils.NormalizeFloatTimestamp(endTime)
 			diagnosisTaskDetail.EndTime = &timestamppb.Timestamp{
-				Seconds: endTime,
+				Seconds: sec,
+				Nanos:   int32(nsec),
 			}
 		}
-		triggerTime, ok := rc.DiagnosisTask["trigger_time"].(int64)
+		triggerTime, ok := rc.DiagnosisTask["trigger_time"].(float64)
 		if ok {
+			sec, nsec := utils.NormalizeFloatTimestamp(triggerTime)
 			diagnosisTaskDetail.TriggerTime = &timestamppb.Timestamp{
-				Seconds: triggerTime,
+				Seconds: sec,
+				Nanos:   int32(nsec),
 			}
 		}
 

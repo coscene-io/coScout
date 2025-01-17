@@ -48,23 +48,12 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 
 		// Add metadata to validated rules
 		for _, validatedRule := range validatedRules {
-			uploadAction, hasUpload := lo.First(lo.Filter(validatedRule.Actions, func(action rule_engine.Action, _ int) bool {
+			// check if rule has an upload action
+			if !lo.SomeBy(validatedRule.Actions, func(action rule_engine.Action) bool {
 				return action.Name == "upload"
-			}))
-			if !hasUpload {
+			}) {
 				log.Debugf("rule %s does not have upload action, skipping", apiRule.GetName())
 				continue
-			}
-			validatedRule.Actions = []rule_engine.Action{uploadAction}
-
-			createMomentAction, hasCreateMoment := lo.First(lo.Filter(validatedRule.Actions, func(action rule_engine.Action, _ int) bool {
-				return action.Name == "create_moment"
-			}))
-			if hasCreateMoment {
-				validatedRule.Actions = []rule_engine.Action{
-					uploadAction,
-					createMomentAction,
-				}
 			}
 
 			validatedRule.Metadata["project_name"] = diagnosisRuleName.Project().String()
@@ -92,6 +81,10 @@ func (e *Engine) ActiveTopics() mapset.Set[string] {
 // ConsumeNext shows how to process a message through the rule engine.
 func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 	for _, rule := range e.rules {
+		if !rule.Topics.Contains(item.Topic) {
+			continue
+		}
+
 		curActivation := map[string]interface{}{
 			"msg":   item.Msg,
 			"scope": rule.Scope,
@@ -200,30 +193,32 @@ func uploadActionImpl(kwargs map[string]interface{}) error {
 	endTime := triggerTs.Add(after)
 
 	// Create collect info
-	collectInfo := &model.CollectInfo{
-		ProjectName: projectName,
-		Record: map[string]interface{}{
-			"title":       title,
-			"description": description,
-			"labels":      labels,
-			"rules": []map[string]interface{}{
-				{"id": ruleId},
-			},
+	collectInfo := &model.CollectInfo{Id: collectInfoId}
+	if err := collectInfo.Load(collectInfoId); err != nil {
+		*collectInfo = model.CollectInfo{Id: collectInfoId}
+	}
+
+	collectInfo.ProjectName = projectName
+	collectInfo.Record = map[string]interface{}{
+		"title":       title,
+		"description": description,
+		"labels":      labels,
+		"rules": []map[string]interface{}{
+			{"id": ruleId},
 		},
-		DiagnosisTask: map[string]interface{}{
-			"rule_id":           ruleId,
-			"rule_display_name": ruleDisplayName,
-			"trigger_time":      triggerTs.Unix(),
-			"start_time":        startTime.Unix(),
-			"end_time":          endTime.Unix(),
-		},
-		Cut: &model.CollectInfoCut{
-			ExtraFiles: extraFiles,
-			Start:      startTime.Unix(),
-			End:        endTime.Unix(),
-			WhiteList:  whiteList,
-		},
-		Id: collectInfoId,
+	}
+	collectInfo.DiagnosisTask = map[string]interface{}{
+		"rule_id":           ruleId,
+		"rule_display_name": ruleDisplayName,
+		"trigger_time":      utils.FloatSecFromTime(triggerTs),
+		"start_time":        utils.FloatSecFromTime(startTime),
+		"end_time":          utils.FloatSecFromTime(endTime),
+	}
+	collectInfo.Cut = &model.CollectInfoCut{
+		ExtraFiles: extraFiles,
+		Start:      startTime.Unix(),
+		End:        endTime.Unix(),
+		WhiteList:  whiteList,
 	}
 
 	// Save the collect info

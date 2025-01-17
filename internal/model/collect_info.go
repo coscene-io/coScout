@@ -44,6 +44,14 @@ type CollectInfoMoment struct {
 	AssignTo    string  `json:"assign_to" yaml:"assign_to"` //todo: change to assignee
 }
 
+type CollectInfoDiagnosisTask struct {
+	RuleId string `json:"rule_id" yaml:"rule_id"`
+	RuleDisplayName string `json:"rule_display_name" yaml:"rule_display_name"`
+	TriggerTime float64 `json:"trigger_time" yaml:"trigger_time"`
+
+
+}
+
 type CollectInfo struct {
 	ProjectName   string                 `json:"project_name" yaml:"project_name"`
 	Record        map[string]interface{} `json:"record" yaml:"record"`

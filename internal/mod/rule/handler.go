@@ -107,9 +107,10 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 					c.errChan <- errors.Errorf("list device diagnosis rules: %v", err)
 					continue
 				}
-				log.Infof("Received rules: %v", apiRules)
+				log.Infof("received rules: %v", apiRules)
 
-				c.engine.UpdateRules(apiRules, modConfig.Topics)
+				c.engine.UpdateRules(apiRules, appConfig.Topics)
+				log.Infof("handling topics: %v", c.engine.ActiveTopics())
 
 				select {
 				case modFirstUpdated <- struct{}{}:

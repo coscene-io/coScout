@@ -110,6 +110,11 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 			targetTopics = append(targetTopics, conn.Topic)
 		}
 	}
+	if len(targetTopics) == 0 {
+		log.Infof("no active topics found in MCAP file %s", filepath)
+		return
+	}
+	log.Infof("sending rule items for MCAP file %s with topics: %v", filepath, targetTopics)
 
 	iter, err := reader.Messages(mcap.UsingIndex(false), mcap.WithTopics(targetTopics))
 	if err != nil {
