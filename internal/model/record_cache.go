@@ -47,7 +47,7 @@ type Moment struct {
 	Task     Task                   `json:"task" yaml:"task"`
 	Event    map[string]interface{} `json:"event" yaml:"event"`
 	Code     string                 `json:"code" yaml:"code"`
-	RuleId   string                 `json:"rule_id" yaml:"rule_id"`
+	RuleName string                 `json:"rule_name" yaml:"rule_name"`
 }
 
 type Task struct {

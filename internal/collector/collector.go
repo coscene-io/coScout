@@ -203,9 +203,9 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				},
 				Device: deviceInfo,
 			}
-			if moment.RuleId != "" {
+			if moment.RuleName != "" {
 				event.Rule = &openDpsV1alpha1Resource.DiagnosisRule{
-					Name: moment.RuleId,
+					Name: moment.RuleName,
 				}
 			}
 			obtainEvent, err := reqClient.ObtainEvent(rc.ProjectName, &event)
@@ -240,7 +240,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				Moment:          m.Name,
 				Device:          deviceInfo.GetName(),
 				Record:          recordName,
-				DiagnosisRuleId: m.RuleId,
+				DiagnosisRuleId: m.RuleName,
 				DeviceContext:   getDeviceExtraInfos(deviceConfig.ExtraFiles),
 			}
 
@@ -340,10 +340,10 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 		Labels:      labels,
 		Device:      deviceInfo,
 	}
-	ruleId, ok := recordCache.DiagnosisTask["rule_id"].(string)
+	ruleName, ok := recordCache.DiagnosisTask["rule_name"].(string)
 	if ok {
 		ruleSpec := &openDpsV1alpha1Resource.DiagnosisRule{
-			Name: ruleId,
+			Name: ruleName,
 		}
 		record.Rules = []*openDpsV1alpha1Resource.DiagnosisRule{ruleSpec}
 	}

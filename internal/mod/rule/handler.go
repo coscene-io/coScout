@@ -362,7 +362,7 @@ func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			Timestamp:   ts,
 			Duration:    duration,
 			Code:        moment.Code,
-			RuleId:      moment.RuleId,
+			RuleName:    info.DiagnosisTask["rule_name"].(string),
 		}
 		if moment.CreateTask {
 			momentToCreate.Task = model.Task{

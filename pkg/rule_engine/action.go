@@ -63,7 +63,9 @@ func NewAction(
 
 	kwargs := make(map[string]expressionEvaluator)
 
+	// Add built-in variables
 	rawKwargs["ts"] = "{ts}"
+
 	for k, v := range rawKwargs {
 		switch val := v.(type) {
 		case string:

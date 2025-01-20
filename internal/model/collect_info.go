@@ -33,23 +33,15 @@ type CollectInfoCut struct {
 }
 
 type CollectInfoMoment struct {
-	Title       string  `json:"title" yaml:"title"`
-	Description string  `json:"description" yaml:"description"`
-	Timestamp   float64 `json:"timestamp" yaml:"timestamp"`
-	StartTime   float64 `json:"start_time" yaml:"start_time"`
-	RuleId      string  `json:"rule_id" yaml:"rule_id"`
-	Code        string  `json:"code" yaml:"code"`
-	CreateTask  bool    `json:"create_task" yaml:"create_task"`
-	SyncTask    bool    `json:"sync_task" yaml:"sync_task"`
-	AssignTo    string  `json:"assign_to" yaml:"assign_to"` //todo: change to assignee
-}
-
-type CollectInfoDiagnosisTask struct {
-	RuleId string `json:"rule_id" yaml:"rule_id"`
-	RuleDisplayName string `json:"rule_display_name" yaml:"rule_display_name"`
-	TriggerTime float64 `json:"trigger_time" yaml:"trigger_time"`
-
-
+	Title        string            `json:"title" yaml:"title"`
+	Description  string            `json:"description" yaml:"description"`
+	Timestamp    float64           `json:"timestamp" yaml:"timestamp"`
+	StartTime    float64           `json:"start_time" yaml:"start_time"`
+	CustomFields map[string]string `json:"custom_fields" yaml:"custom_fields"`
+	Code         string            `json:"code" yaml:"code"`
+	CreateTask   bool              `json:"create_task" yaml:"create_task"`
+	SyncTask     bool              `json:"sync_task" yaml:"sync_task"`
+	AssignTo     string            `json:"assign_to" yaml:"assign_to"` //todo: change to assignee
 }
 
 type CollectInfo struct {

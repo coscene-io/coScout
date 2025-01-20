@@ -150,12 +150,18 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 			}
 		case *resources.ActionSpec_CreateMoment:
 			actionName = "create_moment"
+			customFields := map[string]interface{}{}
+			for k, v := range spec.CreateMoment.GetCustomFields() {
+				customFields[k] = v
+			}
+
 			kwargs = map[string]interface{}{
 				"title":         spec.CreateMoment.GetTitle(),
 				"description":   spec.CreateMoment.GetDescription(),
 				"create_task":   spec.CreateMoment.GetCreateTask(),
-				"assign_to":     spec.CreateMoment.GetAssignee(),
-				"custom_fields": spec.CreateMoment.GetCustomFields(),
+				"sync_task":     spec.CreateMoment.GetSyncTask(),
+				"assignee":      spec.CreateMoment.GetAssignee(),
+				"custom_fields": customFields,
 			}
 		}
 
