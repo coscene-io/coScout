@@ -276,9 +276,10 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 		diagnosisTaskDetail := openDpsV1alpha1Resource.DiagnosisTaskDetail{
 			Device: deviceInfo.GetName(),
 		}
-		ruleId, ok := rc.DiagnosisTask["rule_id"].(string)
-		if ok && ruleId != "" {
-			diagnosisTaskDetail.RuleSpecId = ruleId
+
+		ruleName, ok := rc.DiagnosisTask["rule_name"].(string)
+		if ok && ruleName != "" {
+			diagnosisTaskDetail.DiagnosisRule = ruleName
 		}
 
 		ruleDisplayName, ok := rc.DiagnosisTask["rule_display_name"].(string)
