@@ -31,6 +31,7 @@ import (
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/internal/name"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
@@ -225,6 +226,11 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 		if rc.Moments[i].Name != "" && rc.Moments[i].Event == nil {
 			m := rc.Moments[i]
 
+			diagnosisRuleId := ""
+			if diagnosisRuleName, err := name.NewDiagnosisRule(m.RuleName); err == nil {
+				diagnosisRuleId = diagnosisRuleName.Id
+			}
+
 			deviceEvent := openAnaV1alpha1Resource.DeviceEvent{
 				Code:       m.Code,
 				Parameters: m.Metadata,
@@ -240,7 +246,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				Moment:          m.Name,
 				Device:          deviceInfo.GetName(),
 				Record:          recordName,
-				DiagnosisRuleId: m.RuleName,
+				DiagnosisRuleId: diagnosisRuleId,
 				DeviceContext:   getDeviceExtraInfos(deviceConfig.ExtraFiles),
 			}
 
@@ -342,10 +348,11 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 	}
 	ruleName, ok := recordCache.DiagnosisTask["rule_name"].(string)
 	if ok {
-		ruleSpec := &openDpsV1alpha1Resource.DiagnosisRule{
-			Name: ruleName,
+		record.Rules = []*openDpsV1alpha1Resource.DiagnosisRule{
+			{
+				Name: ruleName,
+			},
 		}
-		record.Rules = []*openDpsV1alpha1Resource.DiagnosisRule{ruleSpec}
 	}
 
 	record, err := reqClient.CreateRecord(recordCache.ProjectName, record)
