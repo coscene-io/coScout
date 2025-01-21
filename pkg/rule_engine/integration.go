@@ -19,10 +19,10 @@ import (
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
-	"github.com/coscene-io/coscout/pkg/utils"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
+	"github.com/sosodev/duration"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -205,7 +205,7 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 	topics.Add(apiRule.GetActiveTopics())
 
 	// Parse debounce duration
-	debounceTime, _ := utils.ParseISODuration(apiRule.GetDebounceDuration())
+	debounceTime, _ := duration.Parse(apiRule.GetDebounceDuration())
 
 	// Create rules for each scope
 	rules := make([]*Rule, 0)
@@ -215,7 +215,7 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 			actions,
 			scope,
 			topics,
-			debounceTime,
+			debounceTime.ToTimeDuration(),
 			nil,
 		))
 	}

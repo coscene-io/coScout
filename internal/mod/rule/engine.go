@@ -13,6 +13,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
+	"github.com/sosodev/duration"
 )
 
 // Engine represents the rule engine that processes messages against rules.
@@ -124,7 +125,7 @@ func uploadActionImpl(kwargs map[string]interface{}) error {
 	if !ok {
 		return errors.Errorf("before must be a string")
 	}
-	before, err := utils.ParseISODuration(beforeStr)
+	before, err := duration.Parse(beforeStr)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse before to duration")
 	}
@@ -133,7 +134,7 @@ func uploadActionImpl(kwargs map[string]interface{}) error {
 	if !ok {
 		return errors.Errorf("after must be a string")
 	}
-	after, err := utils.ParseISODuration(afterStr)
+	after, err := duration.Parse(afterStr)
 	if err != nil {
 		return errors.Wrap(err, "failed to parse after to duration")
 	}
@@ -194,8 +195,8 @@ func uploadActionImpl(kwargs map[string]interface{}) error {
 	}
 
 	// Calculate start and end times
-	startTime := triggerTs.Add(-before)
-	endTime := triggerTs.Add(after)
+	startTime := triggerTs.Add(-before.ToTimeDuration())
+	endTime := triggerTs.Add(after.ToTimeDuration())
 
 	// Create collect info
 	collectInfo := &model.CollectInfo{Id: collectInfoId}
