@@ -51,6 +51,7 @@ ARCH=$(uname -m)
 MESH_ARCH=""
 case "$ARCH" in
 x86_64)
+  ARCH="amd64"
   MESH_ARCH="amd64"
   ;;
 arm64 | aarch64)
