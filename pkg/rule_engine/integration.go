@@ -77,7 +77,16 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 				scType = "bool"
 			case enums.RuleConditionTypeEnum_RULE_CONDITION_TYPE_UNSPECIFIED:
 				log.Errorf("unspecified condition type: %v, skipping", sc)
-				continue
+				return nil, ValidationResult{
+					Success: false,
+					Errors: []ValidationError{{
+						Location: &ValidationErrorLocation{
+							Section:   ConditionSection,
+							ItemIndex: condIdx,
+						},
+						SyntaxError: &struct{}{},
+					}},
+				}
 			}
 
 			scOp := ""
@@ -145,8 +154,12 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 				"title":       spec.Upload.GetTitle(),
 				"description": spec.Upload.GetDescription(),
 				"labels":      spec.Upload.GetLabels(),
-				"extra_files": spec.Upload.GetExtraFiles(),
-				"white_list":  spec.Upload.GetWhiteList(),
+				"extra_files": lo.Filter(spec.Upload.GetExtraFiles(), func(f string, _ int) bool {
+					return f != ""
+				}),
+				"white_list": lo.Filter(spec.Upload.GetWhiteList(), func(f string, _ int) bool {
+					return f != ""
+				}),
 			}
 		case *resources.ActionSpec_CreateMoment:
 			actionName = "create_moment"
