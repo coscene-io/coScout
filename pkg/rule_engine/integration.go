@@ -97,7 +97,16 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 				scOp = "=="
 			case enums.RuleConditionOpEnum_RULE_CONDITION_OP_UNSPECIFIED:
 				log.Errorf("unspecified condition op: %v, skipping", sc)
-				continue
+				return nil, ValidationResult{
+					Success: false,
+					Errors: []ValidationError{{
+						Location: &ValidationErrorLocation{
+							Section:   ConditionSection,
+							ItemIndex: condIdx,
+						},
+						SyntaxError: &struct{}{},
+					}},
+				}
 			}
 
 			scValue := ""
