@@ -36,8 +36,14 @@ import (
 )
 
 const (
-	// periodicInterval is the interval to periodically run for various periodic tasks.
-	periodicInterval = 60 * time.Second
+	// loadConfigInterval is the periodic interval to load the config and update the rules in rule engine.
+	loadConfigInterval = 60 * time.Second
+
+	// listenInterval is the periodic interval to listen for files to be processed.
+	listenInterval = 20 * time.Second
+
+	// collectInfoInterval is the periodic interval to scan collect info files and handle them.
+	collectInfoInterval = 20 * time.Second
 
 	// numThreadToProcessFile is the number of threads to process files concurrently.
 	numThreadToProcessFile = 2
@@ -87,7 +93,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
-				configTicker.Reset(periodicInterval)
+				configTicker.Reset(loadConfigInterval)
 				appConfig := c.confManager.LoadWithRemote()
 				confConfig, ok := appConfig.Mod.Config.(config.DefaultModConfConfig)
 				if ok {
@@ -130,7 +136,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
-				listenTicker.Reset(periodicInterval)
+				listenTicker.Reset(listenInterval)
 				c.sendFilesToBeProcessed(modConfig)
 			case <-ctx.Done():
 				return
@@ -160,7 +166,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
-				t.Reset(periodicInterval)
+				t.Reset(collectInfoInterval)
 				c.scanCollectInfosAndHandle()
 			case <-ctx.Done():
 				return
