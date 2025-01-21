@@ -291,7 +291,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			sec, nsec := utils.NormalizeFloatTimestamp(startTime)
 			diagnosisTaskDetail.StartTime = &timestamppb.Timestamp{
 				Seconds: sec,
-				Nanos:   int32(nsec),
+				Nanos:   nsec,
 			}
 		}
 		endTime, ok := rc.DiagnosisTask["end_time"].(float64)
@@ -299,7 +299,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			sec, nsec := utils.NormalizeFloatTimestamp(endTime)
 			diagnosisTaskDetail.EndTime = &timestamppb.Timestamp{
 				Seconds: sec,
-				Nanos:   int32(nsec),
+				Nanos:   nsec,
 			}
 		}
 		triggerTime, ok := rc.DiagnosisTask["trigger_time"].(float64)
@@ -307,7 +307,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			sec, nsec := utils.NormalizeFloatTimestamp(triggerTime)
 			diagnosisTaskDetail.TriggerTime = &timestamppb.Timestamp{
 				Seconds: sec,
-				Nanos:   int32(nsec),
+				Nanos:   nsec,
 			}
 		}
 

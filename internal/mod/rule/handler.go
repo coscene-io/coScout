@@ -356,14 +356,20 @@ func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		}
 		duration := ts - startTime
 
+		ruleName, ok := info.DiagnosisTask["rule_name"].(string)
+		if !ok {
+			log.Errorf("rule_name is not a string")
+			ruleName = ""
+		}
 		momentToCreate := model.Moment{
 			Title:       moment.Title,
 			Description: moment.Description,
 			Timestamp:   ts,
 			Duration:    duration,
 			Code:        moment.Code,
-			RuleName:    info.DiagnosisTask["rule_name"].(string),
+			RuleName:    ruleName,
 		}
+
 		if moment.CreateTask {
 			momentToCreate.Task = model.Task{
 				Title:       moment.Title,
