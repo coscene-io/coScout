@@ -30,10 +30,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const (
-	deviceAuthCheckInterval = 60 * time.Second
-)
-
 type ModRegister interface {
 	// GetDevice returns the device information for different providers
 	GetDevice() *openDpsV1alpha1Resource.Device
@@ -80,7 +76,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 					Exist:      false,
 				}
 
-				time.Sleep(deviceAuthCheckInterval)
+				time.Sleep(config.DeviceAuthCheckInterval)
 				continue
 			}
 
@@ -91,7 +87,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 					Exist:      false,
 				}
 
-				time.Sleep(deviceAuthCheckInterval)
+				time.Sleep(config.DeviceAuthCheckInterval)
 				continue
 			}
 			device = localDevice
@@ -107,7 +103,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 				Exist:      false,
 			}
 
-			time.Sleep(deviceAuthCheckInterval)
+			time.Sleep(config.DeviceAuthCheckInterval)
 			continue
 		}
 
@@ -118,7 +114,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s already deleted.", device.GetSerialNumber())
-			time.Sleep(deviceAuthCheckInterval * 10)
+			time.Sleep(config.DeviceAuthCheckInterval * 10)
 			continue
 		}
 
@@ -129,7 +125,16 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s already be rejected", device.GetSerialNumber())
-			time.Sleep(deviceAuthCheckInterval)
+			err := r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExpireKey))
+			if err != nil {
+				log.Warnf("unable to delete device auth token expireTime: %v", err)
+			}
+
+			err = r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthKey))
+			if err != nil {
+				log.Warnf("unable to delete device auth token: %v", err)
+			}
+			time.Sleep(config.DeviceAuthCheckInterval)
 			continue
 		}
 
@@ -140,7 +145,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 
 			log.Infof("Remote device %s is pending", device.GetSerialNumber())
-			time.Sleep(deviceAuthCheckInterval)
+			time.Sleep(config.DeviceAuthCheckInterval)
 			continue
 		}
 
@@ -154,7 +159,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 					Exist:      true,
 				}
 
-				time.Sleep(deviceAuthCheckInterval)
+				time.Sleep(config.DeviceAuthCheckInterval)
 				continue
 			}
 
@@ -172,7 +177,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			}
 		}
 
-		time.Sleep(deviceAuthCheckInterval)
+		time.Sleep(config.DeviceAuthCheckInterval)
 		continue
 	}
 }

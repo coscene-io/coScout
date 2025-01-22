@@ -68,6 +68,12 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 		},
 		Topics: make([]string, 0),
 		Import: []string{},
+		Mod: ModConfConfig{
+			Name: "default",
+			Config: DefaultModConfConfig{
+				SkipPeriodHours: 2,
+			},
+		},
 	}
 }
 

@@ -56,6 +56,7 @@ type RequestClient struct {
 	securityTokenCli openStorV1alpha1Connect.SecurityTokenServiceClient
 	fileCli          openDpsV1alpha1Connect.FileServiceClient
 	labelCli         openDpsV1alpha1Connect.LabelServiceClient
+	diagCli          openDpsV1alpha1Connect.DiagnosisRuleServiceClient
 }
 
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, networkChan chan *model.NetworkUsage) *RequestClient {
@@ -71,6 +72,7 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 	securityTokenClient := openStorV1alpha1Connect.NewSecurityTokenServiceClient(httpClient, apiConfig.ServerURL, interceptors)
 	fileClient := openDpsV1alpha1Connect.NewFileServiceClient(httpClient, apiConfig.ServerURL, interceptors)
 	labelClient := openDpsV1alpha1Connect.NewLabelServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	diagClient := openDpsV1alpha1Connect.NewDiagnosisRuleServiceClient(httpClient, apiConfig.ServerURL, interceptors)
 
 	return &RequestClient{
 		deviceCli:        deviceClient,
@@ -82,6 +84,7 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 		securityTokenCli: securityTokenClient,
 		fileCli:          fileClient,
 		labelCli:         labelClient,
+		diagCli:          diagClient,
 		storage:          storage,
 		networkChan:      networkChan,
 	}
@@ -391,6 +394,64 @@ func (r *RequestClient) ObtainEvent(projectName string, event *openDpsV1alpha1Re
 	}
 
 	return apiRes.Msg.GetEvent(), nil
+}
+
+func (r *RequestClient) ListDeviceDiagnosisRules(device string) ([]*openDpsV1alpha1Resource.DiagnosisRule, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.ListDeviceDiagnosisRulesRequest{
+		Parent: device,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.diagCli.ListDeviceDiagnosisRules(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to list device diagnosisRules: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to list device diagnosisRules"))
+	}
+
+	return apiRes.Msg.GetDeviceDiagnosisRules(), nil
+}
+
+func (r *RequestClient) HitDiagnosisRule(rule *openDpsV1alpha1Resource.DiagnosisRule, device string, upload bool) (*emptypb.Empty, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.HitDiagnosisRuleRequest{
+		Hit:    rule,
+		Device: device,
+		Upload: upload,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.diagCli.HitDiagnosisRule(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to hit diagnosis rule: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to hit diagnosis rule"))
+	}
+	return apiRes.Msg, nil
+}
+
+func (r *RequestClient) CountDiagnosisRuleHits(rule *openDpsV1alpha1Resource.DiagnosisRule, device string) (int32, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.CountDiagnosisRuleHitsRequest{
+		Hit:    rule,
+		Device: device,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.diagCli.CountDiagnosisRuleHits(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to count diagnosis rule hits: %v", err)
+		return 0, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to count diagnosis rule hits"))
+	}
+	return apiRes.Msg.GetCount(), nil
 }
 
 func (r *RequestClient) GenerateSecurityToken(project string) (*openStorV1alpha1Service.GenerateSecurityTokenResponse, error) {

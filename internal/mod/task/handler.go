@@ -15,6 +15,7 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -28,49 +29,73 @@ import (
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
-	"github.com/coscene-io/coscout/internal/mod"
 	"github.com/coscene-io/coscout/internal/model"
-	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
 )
 
 type CustomTaskHandler struct {
-	reqClient api.RequestClient
-	config    config.AppConfig
-	storage   *storage.Storage
+	reqClient   api.RequestClient
+	confManager config.ConfManager
+	errChan     chan error
 }
 
-func NewTaskHandler(reqClient api.RequestClient, config config.AppConfig, storage *storage.Storage) mod.CustomHandler {
+func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, errChan chan error) *CustomTaskHandler {
 	return &CustomTaskHandler{
-		reqClient: reqClient,
-		config:    config,
-		storage:   storage,
+		reqClient:   reqClient,
+		confManager: confManager,
+		errChan:     errChan,
 	}
 }
 
-func (c CustomTaskHandler) Run() error {
-	deviceInfo := core.GetDeviceInfo(c.storage)
+func (c CustomTaskHandler) Run(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	go func(t *time.Ticker) {
+		for {
+			select {
+			case <-t.C:
+				ticker.Reset(config.TaskCheckInterval)
+
+				c.run(ctx)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}(ticker)
+
+	<-ctx.Done()
+	log.Infof("Task handler stopped")
+}
+
+func (c CustomTaskHandler) run(_ context.Context) {
+	deviceInfo := core.GetDeviceInfo(c.confManager.GetStorage())
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Info("Device info is not found, skipping task")
-		return nil
+		return
 	}
 
+	//nolint: contextcheck // context is checked in the parent goroutine
 	cancellingTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_CANCELLING.Enum())
 	if err != nil {
 		log.Errorf("Failed to list device cancelling tasks: %v", err)
-		return err
+		c.errChan <- err
+		return
 	}
+	//nolint: contextcheck // context is checked in the parent goroutine
 	c.handleCancellingTasks(cancellingTasks)
 
+	//nolint: contextcheck // context is checked in the parent goroutine
 	pendingTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_PENDING.Enum())
 	if err != nil {
 		log.Errorf("Failed to list device tasks: %v", err)
-		return err
+		c.errChan <- err
+		return
 	}
+
+	//nolint: contextcheck // context is checked in the parent goroutine
 	c.handlePendingTasks(pendingTasks)
 	log.Infof("Task handler completed")
-	return nil
 }
 
 func (c CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resource.Task) {

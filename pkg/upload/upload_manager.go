@@ -143,7 +143,7 @@ func (u *Manager) handleUploadProgress() {
 func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key string, filePath string, fileSize int64, opts minio.PutObjectOptions) (err error) {
 	// Check for largest object size allowed.
 	if fileSize > int64(maxSinglePutObjectSize) {
-		return errors.Errorf("Your proposed upload size ‘%d’ exceeds the maximum allowed object size ‘%d’ for single PUT operation.", fileSize, maxSinglePutObjectSize)
+		return errors.Errorf("Your proposed upload size ‘%s’ exceeds the maximum allowed object size ‘%s’ for single PUT operation.", strconv.FormatInt(fileSize, 10), strconv.FormatInt(maxSinglePutObjectSize, 10))
 	}
 
 	c := minio.Core{Client: u.client}

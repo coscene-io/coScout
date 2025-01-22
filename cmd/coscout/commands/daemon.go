@@ -66,8 +66,7 @@ func run(confManager *config.ConfManager, reqClient *api.RequestClient, register
 	errorChan := make(chan error, 100)
 
 	isAuthed := false
-	for {
-		deviceStatus := <-registerChan
+	for deviceStatus := range registerChan {
 		if deviceStatus.Authorized {
 			log.Info("Device is authorized. Performing actions...")
 

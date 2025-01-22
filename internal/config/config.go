@@ -67,10 +67,8 @@ type ModConfConfig struct {
 }
 
 type DefaultModConfConfig struct {
-	Enabled               bool     `koanf:"enabled" yaml:"enabled" json:"enabled"`
 	ListenDirs            []string `koanf:"listen_dirs" yaml:"listen_dirs" json:"listen_dirs"`
 	CollectDirs           []string `koanf:"collect_dirs" yaml:"collect_dirs" json:"collect_dirs"`
-	Topics                []string `koanf:"topics" yaml:"topics" json:"topics"`
 	Ros2CustomizedMsgDirs []string `koanf:"ros2_customized_msgs_dirs" yaml:"ros2_customized_msgs_dirs" json:"ros2_customized_msgs_dirs"`
 	UploadFiles           []string `koanf:"upload_files" yaml:"upload_files" json:"upload_files"`
 	SkipPeriodHours       int      `koanf:"skip_period_hours" yaml:"skip_period_hours" json:"skip_period_hours"`

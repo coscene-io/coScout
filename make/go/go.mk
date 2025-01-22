@@ -18,9 +18,9 @@ GO_TEST_BINS ?=
 # Settable
 GO_GET_PKGS ?=
 # Settable
-GO_MOD_VERSION ?= 1.23
+GO_MOD_VERSION ?= 1.22
 # Settable
-GO_ALL_REPO_PKGS ?= ./cmd/... ./internal/...
+GO_ALL_REPO_PKGS ?= ./cmd/... ./internal/... ./pkg/...
 # Settable
 SKIP_GOLANGCI_LINT ?=
 # Settable

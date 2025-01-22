@@ -25,13 +25,13 @@ import (
 
 	openAnaV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/enums"
 	openAnaV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/resources"
-	openDpsV1alpha1Common "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/commons"
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/internal/name"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
@@ -40,8 +40,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-const checkInterval = 60 * time.Second
 
 func FindAllRecordCaches() []string {
 	baseFolder := config.GetRecordCacheFolder()
@@ -80,10 +78,12 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 		for {
 			select {
 			case <-t.C:
+				ticker.Reset(config.CollectionInterval)
+
 				appConfig := confManager.LoadWithRemote()
 				getStorage := confManager.GetStorage()
 
-				//nolint: contextcheck // context is checked in the parent goroutine
+				//nolint: contextcheck// context is checked in the parent goroutine
 				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
 				if err != nil {
 					errorChan <- err
@@ -91,8 +91,6 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 			case <-ctx.Done():
 				return
 			}
-
-			ticker.Reset(checkInterval)
 		}
 	}(ticker)
 
@@ -183,9 +181,8 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				description = moment.Description
 			}
 
-			if moment.Timestamp > 1_000_000_000_000 {
-				moment.Timestamp /= 1000
-			}
+			sec, nanos := utils.NormalizeFloatTimestamp(moment.Timestamp)
+			moment.Timestamp = float64(sec) + float64(nanos)/1e9
 
 			event := openDpsV1alpha1Resource.Event{
 				Record:           recordName,
@@ -204,9 +201,9 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				},
 				Device: deviceInfo,
 			}
-			if moment.RuleId != "" {
-				event.Rule = &openDpsV1alpha1Common.RuleSpec{
-					Id: moment.RuleId,
+			if moment.RuleName != "" {
+				event.Rule = &openDpsV1alpha1Resource.DiagnosisRule{
+					Name: moment.RuleName,
 				}
 			}
 			obtainEvent, err := reqClient.ObtainEvent(rc.ProjectName, &event)
@@ -226,6 +223,11 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 		if rc.Moments[i].Name != "" && rc.Moments[i].Event == nil {
 			m := rc.Moments[i]
 
+			diagnosisRuleId := ""
+			if diagnosisRuleName, err := name.NewDiagnosisRule(m.RuleName); err == nil {
+				diagnosisRuleId = diagnosisRuleName.Id
+			}
+
 			deviceEvent := openAnaV1alpha1Resource.DeviceEvent{
 				Code:       m.Code,
 				Parameters: m.Metadata,
@@ -241,7 +243,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				Moment:          m.Name,
 				Device:          deviceInfo.GetName(),
 				Record:          recordName,
-				DiagnosisRuleId: m.RuleId,
+				DiagnosisRuleId: diagnosisRuleId,
 				DeviceContext:   getDeviceExtraInfos(deviceConfig.ExtraFiles),
 			}
 
@@ -269,30 +271,41 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			},
 		}
 		diagnosisTaskDetail := openDpsV1alpha1Resource.DiagnosisTaskDetail{
-			Device:      deviceInfo.GetName(),
-			DisplayName: recordTitle,
-		}
-		ruleId, ok := rc.DiagnosisTask["rule_id"].(string)
-		if ok && ruleId != "" {
-			diagnosisTaskDetail.RuleSpecId = ruleId
+			Device: deviceInfo.GetName(),
 		}
 
-		startTime, ok := rc.DiagnosisTask["start_time"].(int64)
+		ruleName, ok := rc.DiagnosisTask["rule_name"].(string)
+		if ok && ruleName != "" {
+			diagnosisTaskDetail.DiagnosisRule = ruleName
+		}
+
+		ruleDisplayName, ok := rc.DiagnosisTask["rule_display_name"].(string)
+		if ok && ruleDisplayName != "" {
+			diagnosisTaskDetail.DisplayName = ruleDisplayName
+		}
+
+		startTime, ok := rc.DiagnosisTask["start_time"].(float64)
 		if ok {
+			sec, nsec := utils.NormalizeFloatTimestamp(startTime)
 			diagnosisTaskDetail.StartTime = &timestamppb.Timestamp{
-				Seconds: startTime,
+				Seconds: sec,
+				Nanos:   nsec,
 			}
 		}
-		endTime, ok := rc.DiagnosisTask["end_time"].(int64)
+		endTime, ok := rc.DiagnosisTask["end_time"].(float64)
 		if ok {
+			sec, nsec := utils.NormalizeFloatTimestamp(endTime)
 			diagnosisTaskDetail.EndTime = &timestamppb.Timestamp{
-				Seconds: endTime,
+				Seconds: sec,
+				Nanos:   nsec,
 			}
 		}
-		triggerTime, ok := rc.DiagnosisTask["trigger_time"].(int64)
+		triggerTime, ok := rc.DiagnosisTask["trigger_time"].(float64)
 		if ok {
+			sec, nsec := utils.NormalizeFloatTimestamp(triggerTime)
 			diagnosisTaskDetail.TriggerTime = &timestamppb.Timestamp{
-				Seconds: triggerTime,
+				Seconds: sec,
+				Nanos:   nsec,
 			}
 		}
 
@@ -331,12 +344,13 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 		Labels:      labels,
 		Device:      deviceInfo,
 	}
-	ruleId, ok := recordCache.DiagnosisTask["rule_id"].(string)
+	ruleName, ok := recordCache.DiagnosisTask["rule_name"].(string)
 	if ok {
-		ruleSpec := &openDpsV1alpha1Common.RuleSpec{
-			Id: ruleId,
+		record.Rules = []*openDpsV1alpha1Resource.DiagnosisRule{
+			{
+				Name: ruleName,
+			},
 		}
-		record.Rules = []*openDpsV1alpha1Common.RuleSpec{ruleSpec}
 	}
 
 	record, err := reqClient.CreateRecord(recordCache.ProjectName, record)
