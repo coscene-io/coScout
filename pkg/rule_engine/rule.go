@@ -21,7 +21,7 @@ import (
 )
 
 func AllowedVersions() []string {
-	return []string{"v2"}
+	return []string{"VERSION_2"}
 }
 
 // Rule represents a rule with conditions and actions.

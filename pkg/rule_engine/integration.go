@@ -30,7 +30,7 @@ import (
 // ValidateApiRule validates an API rule and returns a list of rules and validation result.
 func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]ActionImpl) ([]*Rule, ValidationResult) {
 	// First validate version
-	if version := apiRule.GetVersion(); !lo.Contains(AllowedVersions(), version) {
+	if version := apiRule.GetVersion().String(); !lo.Contains(AllowedVersions(), version) {
 		return nil, ValidationResult{
 			Success: false,
 			Errors: []ValidationError{{

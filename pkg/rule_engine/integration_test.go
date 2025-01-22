@@ -50,7 +50,7 @@ func TestApiRuleToRuleSpec(t *testing.T) {
 				},
 			},
 		},
-		Version: "v2",
+		Version: resources.DiagnosisRule_VERSION_2,
 		ConditionSpecs: []*resources.ConditionSpec{
 			{
 				Condition: &resources.ConditionSpec_Raw{
