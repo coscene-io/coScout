@@ -36,15 +36,6 @@ import (
 )
 
 const (
-	// loadConfigInterval is the periodic interval to load the config and update the rules in rule engine.
-	loadConfigInterval = 60 * time.Second
-
-	// listenInterval is the periodic interval to listen for files to be processed.
-	listenInterval = 20 * time.Second
-
-	// collectInfoInterval is the periodic interval to scan collect info files and handle them.
-	collectInfoInterval = 20 * time.Second
-
 	// numThreadToProcessFile is the number of threads to process files concurrently.
 	numThreadToProcessFile = 2
 )
@@ -93,7 +84,8 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
-				configTicker.Reset(loadConfigInterval)
+				configTicker.Reset(config.ReloadRulesInterval)
+
 				appConfig := c.confManager.LoadWithRemote()
 				confConfig, ok := appConfig.Mod.Config.(config.DefaultModConfConfig)
 				if ok {
@@ -106,7 +98,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 					continue
 				}
 
-				//nolint: contextcheck // context is checked in the parent goroutine
+				//nolint: contextcheck// context is checked in the parent goroutine
 				apiRules, err := c.reqClient.ListDeviceDiagnosisRules(device.GetName())
 				if err != nil {
 					log.Errorf("list device diagnosis rules: %v", err)
@@ -118,10 +110,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 				c.engine.UpdateRules(apiRules, appConfig.Topics)
 				log.Infof("handling topics: %v", c.engine.ActiveTopics())
 
-				select {
-				case modFirstUpdated <- struct{}{}:
-				default:
-				}
+				modFirstUpdated <- struct{}{}
 			case <-ctx.Done():
 				return
 			}
@@ -136,7 +125,8 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
-				listenTicker.Reset(listenInterval)
+				listenTicker.Reset(config.RuleCheckListenFilesInterval)
+
 				c.sendFilesToBeProcessed(modConfig)
 			case <-ctx.Done():
 				return
@@ -166,7 +156,8 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
-				t.Reset(collectInfoInterval)
+				t.Reset(config.RuleScanCollectInfosInterval)
+
 				c.scanCollectInfosAndHandle()
 			case <-ctx.Done():
 				return
@@ -178,9 +169,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 	log.Infof("Rule handler stopped")
 }
 
-func (c CustomRuleHandler) sendFilesToBeProcessed(
-	modConfig *config.DefaultModConfConfig,
-) {
+func (c CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
 	if len(modConfig.CollectDirs) == 0 {
 		return
 	}
@@ -322,7 +311,7 @@ func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			continue
 		}
 
-		if utils.CheckReadPath(extraFileAbs) {
+		if !utils.CheckReadPath(extraFileAbs) {
 			continue
 		}
 
@@ -352,7 +341,7 @@ func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 	for _, moment := range info.Moments {
 		ts := moment.Timestamp
-		// Convert to milliseconds if the timestamp is in seconds
+		// Convert to seconds if the timestamp is in milliseconds
 		if ts > 1_000_000_000_000 {
 			ts /= 1_000
 		}

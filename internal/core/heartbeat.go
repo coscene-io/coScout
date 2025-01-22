@@ -21,12 +21,11 @@ import (
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
 	"github.com/coscene-io/coscout"
 	"github.com/coscene-io/coscout/internal/api"
+	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
 	log "github.com/sirupsen/logrus"
 )
-
-const heartbeatInterval = 60 * time.Second
 
 type ErrorInfo struct {
 	Err       error
@@ -71,7 +70,7 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 			return
 		default:
 			extraInfo := map[string]string{}
-			if lastError.Err != nil && lastError.Timestamp > time.Now().Add(-5*heartbeatInterval).Unix() {
+			if lastError.Err != nil && lastError.Timestamp > time.Now().Add(-5*config.HeartbeatInterval).Unix() {
 				extraInfo["error_msg"] = lastError.Err.Error()
 				extraInfo["code"] = "ERROR"
 			} else {
@@ -86,7 +85,7 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 			}
 
 			cosVersion := coscout.GetVersion()
-			//nolint: contextcheck // context is checked in the parent goroutine
+			//nolint: contextcheck// context is checked in the parent goroutine
 			_, err := reqClient.SendHeartbeat(deviceInfo.GetName(), cosVersion, &nc, extraInfo)
 			if err != nil {
 				log.Errorf("failed to send heartbeat: %v", err)
@@ -97,7 +96,7 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 				networkUsage.ReduceReceived(receivedBytes)
 			}
 
-			time.Sleep(heartbeatInterval)
+			time.Sleep(config.HeartbeatInterval)
 		}
 	}
 }

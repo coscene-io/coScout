@@ -29,8 +29,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-const checkInterval = 60 * time.Second
-
 func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startChan chan bool, finishChan chan bool, errorChan chan error) {
 	<-startChan
 
@@ -50,14 +48,14 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		for {
 			select {
 			case <-t.C:
+				ticker.Reset(config.RefreshRemoteConfigInterval)
+
 				//nolint: contextcheck // context is checked in the parent goroutine
 				refreshRemoteConfig(confManager, reqClient)
 			case <-ctx.Done():
 				log.Infof("Daemon context done")
 				return
 			}
-
-			ticker.Reset(checkInterval)
 		}
 	}(ticker)
 

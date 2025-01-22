@@ -34,8 +34,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const checkInterval = 60 * time.Second
-
 type CustomTaskHandler struct {
 	reqClient   api.RequestClient
 	confManager config.ConfManager
@@ -57,12 +55,12 @@ func (c CustomTaskHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case <-t.C:
+				ticker.Reset(config.TaskCheckInterval)
+
 				c.run(ctx)
 			case <-ctx.Done():
 				return
 			}
-
-			ticker.Reset(checkInterval)
 		}
 	}(ticker)
 

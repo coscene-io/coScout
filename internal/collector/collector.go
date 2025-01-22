@@ -41,8 +41,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const checkInterval = 60 * time.Second
-
 func FindAllRecordCaches() []string {
 	baseFolder := config.GetRecordCacheFolder()
 	var records []string
@@ -80,10 +78,12 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 		for {
 			select {
 			case <-t.C:
+				ticker.Reset(config.CollectionInterval)
+
 				appConfig := confManager.LoadWithRemote()
 				getStorage := confManager.GetStorage()
 
-				//nolint: contextcheck // context is checked in the parent goroutine
+				//nolint: contextcheck// context is checked in the parent goroutine
 				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
 				if err != nil {
 					errorChan <- err
@@ -91,8 +91,6 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 			case <-ctx.Done():
 				return
 			}
-
-			ticker.Reset(checkInterval)
 		}
 	}(ticker)
 
@@ -183,9 +181,8 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				description = moment.Description
 			}
 
-			if moment.Timestamp > 1_000_000_000_000 {
-				moment.Timestamp /= 1000
-			}
+			sec, nanos := utils.NormalizeFloatTimestamp(moment.Timestamp)
+			moment.Timestamp = float64(sec) + float64(nanos)/1e9
 
 			event := openDpsV1alpha1Resource.Event{
 				Record:           recordName,
