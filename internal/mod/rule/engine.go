@@ -15,6 +15,7 @@
 package rule
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
@@ -51,7 +52,12 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 			},
 		)
 		if !validationResult.Success {
-			log.Errorf("rule validation failed for rule: %v, skipping", apiRule)
+			log.Errorf("rule validation failed for rule: %s, skipping", apiRule.GetDisplayName())
+			bytes, err := json.Marshal(validationResult)
+			if err == nil {
+				log.Errorf("validation result: %s", string(bytes))
+			}
+
 			continue
 		}
 

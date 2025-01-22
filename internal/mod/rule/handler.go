@@ -110,7 +110,10 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 				c.engine.UpdateRules(apiRules, appConfig.Topics)
 				log.Infof("handling topics: %v", c.engine.ActiveTopics())
 
-				modFirstUpdated <- struct{}{}
+				select {
+				case modFirstUpdated <- struct{}{}:
+				default:
+				}
 			case <-ctx.Done():
 				return
 			}
