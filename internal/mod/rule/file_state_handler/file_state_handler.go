@@ -448,6 +448,9 @@ type FileFilter func(string, FileState) bool
 
 // Files returns files matching the given filters.
 func (f *fileStateHandler) Files(filters ...FileFilter) []FileState {
+	f.updateLock.Lock()         // 添加读锁
+	defer f.updateLock.Unlock() // 确保锁会被释放
+
 	var result []FileState
 	for filename, state := range f.state {
 		if state.Unsupported {
