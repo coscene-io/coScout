@@ -224,7 +224,6 @@ func (c CustomRuleHandler) processListenedFilesAndSendMessages(
 
 				c.processFileWithRule(filename)
 				log.Infof("Finished processing file: %v", filename)
-
 			}(fileToProcess)
 		case <-ctx.Done():
 			wg.Wait()
