@@ -68,7 +68,7 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 	}
 }
 
-func (c CustomRuleHandler) Run(ctx context.Context) {
+func (c *CustomRuleHandler) Run(ctx context.Context) {
 	if c.fileStateHandler == nil {
 		log.Errorf("file state handler is nil")
 		return
@@ -172,7 +172,7 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 	log.Infof("Rule handler stopped")
 }
 
-func (c CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
 	if len(modConfig.CollectDirs) == 0 {
 		return
 	}
@@ -199,7 +199,7 @@ func (c CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModCo
 	}
 }
 
-func (c CustomRuleHandler) processListenedFilesAndSendMessages(
+func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 	ctx context.Context,
 	numThreadToProcessFile int,
 ) {
@@ -232,7 +232,7 @@ func (c CustomRuleHandler) processListenedFilesAndSendMessages(
 	}
 }
 
-func (c CustomRuleHandler) processFileWithRule(
+func (c *CustomRuleHandler) processFileWithRule(
 	filename string,
 ) {
 	log.Infof("RuleEngine exec file: %v", filename)
@@ -247,12 +247,11 @@ func (c CustomRuleHandler) processFileWithRule(
 }
 
 // scanCollectInfosAndHandle handles all collect info files within the collect info dir.
-func (c CustomRuleHandler) scanCollectInfosAndHandle() {
+func (c *CustomRuleHandler) scanCollectInfosAndHandle() {
 	log.Infof("Starts to scan collect info dir")
 
 	// Search for files under the collect info dir and handles them
 	collectInfoDir := config.GetCollectInfoFolder()
-	log.Infof("Collect info dir: %v", collectInfoDir)
 
 	entries, err := os.ReadDir(collectInfoDir)
 	if err != nil {
@@ -280,7 +279,7 @@ func (c CustomRuleHandler) scanCollectInfosAndHandle() {
 }
 
 // handleCollectInfo handles a single the collect info.
-func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
+func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 	if info.Cut == nil || time.Unix(info.Cut.End, 0).After(time.Now()) {
 		return
 	}
