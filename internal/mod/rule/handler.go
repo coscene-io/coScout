@@ -191,6 +191,10 @@ func (c CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModCo
 		file_state_handler.FilterIsListening(),
 		file_state_handler.FilterReadyToProcess(),
 	) {
+		err := c.fileStateHandler.MarkProcessedFile(fileState.Pathname)
+		if err != nil {
+			log.Errorf("mark processed file: %v", err)
+		}
 		c.listenChan <- fileState.Pathname
 	}
 }
@@ -221,10 +225,6 @@ func (c CustomRuleHandler) processListenedFilesAndSendMessages(
 				c.processFileWithRule(filename)
 				log.Infof("Finished processing file: %v", filename)
 
-				err := c.fileStateHandler.MarkProcessedFile(filename)
-				if err != nil {
-					log.Errorf("mark processed file: %v", err)
-				}
 			}(fileToProcess)
 		case <-ctx.Done():
 			wg.Wait()
