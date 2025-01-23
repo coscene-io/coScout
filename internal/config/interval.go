@@ -36,7 +36,7 @@ const (
 	RuleCheckListenFilesInterval = 23 * time.Second
 
 	// RuleScanCollectInfosInterval is the interval at which the rule is scanned to collect infos.
-	RuleScanCollectInfosInterval = 23 * time.Second
+	RuleScanCollectInfosInterval = 27 * time.Second
 
 	// DeviceAuthCheckInterval is the interval at which the device is checked for authorization.
 	DeviceAuthCheckInterval = 60 * time.Second

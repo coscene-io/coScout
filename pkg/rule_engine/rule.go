@@ -17,11 +17,12 @@ package rule_engine
 import (
 	"time"
 
+	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	mapset "github.com/deckarep/golang-set/v2"
 )
 
 func AllowedVersions() []string {
-	return []string{"VERSION_2"}
+	return []string{resources.DiagnosisRule_VERSION_2.String()}
 }
 
 // Rule represents a rule with conditions and actions.
