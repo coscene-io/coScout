@@ -25,12 +25,15 @@ import (
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
+	"github.com/ThreeDotsLabs/watermill"
+	gcmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
 )
@@ -280,5 +283,11 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	_, err = c.reqClient.AddTaskTags(task.GetName(), tags)
 	if err != nil {
 		log.Errorf("Failed to add task tags: %v", err)
+	}
+
+	msg := gcmessage.NewMessage(watermill.NewUUID(), []byte(task.GetName()))
+	err = c.pubSub.Publish(constant.TopicCollectMsg, msg)
+	if err != nil {
+		log.Errorf("Failed to publish collect message: %v", err)
 	}
 }

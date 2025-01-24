@@ -53,7 +53,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	}(pubSub)
 
 	go func() {
-		err := collector.Collect(ctx, reqClient, confManager, errorChan)
+		err := collector.Collect(ctx, reqClient, confManager, pubSub, errorChan)
 		if err != nil {
 			errorChan <- err
 		}

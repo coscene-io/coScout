@@ -27,12 +27,14 @@ import (
 	openAnaV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/analysis/v1alpha1/resources"
 	openDpsV1alpha1Enum "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
+	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/name"
 	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -67,7 +69,7 @@ func FindAllRecordCaches() []string {
 	return records
 }
 
-func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, errorChan chan error) error {
+func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
 	uploadChan := make(chan *model.RecordCache, 10)
 
 	go Upload(ctx, reqClient, confManager, uploadChan, errorChan)
@@ -94,8 +96,29 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 		}
 	}(ticker)
 
+	go triggerUpload(ctx, pubSub, ticker)
+
 	<-ctx.Done()
 	return nil
+}
+
+func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, t *time.Ticker) {
+	messages, err := pubSub.Subscribe(ctx, constant.TopicCollectMsg)
+	if err != nil {
+		log.Errorf("subscribe to collect message failed: %v", err)
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-messages:
+			t.Reset(1 * time.Second)
+			log.Infof("Received collect message, start collecting for upload")
+			msg.Ack()
+		}
+	}
 }
 
 func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {

@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ThreeDotsLabs/watermill"
+	gcmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/coscene-io/coscout/internal/api"
@@ -418,6 +420,12 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 	if cleanId := info.Clean(); cleanId == "" {
 		log.Errorf("clean collect info failed for id: %v", info.Id)
+	}
+
+	msg := gcmessage.NewMessage(watermill.NewUUID(), []byte(rc.GetRecordCachePath()))
+	err := c.pubSub.Publish(constant.TopicCollectMsg, msg)
+	if err != nil {
+		log.Errorf("Failed to publish collect message: %v", err)
 	}
 }
 

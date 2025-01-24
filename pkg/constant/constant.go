@@ -53,5 +53,6 @@ const (
 	HttpModType = "http"
 
 	// TopicRuleMsg PubSub topic name.
-	TopicRuleMsg = "topic.rules.msg"
+	TopicRuleMsg    = "topic.rules.msg"
+	TopicCollectMsg = "topic.collect.msg"
 )

@@ -6,6 +6,7 @@ require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250122060750-4df03e5a2d69.1
 	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.3-20250122060750-4df03e5a2d69.1
 	connectrpc.com/connect v1.18.1
+	github.com/ThreeDotsLabs/watermill v1.4.4
 	github.com/bmatcuk/doublestar/v4 v4.8.0
 	github.com/coscene-io/x v0.0.0-20241217064456-1ad08bd128a7
 	github.com/deckarep/golang-set/v2 v2.7.0
@@ -13,6 +14,7 @@ require (
 	github.com/foxglove/mcap/go/mcap v1.7.0
 	github.com/google/cel-go v0.22.1
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/mux v1.8.1
 	github.com/knadh/koanf v1.5.0
 	github.com/minio/minio-go/v7 v7.0.61
 	github.com/oriser/regroup v0.0.0-20210730155327-fca8d7531263
@@ -30,13 +32,11 @@ require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.3-20240508200655-46a4cf4ba109.1 // indirect
 	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.3-20230414000709-087bc8072ce4.1 // indirect
 	cel.dev/expr v0.18.0 // indirect
-	github.com/ThreeDotsLabs/watermill v1.4.4 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32 // indirect
-	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect

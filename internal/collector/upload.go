@@ -16,8 +16,10 @@ package collector
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"path"
 	"sort"
 	"strconv"
@@ -238,10 +240,18 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		log.Errorf("unable to generate security token: %v", err)
 		return err
 	}
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			//nolint: gosec// InsecureSkipVerify is used to skip certificate verification
+			InsecureSkipVerify: appConfig.Api.Insecure,
+		},
+	}
 	mc, err := minio.New(generateSecurityTokenRes.GetEndpoint(), &minio.Options{
-		Creds:  credentials.NewStaticV4(generateSecurityTokenRes.GetAccessKeyId(), generateSecurityTokenRes.GetAccessKeySecret(), generateSecurityTokenRes.GetSessionToken()),
-		Secure: true,
-		Region: "",
+		Creds:     credentials.NewStaticV4(generateSecurityTokenRes.GetAccessKeyId(), generateSecurityTokenRes.GetAccessKeySecret(), generateSecurityTokenRes.GetSessionToken()),
+		Secure:    true,
+		Region:    "",
+		Transport: transport,
 	})
 	if err != nil {
 		log.Errorf("unable to create minio client: %v", err)
