@@ -32,6 +32,9 @@ type AppConfig struct {
 	// Mod config
 	Mod ModConfConfig `koanf:"mod" yaml:"mod" json:"mod"`
 
+	// HttpServer HttpServerConfig `yaml:"http_server"`
+	HttpServer HttpServerConfig `koanf:"http_server" yaml:"http_server" json:"http_server"`
+
 	// import other config
 	Import []string `koanf:"__import__" yaml:"__import__" json:"__import__"`
 }
@@ -40,6 +43,7 @@ type ApiConfig struct {
 	ServerURL   string `koanf:"server_url"   yaml:"server_url" json:"server_url"`
 	ProjectSlug string `koanf:"project_slug" yaml:"project_slug" json:"project_slug"`
 	OrgSlug     string `koanf:"org_slug"     yaml:"org_slug" json:"org_slug"`
+	Insecure    bool   `koanf:"insecure"     yaml:"insecure" json:"insecure"`
 }
 
 type CollectorConfig struct {
@@ -72,4 +76,8 @@ type DefaultModConfConfig struct {
 	Ros2CustomizedMsgDirs []string `koanf:"ros2_customized_msgs_dirs" yaml:"ros2_customized_msgs_dirs" json:"ros2_customized_msgs_dirs"`
 	UploadFiles           []string `koanf:"upload_files" yaml:"upload_files" json:"upload_files"`
 	SkipPeriodHours       int      `koanf:"skip_period_hours" yaml:"skip_period_hours" json:"skip_period_hours"`
+}
+
+type HttpServerConfig struct {
+	Port int `koanf:"port" yaml:"port" json:"port"`
 }

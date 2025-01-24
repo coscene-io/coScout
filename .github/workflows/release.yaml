@@ -82,7 +82,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gzip
       - name: Build coScout agent
         run: |
-          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o cos cmd/coscout/main.go
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} make build-binary
+          cp bin/cos cos
           chmod +x cos
       - name: Build metadata files
         env:

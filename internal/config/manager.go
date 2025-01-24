@@ -59,6 +59,9 @@ func (c ConfManager) SetRemote(key string, value string) {
 
 func (c ConfManager) getDefaultConfig() AppConfig {
 	return AppConfig{
+		Api: ApiConfig{
+			Insecure: false,
+		},
 		Collector: CollectorConfig{
 			DeleteAfterIntervalInHours: 48,
 			SkipCheckSameFile:          false,
@@ -73,6 +76,9 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 			Config: DefaultModConfConfig{
 				SkipPeriodHours: 2,
 			},
+		},
+		HttpServer: HttpServerConfig{
+			Port: 22524,
 		},
 	}
 }

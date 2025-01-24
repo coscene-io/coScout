@@ -23,6 +23,7 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 )
 
 func CheckReadPath(path string) bool {
@@ -30,14 +31,13 @@ func CheckReadPath(path string) bool {
 		return false
 	}
 
-	info, err := os.Stat(path)
+	_, err := os.Stat(path)
 	if err != nil {
 		return false
 	}
-	if info.Mode().Perm()&0444 == 0444 {
-		return true
-	}
-	return false
+
+	err = unix.Access(path, unix.R_OK)
+	return err == nil
 }
 
 func DeleteDir(dir string) bool {

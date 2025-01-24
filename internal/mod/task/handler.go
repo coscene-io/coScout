@@ -25,11 +25,15 @@ import (
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
+	"github.com/ThreeDotsLabs/watermill"
+	gcmessage "github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
 )
@@ -38,17 +42,19 @@ type CustomTaskHandler struct {
 	reqClient   api.RequestClient
 	confManager config.ConfManager
 	errChan     chan error
+	pubSub      *gochannel.GoChannel
 }
 
-func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, errChan chan error) *CustomTaskHandler {
+func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomTaskHandler {
 	return &CustomTaskHandler{
 		reqClient:   reqClient,
 		confManager: confManager,
 		errChan:     errChan,
+		pubSub:      pubSub,
 	}
 }
 
-func (c CustomTaskHandler) Run(ctx context.Context) {
+func (c *CustomTaskHandler) Run(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	go func(t *time.Ticker) {
@@ -68,7 +74,7 @@ func (c CustomTaskHandler) Run(ctx context.Context) {
 	log.Infof("Task handler stopped")
 }
 
-func (c CustomTaskHandler) run(_ context.Context) {
+func (c *CustomTaskHandler) run(_ context.Context) {
 	deviceInfo := core.GetDeviceInfo(c.confManager.GetStorage())
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Info("Device info is not found, skipping task")
@@ -98,7 +104,7 @@ func (c CustomTaskHandler) run(_ context.Context) {
 	log.Infof("Task handler completed")
 }
 
-func (c CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resource.Task) {
+func (c *CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resource.Task) {
 	if len(tasks) == 0 {
 		return
 	}
@@ -160,7 +166,7 @@ func (c CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resourc
 	}
 }
 
-func (c CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.Task) {
+func (c *CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.Task) {
 	if len(tasks) == 0 {
 		return
 	}
@@ -184,7 +190,7 @@ func (c CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.T
 	}
 }
 
-func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) {
+func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) {
 	log.Infof("Handling upload task %s", task.GetName())
 
 	taskDetail := task.GetUploadTaskDetail()
@@ -277,5 +283,11 @@ func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) 
 	_, err = c.reqClient.AddTaskTags(task.GetName(), tags)
 	if err != nil {
 		log.Errorf("Failed to add task tags: %v", err)
+	}
+
+	msg := gcmessage.NewMessage(watermill.NewUUID(), []byte(task.GetName()))
+	err = c.pubSub.Publish(constant.TopicCollectMsg, msg)
+	if err != nil {
+		log.Errorf("Failed to publish collect message: %v", err)
 	}
 }

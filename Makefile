@@ -1,5 +1,5 @@
 MAKEGO := make/go
-MAKEGO_REMOTE := https://github.com/coscene-io/cos-agent.git
+MAKEGO_REMOTE := https://github.com/coscene-io/coScout.git
 PROJECT := coscout
 GO_MODULE := github.com/coscene-io/coscout
 DOCKER_ORG := cosceneio

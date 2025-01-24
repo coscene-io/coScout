@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,12 +24,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ThreeDotsLabs/watermill"
+	gcmessage "github.com/ThreeDotsLabs/watermill/message"
+	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/pkg/errors"
@@ -44,6 +49,7 @@ type CustomRuleHandler struct {
 	reqClient   api.RequestClient
 	confManager config.ConfManager
 	errChan     chan error
+	pubSub      *gochannel.GoChannel
 
 	fileStateHandler file_state_handler.FileStateHandler
 	listenChan       chan string
@@ -51,7 +57,7 @@ type CustomRuleHandler struct {
 	engine           Engine
 }
 
-func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, errChan chan error) *CustomRuleHandler {
+func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomRuleHandler {
 	fileStateHandler, err := file_state_handler.New()
 	if err != nil {
 		log.Errorf("create file state handler: %v", err)
@@ -65,10 +71,11 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		listenChan:       make(chan string, 1000),
 		ruleItemChan:     make(chan rule_engine.RuleItem, 1000),
 		engine:           Engine{},
+		pubSub:           pubSub,
 	}
 }
 
-func (c CustomRuleHandler) Run(ctx context.Context) {
+func (c *CustomRuleHandler) Run(ctx context.Context) {
 	if c.fileStateHandler == nil {
 		log.Errorf("file state handler is nil")
 		return
@@ -168,11 +175,41 @@ func (c CustomRuleHandler) Run(ctx context.Context) {
 		}
 	}(collectTicker)
 
+	go c.handleSubMsg(ctx)
+
 	<-ctx.Done()
 	log.Infof("Rule handler stopped")
 }
 
-func (c CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
+	messages, err := c.pubSub.Subscribe(ctx, constant.TopicRuleMsg)
+	if err != nil {
+		log.Errorf("subscribe to rule message: %v", err)
+		c.errChan <- errors.Wrap(err, "subscribe to rule message")
+		return
+	}
+
+	for {
+		select {
+		case msg := <-messages:
+			item := rule_engine.RuleItem{}
+			err := json.Unmarshal(msg.Payload, &item)
+			if err != nil {
+				log.Errorf("unmarshal rule item: %v", err)
+
+				msg.Ack()
+				continue
+			}
+
+			c.ruleItemChan <- item
+			msg.Ack()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
 	if len(modConfig.CollectDirs) == 0 {
 		return
 	}
@@ -199,7 +236,7 @@ func (c CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModCo
 	}
 }
 
-func (c CustomRuleHandler) processListenedFilesAndSendMessages(
+func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 	ctx context.Context,
 	numThreadToProcessFile int,
 ) {
@@ -232,7 +269,7 @@ func (c CustomRuleHandler) processListenedFilesAndSendMessages(
 	}
 }
 
-func (c CustomRuleHandler) processFileWithRule(
+func (c *CustomRuleHandler) processFileWithRule(
 	filename string,
 ) {
 	log.Infof("RuleEngine exec file: %v", filename)
@@ -247,12 +284,11 @@ func (c CustomRuleHandler) processFileWithRule(
 }
 
 // scanCollectInfosAndHandle handles all collect info files within the collect info dir.
-func (c CustomRuleHandler) scanCollectInfosAndHandle() {
+func (c *CustomRuleHandler) scanCollectInfosAndHandle() {
 	log.Infof("Starts to scan collect info dir")
 
 	// Search for files under the collect info dir and handles them
 	collectInfoDir := config.GetCollectInfoFolder()
-	log.Infof("Collect info dir: %v", collectInfoDir)
 
 	entries, err := os.ReadDir(collectInfoDir)
 	if err != nil {
@@ -280,7 +316,7 @@ func (c CustomRuleHandler) scanCollectInfosAndHandle() {
 }
 
 // handleCollectInfo handles a single the collect info.
-func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
+func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 	if info.Cut == nil || time.Unix(info.Cut.End, 0).After(time.Now()) {
 		return
 	}
@@ -384,6 +420,12 @@ func (c CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 	if cleanId := info.Clean(); cleanId == "" {
 		log.Errorf("clean collect info failed for id: %v", info.Id)
+	}
+
+	msg := gcmessage.NewMessage(watermill.NewUUID(), []byte(rc.GetRecordCachePath()))
+	err := c.pubSub.Publish(constant.TopicCollectMsg, msg)
+	if err != nil {
+		log.Errorf("Failed to publish collect message: %v", err)
 	}
 }
 

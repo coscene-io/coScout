@@ -16,6 +16,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -60,7 +61,14 @@ type RequestClient struct {
 }
 
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, networkChan chan *model.NetworkUsage) *RequestClient {
-	httpClient := http.DefaultClient
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				//nolint: gosec// make work in some old machines.
+				InsecureSkipVerify: apiConfig.Insecure,
+			},
+		},
+	}
 	interceptors := connect.WithInterceptors(interceptor.NetworkUsageInterceptor(networkChan))
 
 	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL, interceptors)

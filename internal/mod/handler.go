@@ -17,8 +17,10 @@ package mod
 import (
 	"context"
 
+	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/mod/http"
 	"github.com/coscene-io/coscout/internal/mod/rule"
 	"github.com/coscene-io/coscout/internal/mod/task"
 	"github.com/coscene-io/coscout/pkg/constant"
@@ -29,12 +31,14 @@ type CustomHandler interface {
 	Run(ctx context.Context)
 }
 
-func NewModHandler(reqClient api.RequestClient, confManager config.ConfManager, errChan chan error, mod string) CustomHandler {
+func NewModHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error, mod string) CustomHandler {
 	switch mod {
 	case constant.TaskModType:
-		return task.NewTaskHandler(reqClient, confManager, errChan)
+		return task.NewTaskHandler(reqClient, confManager, pubSub, errChan)
 	case constant.RuleModType:
-		return rule.NewRuleHandler(reqClient, confManager, errChan)
+		return rule.NewRuleHandler(reqClient, confManager, pubSub, errChan)
+	case constant.HttpModType:
+		return http.NewHttpHandler(reqClient, confManager, pubSub, errChan)
 	default:
 		return nil
 	}

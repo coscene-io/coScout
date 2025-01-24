@@ -6,6 +6,7 @@ require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250122060750-4df03e5a2d69.1
 	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.3-20250122060750-4df03e5a2d69.1
 	connectrpc.com/connect v1.18.1
+	github.com/ThreeDotsLabs/watermill v1.4.4
 	github.com/bmatcuk/doublestar/v4 v4.8.0
 	github.com/coscene-io/x v0.0.0-20241217064456-1ad08bd128a7
 	github.com/deckarep/golang-set/v2 v2.7.0
@@ -13,6 +14,7 @@ require (
 	github.com/foxglove/mcap/go/mcap v1.7.0
 	github.com/google/cel-go v0.22.1
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/mux v1.8.1
 	github.com/knadh/koanf v1.5.0
 	github.com/minio/minio-go/v7 v7.0.61
 	github.com/oriser/regroup v0.0.0-20210730155327-fca8d7531263
@@ -37,9 +39,10 @@ require (
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/klauspost/compress v1.16.7 // indirect
+	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
+	github.com/lithammer/shortuuid/v3 v3.0.7 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
@@ -47,6 +50,7 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
