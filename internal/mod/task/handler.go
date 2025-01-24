@@ -25,6 +25,7 @@ import (
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
+	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
@@ -38,13 +39,15 @@ type CustomTaskHandler struct {
 	reqClient   api.RequestClient
 	confManager config.ConfManager
 	errChan     chan error
+	pubSub      *gochannel.GoChannel
 }
 
-func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, errChan chan error) *CustomTaskHandler {
+func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomTaskHandler {
 	return &CustomTaskHandler{
 		reqClient:   reqClient,
 		confManager: confManager,
 		errChan:     errChan,
+		pubSub:      pubSub,
 	}
 }
 

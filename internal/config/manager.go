@@ -74,6 +74,9 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 				SkipPeriodHours: 2,
 			},
 		},
+		HttpServer: HttpServerConfig{
+			Port: 22524,
+		},
 	}
 }
 

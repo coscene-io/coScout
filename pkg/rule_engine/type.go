@@ -129,7 +129,8 @@ func NewEnv() (*cel.Env, error) {
 }
 
 type RuleItem struct {
-	Msg   map[string]interface{}
-	Topic string
-	Ts    float64 // Timestamp in seconds
+	Msg     map[string]interface{} `json:"msg"`
+	Topic   string                 `json:"topic"`
+	Ts      float64                `json:"ts"` // Timestamp in seconds
+	MsgType string                 `json:"msgType"`
 }

@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThreeDotsLabs/watermill"
+	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
@@ -34,6 +36,21 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	pubSub := gochannel.NewGoChannel(
+		gochannel.Config{
+			Persistent:                     false,
+			OutputChannelBuffer:            1000,
+			BlockPublishUntilSubscriberAck: true,
+		},
+		watermill.NewStdLogger(false, false),
+	)
+	defer func(pubSub *gochannel.GoChannel) {
+		err := pubSub.Close()
+		if err != nil {
+			log.Errorf("unable to close pubsub: %v", err)
+		}
+	}(pubSub)
 
 	go func() {
 		err := collector.Collect(ctx, reqClient, confManager, errorChan)
@@ -59,8 +76,9 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		}
 	}(ticker)
 
-	go mod.NewModHandler(*reqClient, *confManager, errorChan, constant.TaskModType).Run(ctx)
-	go mod.NewModHandler(*reqClient, *confManager, errorChan, constant.RuleModType).Run(ctx)
+	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.TaskModType).Run(ctx)
+	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.RuleModType).Run(ctx)
+	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.HttpModType).Run(ctx)
 	go core.SendHeartbeat(ctx, reqClient, confManager.GetStorage(), errorChan)
 
 	<-finishChan

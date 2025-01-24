@@ -50,4 +50,8 @@ const (
 
 	TaskModType = "task"
 	RuleModType = "rule"
+	HttpModType = "http"
+
+	// TopicRuleMsg PubSub topic name.
+	TopicRuleMsg = "topic.rules.msg"
 )
