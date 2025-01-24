@@ -51,7 +51,7 @@ func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager,
 	}
 }
 
-func (c CustomTaskHandler) Run(ctx context.Context) {
+func (c *CustomTaskHandler) Run(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	go func(t *time.Ticker) {
@@ -71,7 +71,7 @@ func (c CustomTaskHandler) Run(ctx context.Context) {
 	log.Infof("Task handler stopped")
 }
 
-func (c CustomTaskHandler) run(_ context.Context) {
+func (c *CustomTaskHandler) run(_ context.Context) {
 	deviceInfo := core.GetDeviceInfo(c.confManager.GetStorage())
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Info("Device info is not found, skipping task")
@@ -101,7 +101,7 @@ func (c CustomTaskHandler) run(_ context.Context) {
 	log.Infof("Task handler completed")
 }
 
-func (c CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resource.Task) {
+func (c *CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resource.Task) {
 	if len(tasks) == 0 {
 		return
 	}
@@ -163,7 +163,7 @@ func (c CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resourc
 	}
 }
 
-func (c CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.Task) {
+func (c *CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.Task) {
 	if len(tasks) == 0 {
 		return
 	}
@@ -187,7 +187,7 @@ func (c CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.T
 	}
 }
 
-func (c CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) {
+func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) {
 	log.Infof("Handling upload task %s", task.GetName())
 
 	taskDetail := task.GetUploadTaskDetail()

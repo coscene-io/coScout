@@ -552,12 +552,18 @@ fi
 
 # create config file
 echo "Creating config file..."
+INSECURE=false
+if [[ $SKIP_VERIFY_CERT -eq 1 ]]; then
+  INSECURE=true
+fi
+
 # create config file ~/.config/cos/config.yaml
 sudo -u "$CUR_USER" tee "${COS_CONFIG_DIR}/config.yaml" >/dev/null <<EOL
 api:
   server_url: $SERVER_URL
   project_slug: $PROJECT_SLUG
   org_slug: $ORG_SLUG
+  insecure: $INSECURE
 
 register:
   type: file

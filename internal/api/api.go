@@ -64,7 +64,8 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
+				//nolint: gosec// make work in some old machines.
+				InsecureSkipVerify: apiConfig.Insecure,
 			},
 		},
 	}
