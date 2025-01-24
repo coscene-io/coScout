@@ -116,7 +116,7 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 	}
 	log.Infof("sending rule items for MCAP file %s with topics: %v", filepath, targetTopics)
 
-	iter, err := reader.Messages(mcap.UsingIndex(false), mcap.WithTopics(targetTopics))
+	iter, err := reader.Messages(mcap.WithTopics(targetTopics))
 	if err != nil {
 		log.Errorf("failed to create message iterator: %v", err)
 		return
