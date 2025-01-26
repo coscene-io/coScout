@@ -16,6 +16,7 @@ package model
 
 import (
 	"encoding/json"
+	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
@@ -77,6 +78,9 @@ type RecordCache struct {
 	// key is absolute file path, value is file info
 	OriginalFiles     map[string]FileInfo `json:"files" yaml:"files"`
 	UploadedFilePaths []string            `json:"uploaded_filepaths" yaml:"uploaded_filepaths"`
+
+	// random int for cache folder to avoid conflict
+	randomInt int
 }
 
 func (rc *RecordCache) GetBaseFolder() string {
@@ -84,7 +88,11 @@ func (rc *RecordCache) GetBaseFolder() string {
 
 	seconds := rc.Timestamp / 1000
 	milliseconds := rc.Timestamp % 1000
-	dirName := time.Unix(seconds, 0).UTC().Format("2006-01-02-15-04-05") + "_" + strconv.Itoa(int(milliseconds))
+	if rc.randomInt == 0 {
+		rand.New(rand.NewSource(time.Now().UnixNano()))
+		rc.randomInt = rand.Intn(1000) + 1
+	}
+	dirName := time.Unix(seconds, 0).UTC().Format("2006-01-02-15-04-05") + "_" + strconv.Itoa(int(milliseconds)) + "_" + strconv.Itoa(rc.randomInt)
 	return path.Join(baseFolder, dirName)
 }
 
