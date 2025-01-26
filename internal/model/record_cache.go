@@ -79,8 +79,8 @@ type RecordCache struct {
 	OriginalFiles     map[string]FileInfo `json:"files" yaml:"files"`
 	UploadedFilePaths []string            `json:"uploaded_filepaths" yaml:"uploaded_filepaths"`
 
-	// randomInt is used to avoid conflict when creating cache folder
-	randomPostfix string
+	// randomPostfix is used to avoid conflict when creating cache folder
+	RandomPostfix string `json:"random_postfix" yaml:"random_postfix"`
 }
 
 func (rc *RecordCache) GetBaseFolder() string {
@@ -88,10 +88,10 @@ func (rc *RecordCache) GetBaseFolder() string {
 
 	seconds := rc.Timestamp / 1000
 	milliseconds := rc.Timestamp % 1000
-	if rc.randomPostfix == "" {
-		rc.randomPostfix = uuid.New().String()
+	if rc.RandomPostfix == "" {
+		rc.RandomPostfix = uuid.New().String()
 	}
-	dirName := time.Unix(seconds, 0).UTC().Format("2006-01-02-15-04-05") + "_" + strconv.Itoa(int(milliseconds)) + "_" + rc.randomPostfix
+	dirName := time.Unix(seconds, 0).UTC().Format("2006-01-02-15-04-05") + "_" + strconv.Itoa(int(milliseconds)) + "_" + rc.RandomPostfix
 	return path.Join(baseFolder, dirName)
 }
 
