@@ -16,7 +16,6 @@ package model
 
 import (
 	"encoding/json"
-	"math/rand"
 	"os"
 	"path"
 	"path/filepath"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/pkg/utils"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -79,8 +79,8 @@ type RecordCache struct {
 	OriginalFiles     map[string]FileInfo `json:"files" yaml:"files"`
 	UploadedFilePaths []string            `json:"uploaded_filepaths" yaml:"uploaded_filepaths"`
 
-	// random int for cache folder to avoid conflict
-	randomInt int
+	// randomInt is used to avoid conflict when creating cache folder
+	randomPostfix string
 }
 
 func (rc *RecordCache) GetBaseFolder() string {
@@ -88,11 +88,10 @@ func (rc *RecordCache) GetBaseFolder() string {
 
 	seconds := rc.Timestamp / 1000
 	milliseconds := rc.Timestamp % 1000
-	if rc.randomInt == 0 {
-		rand.New(rand.NewSource(time.Now().UnixNano()))
-		rc.randomInt = rand.Intn(1000) + 1
+	if rc.randomPostfix == "" {
+		rc.randomPostfix = uuid.New().String()
 	}
-	dirName := time.Unix(seconds, 0).UTC().Format("2006-01-02-15-04-05") + "_" + strconv.Itoa(int(milliseconds)) + "_" + strconv.Itoa(rc.randomInt)
+	dirName := time.Unix(seconds, 0).UTC().Format("2006-01-02-15-04-05") + "_" + strconv.Itoa(int(milliseconds)) + "_" + rc.randomPostfix
 	return path.Join(baseFolder, dirName)
 }
 
