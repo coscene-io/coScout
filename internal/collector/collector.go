@@ -71,6 +71,7 @@ func FindAllRecordCaches() []string {
 
 func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
 	uploadChan := make(chan *model.RecordCache, 10)
+	triggerChan := make(chan struct{}, 1)
 
 	go Upload(ctx, reqClient, confManager, uploadChan, errorChan)
 	ticker := time.NewTicker(1 * time.Second)
@@ -80,29 +81,44 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 		for {
 			select {
 			case <-t.C:
-				ticker.Reset(config.CollectionInterval)
-
-				appConfig := confManager.LoadWithRemote()
-				getStorage := confManager.GetStorage()
-
-				//nolint: contextcheck// context is checked in the parent goroutine
-				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
-				if err != nil {
-					errorChan <- err
+				select {
+				case triggerChan <- struct{}{}:
+				default: // 如果已经有待处理的触发，则跳过
 				}
+
+				t.Reset(config.CollectionInterval)
 			case <-ctx.Done():
 				return
 			}
 		}
 	}(ticker)
 
-	go triggerUpload(ctx, pubSub, ticker)
+	// 执行收集任务的 goroutine
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-triggerChan:
+				// 执行收集任务
+				appConfig := confManager.LoadWithRemote()
+				getStorage := confManager.GetStorage()
+
+				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
+				if err != nil {
+					errorChan <- err
+				}
+			}
+		}
+	}()
+
+	go triggerUpload(ctx, pubSub, triggerChan)
 
 	<-ctx.Done()
 	return nil
 }
 
-func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, t *time.Ticker) {
+func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan chan struct{}) {
 	messages, err := pubSub.Subscribe(ctx, constant.TopicCollectMsg)
 	if err != nil {
 		log.Errorf("subscribe to collect message failed: %v", err)
@@ -114,14 +130,20 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, t *time.Tic
 		case <-ctx.Done():
 			return
 		case msg := <-messages:
-			t.Reset(1 * time.Second)
 			log.Infof("Received collect message, start collecting for upload")
+
+			select {
+			case triggerChan <- struct{}{}:
+			default: // 如果已经有待处理的触发，则跳过
+			}
 			msg.Ack()
 		}
 	}
 }
 
 func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {
+	log.Infof("Start collecting record caches")
+
 	deviceInfo := core.GetDeviceInfo(storage)
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Warn("device info not found, skip collecting")
