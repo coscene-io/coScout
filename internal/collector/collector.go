@@ -74,7 +74,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 	triggerChan := make(chan struct{}, 1)
 
 	go Upload(ctx, reqClient, confManager, uploadChan, errorChan)
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(config.CollectionInterval)
 	defer ticker.Stop()
 
 	go func(t *time.Ticker) {
@@ -85,8 +85,6 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 				case triggerChan <- struct{}{}:
 				default: // 如果已经有待处理的触发，则跳过
 				}
-
-				t.Reset(config.CollectionInterval)
 			case <-ctx.Done():
 				return
 			}
@@ -109,6 +107,8 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 				if err != nil {
 					errorChan <- err
 				}
+
+				time.Sleep(1 * time.Second)
 			}
 		}
 	}()
@@ -116,6 +116,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 	go triggerUpload(ctx, pubSub, triggerChan)
 
 	<-ctx.Done()
+	log.Warnf("collector context done")
 	return nil
 }
 
@@ -196,6 +197,7 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 
 		uploadChan <- &rc
 	}
+	log.Infof("Finish collecting record caches")
 	return nil
 }
 

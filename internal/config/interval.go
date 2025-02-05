@@ -18,7 +18,7 @@ import "time"
 
 const (
 	// CollectionInterval is the interval at which data is collected to upload.
-	CollectionInterval = 60 * time.Second
+	CollectionInterval = 33 * time.Second
 
 	// HeartbeatInterval is the interval at which the heartbeat is sent.
 	HeartbeatInterval = 60 * time.Second
