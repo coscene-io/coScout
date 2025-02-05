@@ -104,6 +104,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 				appConfig := confManager.LoadWithRemote()
 				getStorage := confManager.GetStorage()
 
+				//nolint: contextcheck // context is checked in the parent goroutine
 				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
 				if err != nil {
 					errorChan <- err
