@@ -518,10 +518,10 @@ if [[ $REMOVE_CONFIG -eq 1 ]]; then
 fi
 
 # set some variables
-LATEST_COS_URL="https://download.coscene.cn/coscoutPro/latest/$OS-$ARCH.gz"
-BETA_COS_URL="https://download.coscene.cn/coscoutPro/beta/$OS-$ARCH.gz"
-LATEST_COS_INFO_URL="https://download.coscene.cn/coscoutPro/latest/$OS-$ARCH.json"
-BETA_COS_INFO_URL="https://download.coscene.cn/coscoutPro/beta/$OS-$ARCH.json"
+LATEST_COS_URL="https://download.coscene.cn/coscout/v2/latest/$OS-$ARCH.gz"
+BETA_COS_URL="https://download.coscene.cn/coscout/v2/beta/$OS-$ARCH.gz"
+LATEST_COS_INFO_URL="https://download.coscene.cn/coscout/v2/latest/$OS-$ARCH.json"
+BETA_COS_INFO_URL="https://download.coscene.cn/coscout/v2/beta/$OS-$ARCH.json"
 
 DEFAULT_INFO_URL="$LATEST_COS_INFO_URL"
 DEFAULT_BINARY_URL="$LATEST_COS_URL"

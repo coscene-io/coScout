@@ -33,7 +33,7 @@ SUPPORT_COS_ARCH=("x86_64" "arm64" "arm")
 SUPPORT_MESH_ARCH=("amd64" "aarch64")
 
 MESH_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
-COS_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com/coscoutPro
+COS_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com/coscout/v2
 
 # get user input
 while test $# -gt 0; do
