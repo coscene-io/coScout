@@ -45,11 +45,12 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 		select {
 		case recordCache := <-uploadChan:
 			if recordCache == nil {
-				return
+				log.Warn("record cache is nil, skip")
+				continue
 			}
 			if !utils.CheckReadPath(recordCache.GetRecordCachePath()) {
 				log.Warnf("record cache %s not exist", recordCache.GetRecordCachePath())
-				return
+				continue
 			}
 
 			//nolint: contextcheck // context is checked in the parent goroutine

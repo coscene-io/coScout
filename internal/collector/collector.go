@@ -135,12 +135,14 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 			return
 		case msg := <-messages:
 			log.Infof("Received collect message, start collecting for upload")
+			msg.Ack()
+
+			time.Sleep(1 * time.Second)
 
 			select {
 			case triggerChan <- struct{}{}:
 			default: // 如果已经有待处理的触发，则跳过
 			}
-			msg.Ack()
 		}
 	}
 }
@@ -197,7 +199,9 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 		// create related resources
 		createRelatedRecordResources(deviceInfo, &rc, reqClient, config.Device)
 
-		uploadChan <- &rc
+		if rcName, ok := rc.Record["name"].(string); ok && rcName != "" {
+			uploadChan <- &rc
+		}
 	}
 	log.Infof("Finish collecting record caches")
 	return nil
