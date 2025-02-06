@@ -78,6 +78,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 	defer ticker.Stop()
 
 	go func(t *time.Ticker) {
+		defer log.Warn("collector ticker stopped")
 		for {
 			select {
 			case <-t.C:
@@ -93,6 +94,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 
 	// 执行收集任务的 goroutine
 	go func() {
+		defer log.Warn("collector goroutine stopped")
 		for {
 			select {
 			case <-ctx.Done():
