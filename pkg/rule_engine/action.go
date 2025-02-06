@@ -17,6 +17,7 @@ package rule_engine
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/cel-go/cel"
@@ -157,7 +158,16 @@ func compileEmbeddedExpr(env *cel.Env, expr string) (expressionEvaluator, error)
 				result = strings.Replace(result, matches[i][0], "{ ERROR }", 1)
 				continue
 			}
-			result = strings.Replace(result, matches[i][0], fmt.Sprintf("%v", val.Value()), 1)
+
+			var formattedValue string
+			switch v := val.Value().(type) {
+			case float64:
+				formattedValue = strings.TrimRight(strconv.FormatFloat(v, 'f', -1, 64), "0")
+			default:
+				formattedValue = fmt.Sprintf("%v", v)
+			}
+
+			result = strings.Replace(result, matches[i][0], formattedValue, 1)
 		}
 		return result, nil
 	}, nil
