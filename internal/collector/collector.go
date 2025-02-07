@@ -71,24 +71,20 @@ func FindAllRecordCaches() []string {
 
 func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
 	uploadChan := make(chan *model.RecordCache, 10)
+	triggerChan := make(chan struct{}, 1)
 
 	go Upload(ctx, reqClient, confManager, uploadChan, errorChan)
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(config.CollectionInterval)
 	defer ticker.Stop()
 
 	go func(t *time.Ticker) {
+		defer log.Warn("collector ticker stopped")
 		for {
 			select {
 			case <-t.C:
-				ticker.Reset(config.CollectionInterval)
-
-				appConfig := confManager.LoadWithRemote()
-				getStorage := confManager.GetStorage()
-
-				//nolint: contextcheck// context is checked in the parent goroutine
-				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
-				if err != nil {
-					errorChan <- err
+				select {
+				case triggerChan <- struct{}{}:
+				default: // 如果已经有待处理的触发，则跳过
 				}
 			case <-ctx.Done():
 				return
@@ -96,13 +92,37 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 		}
 	}(ticker)
 
-	go triggerUpload(ctx, pubSub, ticker)
+	// 执行收集任务的 goroutine
+	go func() {
+		defer log.Warn("collector goroutine stopped")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-triggerChan:
+				// 执行收集任务
+				appConfig := confManager.LoadWithRemote()
+				getStorage := confManager.GetStorage()
+
+				//nolint: contextcheck // context is checked in the parent goroutine
+				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
+				if err != nil {
+					errorChan <- err
+				}
+
+				time.Sleep(1 * time.Second)
+			}
+		}
+	}()
+
+	go triggerUpload(ctx, pubSub, triggerChan)
 
 	<-ctx.Done()
+	log.Warnf("collector context done")
 	return nil
 }
 
-func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, t *time.Ticker) {
+func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan chan struct{}) {
 	messages, err := pubSub.Subscribe(ctx, constant.TopicCollectMsg)
 	if err != nil {
 		log.Errorf("subscribe to collect message failed: %v", err)
@@ -114,14 +134,22 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, t *time.Tic
 		case <-ctx.Done():
 			return
 		case msg := <-messages:
-			t.Reset(1 * time.Second)
 			log.Infof("Received collect message, start collecting for upload")
 			msg.Ack()
+
+			time.Sleep(1 * time.Second)
+
+			select {
+			case triggerChan <- struct{}{}:
+			default: // 如果已经有待处理的触发，则跳过
+			}
 		}
 	}
 }
 
 func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {
+	log.Infof("Start collecting record caches")
+
 	deviceInfo := core.GetDeviceInfo(storage)
 	if deviceInfo == nil || deviceInfo.GetName() == "" {
 		log.Warn("device info not found, skip collecting")
@@ -171,8 +199,11 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 		// create related resources
 		createRelatedRecordResources(deviceInfo, &rc, reqClient, config.Device)
 
-		uploadChan <- &rc
+		if rcName, ok := rc.Record["name"].(string); ok && rcName != "" {
+			uploadChan <- &rc
+		}
 	}
+	log.Infof("Finish collecting record caches")
 	return nil
 }
 

@@ -36,7 +36,7 @@ jobs:
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
-            /home/runner/cos_binaries.tar.gz:/coscoutPro/tar/${{ inputs.cosVersion }}/cos_binaries.tar.gz
-            /home/runner/cos_binaries_arm64.tar.gz:/coscoutPro/tar/${{ inputs.cosVersion }}/cos_binaries_arm64.tar.gz
-            /home/runner/cos_binaries_arm.tar.gz:/coscoutPro/tar/${{ inputs.cosVersion }}/cos_binaries_arm.tar.gz
-            /home/runner/cos_binaries_x86_64.tar.gz:/coscoutPro/tar/${{ inputs.cosVersion }}/cos_binaries_x86_64.tar.gz
+            /home/runner/cos_binaries.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries.tar.gz
+            /home/runner/cos_binaries_arm64.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm64.tar.gz
+            /home/runner/cos_binaries_arm.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm.tar.gz
+            /home/runner/cos_binaries_x86_64.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_x86_64.tar.gz
