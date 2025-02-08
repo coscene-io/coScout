@@ -401,6 +401,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			Duration:    duration,
 			Code:        moment.Code,
 			RuleName:    ruleName,
+			Metadata:    moment.CustomFields,
 		}
 
 		if moment.CreateTask {
