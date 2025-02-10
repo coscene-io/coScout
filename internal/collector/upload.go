@@ -143,7 +143,9 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	if allCompleted {
 		log.Infof("upload all files successfully")
 
-		labels := append(recordCache.Labels, constant.LabelUploadSuccess)
+		var labels []string
+		labels = append(labels, recordCache.Labels...)
+		labels = append(labels, constant.LabelUploadSuccess)
 
 		_, err := reqClient.UpdateRecordLabels(recordCache.ProjectName, recordName, labels)
 		if err != nil {

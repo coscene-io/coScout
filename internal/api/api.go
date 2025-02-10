@@ -362,6 +362,14 @@ func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.
 		log.Errorf("unable to save record cache: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to save record cache"))
 	}
+
+	for _, label := range rc.GetLabels() {
+		_, err := r.ensureLabel(parent, label.GetDisplayName())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return apiRes.Msg, nil
 }
 
