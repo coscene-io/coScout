@@ -212,15 +212,26 @@ func createRelatedRecordResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 		createRecord(deviceInfo, rc, reqClient)
 	}
 
-	createRecordRelatedResources(deviceInfo, rc, reqClient, deviceConfig)
+	createRecordRelatedMoments(deviceInfo, rc, reqClient, deviceConfig)
+	createRecordRelatedDiagnosisTasks(deviceInfo, rc, reqClient, deviceConfig)
+	createRecordRelatedUploadTasks(deviceInfo, rc, reqClient, deviceConfig)
 }
 
-func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient, deviceConfig config.DeviceConfig) {
+func createRecordRelatedMoments(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient, deviceConfig config.DeviceConfig) {
+	if len(rc.Moments) == 0 {
+		return
+	}
+
 	recordName, ok := rc.Record["name"].(string)
 	if !ok || recordName == "" {
 		return
 	}
 	recordTitle, _ := rc.Record["title"].(string)
+	rc, err := rc.Reload()
+	if err != nil {
+		log.Errorf("reload record cache failed: %v", err)
+		return
+	}
 
 	for i := range rc.Moments {
 		moment := rc.Moments[i]
@@ -307,73 +318,116 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			}
 		}
 	}
+}
 
-	//nolint: nestif // we need to check if the task is new
-	if rc.DiagnosisTask != nil {
-		taskName, ok := rc.DiagnosisTask["name"].(string)
-		if ok && taskName != "" {
-			return
-		}
+func createRecordRelatedDiagnosisTasks(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient, _ config.DeviceConfig) {
+	if rc.DiagnosisTask == nil {
+		return
+	}
 
-		diaTask := openDpsV1alpha1Resource.Task{
-			Title:       recordTitle,
-			Description: getRecordDescription(recordTitle, rc),
-			Category:    openDpsV1alpha1Enum.TaskCategoryEnum_DIAGNOSIS,
-			State:       openDpsV1alpha1Enum.TaskStateEnum_PROCESSING,
-			Tags: map[string]string{
-				"recordName": recordName,
-			},
-		}
-		diagnosisTaskDetail := openDpsV1alpha1Resource.DiagnosisTaskDetail{
-			Device: deviceInfo.GetName(),
-		}
+	taskName, ok := rc.DiagnosisTask["name"].(string)
+	if ok && taskName != "" {
+		return
+	}
 
-		ruleName, ok := rc.DiagnosisTask["rule_name"].(string)
-		if ok && ruleName != "" {
-			diagnosisTaskDetail.DiagnosisRule = ruleName
-		}
+	rc, err := rc.Reload()
+	if err != nil {
+		log.Errorf("reload record cache failed: %v", err)
+		return
+	}
+	recordName, ok := rc.Record["name"].(string)
+	if !ok || recordName == "" {
+		return
+	}
+	recordTitle, _ := rc.Record["title"].(string)
 
-		ruleDisplayName, ok := rc.DiagnosisTask["rule_display_name"].(string)
-		if ok && ruleDisplayName != "" {
-			diagnosisTaskDetail.DisplayName = ruleDisplayName
-		}
+	diaTask := openDpsV1alpha1Resource.Task{
+		Title:       recordTitle,
+		Description: getRecordDescription(recordTitle, rc),
+		Category:    openDpsV1alpha1Enum.TaskCategoryEnum_DIAGNOSIS,
+		State:       openDpsV1alpha1Enum.TaskStateEnum_PROCESSING,
+		Tags: map[string]string{
+			"recordName": recordName,
+		},
+	}
+	diagnosisTaskDetail := openDpsV1alpha1Resource.DiagnosisTaskDetail{
+		Device: deviceInfo.GetName(),
+	}
 
-		startTime, ok := rc.DiagnosisTask["start_time"].(float64)
-		if ok {
-			sec, nsec := utils.NormalizeFloatTimestamp(startTime)
-			diagnosisTaskDetail.StartTime = &timestamppb.Timestamp{
-				Seconds: sec,
-				Nanos:   nsec,
-			}
-		}
-		endTime, ok := rc.DiagnosisTask["end_time"].(float64)
-		if ok {
-			sec, nsec := utils.NormalizeFloatTimestamp(endTime)
-			diagnosisTaskDetail.EndTime = &timestamppb.Timestamp{
-				Seconds: sec,
-				Nanos:   nsec,
-			}
-		}
-		triggerTime, ok := rc.DiagnosisTask["trigger_time"].(float64)
-		if ok {
-			sec, nsec := utils.NormalizeFloatTimestamp(triggerTime)
-			diagnosisTaskDetail.TriggerTime = &timestamppb.Timestamp{
-				Seconds: sec,
-				Nanos:   nsec,
-			}
-		}
+	ruleName, ok := rc.DiagnosisTask["rule_name"].(string)
+	if ok && ruleName != "" {
+		diagnosisTaskDetail.DiagnosisRule = ruleName
+	}
 
-		diaTask.SetDiagnosisTaskDetail(&diagnosisTaskDetail)
-		task, err := reqClient.CreateTask(rc.ProjectName, &diaTask)
+	ruleDisplayName, ok := rc.DiagnosisTask["rule_display_name"].(string)
+	if ok && ruleDisplayName != "" {
+		diagnosisTaskDetail.DisplayName = ruleDisplayName
+	}
+
+	startTime, ok := rc.DiagnosisTask["start_time"].(float64)
+	if ok {
+		sec, nsec := utils.NormalizeFloatTimestamp(startTime)
+		diagnosisTaskDetail.StartTime = &timestamppb.Timestamp{
+			Seconds: sec,
+			Nanos:   nsec,
+		}
+	}
+	endTime, ok := rc.DiagnosisTask["end_time"].(float64)
+	if ok {
+		sec, nsec := utils.NormalizeFloatTimestamp(endTime)
+		diagnosisTaskDetail.EndTime = &timestamppb.Timestamp{
+			Seconds: sec,
+			Nanos:   nsec,
+		}
+	}
+	triggerTime, ok := rc.DiagnosisTask["trigger_time"].(float64)
+	if ok {
+		sec, nsec := utils.NormalizeFloatTimestamp(triggerTime)
+		diagnosisTaskDetail.TriggerTime = &timestamppb.Timestamp{
+			Seconds: sec,
+			Nanos:   nsec,
+		}
+	}
+
+	diaTask.SetDiagnosisTaskDetail(&diagnosisTaskDetail)
+	task, err := reqClient.CreateTask(rc.ProjectName, &diaTask)
+	if err != nil {
+		log.Errorf("create task failed: %v", err)
+	} else {
+		rc.DiagnosisTask["name"] = task.GetName()
+		err = rc.Save()
 		if err != nil {
-			log.Errorf("create task failed: %v", err)
-		} else {
-			rc.DiagnosisTask["name"] = task.GetName()
-			err = rc.Save()
-			if err != nil {
-				log.Errorf("save record cache failed: %v", err)
-			}
+			log.Errorf("save record cache failed: %v", err)
 		}
+	}
+}
+
+func createRecordRelatedUploadTasks(_ *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient, _ config.DeviceConfig) {
+	if rc.UploadTask == nil {
+		return
+	}
+
+	rc, err := rc.Reload()
+	if err != nil {
+		log.Errorf("reload record cache failed: %v", err)
+		return
+	}
+	taskName, ok := rc.UploadTask["name"].(string)
+	if !ok || taskName == "" {
+		return
+	}
+
+	recordName, ok := rc.Record["name"].(string)
+	if !ok || recordName == "" {
+		return
+	}
+
+	tags := map[string]string{}
+	tags["recordName"] = recordName
+
+	_, err = reqClient.AddTaskTags(taskName, tags)
+	if err != nil {
+		log.Errorf("add task tags failed: %v", err)
 	}
 }
 
