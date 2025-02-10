@@ -143,7 +143,9 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	if allCompleted {
 		log.Infof("upload all files successfully")
 
-		_, err := reqClient.UpdateRecordLabels(recordCache.ProjectName, recordName, []string{constant.LabelUploadSuccess})
+		labels := append(recordCache.Labels, constant.LabelUploadSuccess)
+
+		_, err := reqClient.UpdateRecordLabels(recordCache.ProjectName, recordName, labels)
 		if err != nil {
 			log.Errorf("failed to update record labels: %v", err)
 			return err
