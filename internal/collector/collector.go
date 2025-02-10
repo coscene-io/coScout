@@ -84,7 +84,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 			case <-t.C:
 				select {
 				case triggerChan <- struct{}{}:
-				default: // 如果已经有待处理的触发，则跳过
+				default: // Skip if there's already a pending trigger
 				}
 			case <-ctx.Done():
 				return
@@ -92,7 +92,6 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 		}
 	}(ticker)
 
-	// 执行收集任务的 goroutine
 	go func() {
 		defer log.Warn("collector goroutine stopped")
 		for {
@@ -100,7 +99,6 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 			case <-ctx.Done():
 				return
 			case <-triggerChan:
-				// 执行收集任务
 				appConfig := confManager.LoadWithRemote()
 				getStorage := confManager.GetStorage()
 
@@ -141,7 +139,7 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 
 			select {
 			case triggerChan <- struct{}{}:
-			default: // 如果已经有待处理的触发，则跳过
+			default: // Skip if there's already a pending trigger
 			}
 		}
 	}
