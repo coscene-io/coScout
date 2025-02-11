@@ -350,6 +350,17 @@ func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// record's labels may have not been ensured
+	recordLabels := rc.GetLabels()
+	for _, label := range recordLabels {
+		l, err := r.ensureLabel(parent, label.GetDisplayName())
+		if err != nil {
+			return nil, err
+		}
+		recordLabels = append(recordLabels, l)
+	}
+	rc.SetLabels(recordLabels)
+
 	req := openDpsV1alpha1Service.CreateRecordRequest{
 		Parent: parent,
 		Record: rc,
@@ -362,6 +373,7 @@ func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.
 		log.Errorf("unable to save record cache: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to save record cache"))
 	}
+
 	return apiRes.Msg, nil
 }
 
