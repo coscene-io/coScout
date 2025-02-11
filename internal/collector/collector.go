@@ -306,6 +306,39 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				log.Errorf("trigger device event failed: %v", err)
 			}
 		}
+
+		if rc.Moments[i].Name != "" && rc.Moments[i].Task.Name == "" {
+			t := rc.Moments[i].Task
+
+			// Create new task
+			task := &openDpsV1alpha1Resource.Task{
+				Title:       t.Title,
+				Description: t.Description,
+				Assignee:    t.Assignee,
+				Category:    openDpsV1alpha1Enum.TaskCategoryEnum_COMMON,
+				State:       openDpsV1alpha1Enum.TaskStateEnum_PROCESSING,
+				Detail: &openDpsV1alpha1Resource.Task_CommonTaskDetail{
+					CommonTaskDetail: &openDpsV1alpha1Resource.CommonTaskDetail{
+						Related: &openDpsV1alpha1Resource.CommonTaskDetail_Event{
+							Event: rc.Moments[i].Name,
+						},
+					},
+				},
+			}
+			task.GetCommonTaskDetail().SetEvent(rc.Moments[i].Name)
+
+			createdTask, err := reqClient.UpsertTask(rc.ProjectName, task)
+			if err != nil {
+				log.Errorf("create task failed: %v", err)
+			} else {
+				// Update moment's task name with created task name
+				rc.Moments[i].Task.Name = createdTask.GetName()
+				err = rc.Save()
+				if err != nil {
+					log.Errorf("save record cache failed: %v", err)
+				}
+			}
+		}
 	}
 
 	//nolint: nestif // we need to check if the task is new

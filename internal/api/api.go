@@ -346,6 +346,25 @@ func (r *RequestClient) CreateTask(projectName string, task *openDpsV1alpha1Reso
 	return apiRes.Msg, nil
 }
 
+func (r *RequestClient) UpsertTask(projectName string, task *openDpsV1alpha1Resource.Task) (*openDpsV1alpha1Resource.Task, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.UpsertTaskRequest{
+		Parent: projectName,
+		Task:   task,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.taskCli.UpsertTask(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to upsert task: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to create task"))
+	}
+	return apiRes.Msg, nil
+}
+
 func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.Record) (*openDpsV1alpha1Resource.Record, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

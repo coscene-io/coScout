@@ -394,9 +394,20 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			log.Errorf("rule_name is not a string")
 			ruleName = ""
 		}
+
+		// Get title and description from record if not set in moment
+		title := moment.Title
+		if title == "" {
+			title, _ = info.Record["title"].(string)
+		}
+		description := moment.Description
+		if description == "" {
+			description = title
+		}
+
 		momentToCreate := model.Moment{
-			Title:       moment.Title,
-			Description: moment.Description,
+			Title:       title,
+			Description: description,
 			Timestamp:   ts,
 			Duration:    duration,
 			Code:        moment.Code,
@@ -406,8 +417,8 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 		if moment.CreateTask {
 			momentToCreate.Task = model.Task{
-				Title:       moment.Title,
-				Description: moment.Description,
+				Title:       title,
+				Description: description,
 				Assignee:    moment.AssignTo,
 				SyncTask:    moment.SyncTask,
 			}
