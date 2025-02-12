@@ -330,9 +330,7 @@ func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, recordTit
 			}
 			if moment.Task.Name != "" && moment.Task.SyncTask {
 				t, err := reqClient.SyncTask(rc.ProjectName, moment.Task.Name)
-				if err != nil {
-					log.Errorf("sync task failed: %v", err)
-				} else {
+				if err == nil {
 					log.Infof("sync task %s succeeded,response: %s", moment.Task.Name, t.GetName())
 				}
 			}

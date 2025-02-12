@@ -20,6 +20,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	openAnaV1alpha1Connect "buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go/coscene/openapi/analysis/v1alpha1/services/servicesconnect"
@@ -646,7 +647,11 @@ func (r *RequestClient) SyncTask(projectName, taskName string) (*openDpsV1alpha1
 
 	apiRes, err := r.taskCli.SyncTask(ctx, apiReq)
 	if err != nil {
-		log.Errorf("unable to sync task %s", taskName)
+		_, taskId, found := strings.Cut(taskName, "/tasks/")
+		if !found {
+			taskId = taskName
+		}
+		log.Errorf("unable to sync task %s", taskId)
 		return nil, err
 	}
 
