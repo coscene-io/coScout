@@ -274,27 +274,25 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			}
 		}
 
-		if rc.Moments[i].Name != "" && rc.Moments[i].Event == nil {
-			m := rc.Moments[i]
-
+		if moment.Name != "" && moment.Event == nil {
 			diagnosisRuleId := ""
-			if diagnosisRuleName, err := name.NewDiagnosisRule(m.RuleName); err == nil {
+			if diagnosisRuleName, err := name.NewDiagnosisRule(moment.RuleName); err == nil {
 				diagnosisRuleId = diagnosisRuleName.Id
 			}
 
 			deviceEvent := openAnaV1alpha1Resource.DeviceEvent{
-				Code:       m.Code,
-				Parameters: m.Metadata,
+				Code:       moment.Code,
+				Parameters: moment.Metadata,
 				TriggerTime: &timestamppb.Timestamp{
-					Seconds: int64(m.Timestamp),
-					Nanos:   int32((m.Timestamp - float64(int64(m.Timestamp))) * 1e9),
+					Seconds: int64(moment.Timestamp),
+					Nanos:   int32((moment.Timestamp - float64(int64(moment.Timestamp))) * 1e9),
 				},
 				Duration: &durationpb.Duration{
-					Seconds: int64(m.Duration),
-					Nanos:   int32((m.Duration - float64(int64(m.Duration))) * 1e9),
+					Seconds: int64(moment.Duration),
+					Nanos:   int32((moment.Duration - float64(int64(moment.Duration))) * 1e9),
 				},
 				EventSource:     openAnaV1alpha1Enum.EventSourceEnum_DEVICE,
-				Moment:          m.Name,
+				Moment:          moment.Name,
 				Device:          deviceInfo.GetName(),
 				Record:          recordName,
 				DiagnosisRuleId: diagnosisRuleId,
@@ -307,35 +305,48 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 			}
 		}
 
-		if rc.Moments[i].Name != "" && rc.Moments[i].Task.Name == "" {
-			t := rc.Moments[i].Task
-
+		//nolint: nestif // we need to check if the task is new
+		if moment.Name != "" && moment.Task.Name == "" {
+			displayName := recordTitle
+			description := recordTitle
+			if moment.Title != "" {
+				displayName = moment.Title
+			}
+			if moment.Description != "" {
+				description = moment.Description
+			}
 			// Create new task
 			task := &openDpsV1alpha1Resource.Task{
-				Title:       t.Title,
-				Description: t.Description,
-				Assignee:    t.Assignee,
+				Title:       displayName,
+				Description: description,
+				Assignee:    moment.Task.Assignee,
 				Category:    openDpsV1alpha1Enum.TaskCategoryEnum_COMMON,
 				State:       openDpsV1alpha1Enum.TaskStateEnum_PROCESSING,
 				Detail: &openDpsV1alpha1Resource.Task_CommonTaskDetail{
 					CommonTaskDetail: &openDpsV1alpha1Resource.CommonTaskDetail{
 						Related: &openDpsV1alpha1Resource.CommonTaskDetail_Event{
-							Event: rc.Moments[i].Name,
+							Event: moment.Name,
 						},
 					},
 				},
 			}
-			task.GetCommonTaskDetail().SetEvent(rc.Moments[i].Name)
+			task.GetCommonTaskDetail().SetEvent(moment.Name)
 
-			createdTask, err := reqClient.UpsertTask(rc.ProjectName, task)
+			upsertedTask, err := reqClient.UpsertTask(rc.ProjectName, task)
 			if err != nil {
 				log.Errorf("create task failed: %v", err)
 			} else {
 				// Update moment's task name with created task name
-				rc.Moments[i].Task.Name = createdTask.GetName()
+				moment.Task.Name = upsertedTask.GetName()
 				err = rc.Save()
 				if err != nil {
 					log.Errorf("save record cache failed: %v", err)
+				}
+				if moment.Task.Name != "" && moment.Task.SyncTask {
+					err = reqClient.SyncTask(rc.ProjectName, moment.Task.Name)
+					if err != nil {
+						log.Errorf("sync task failed: %v", err)
+					}
 				}
 			}
 		}
