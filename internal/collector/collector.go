@@ -207,6 +207,141 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 	return nil
 }
 
+func obtainEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, moment *model.Moment, recordName, recordTitle string, reqClient *api.RequestClient) {
+	//nolint: nestif // we need to check if the moment is new
+	if moment.Name == "" {
+		displayName := recordTitle
+		description := recordTitle
+		if moment.Title != "" {
+			displayName = moment.Title
+		}
+		if moment.Description != "" {
+			description = moment.Description
+		}
+
+		sec, nanos := utils.NormalizeFloatTimestamp(moment.Timestamp)
+		moment.Timestamp = float64(sec) + float64(nanos)/1e9
+
+		event := openDpsV1alpha1Resource.Event{
+			Record:           recordName,
+			DisplayName:      displayName,
+			Description:      description,
+			CustomizedFields: moment.Metadata,
+			TriggerTime: &timestamppb.Timestamp{
+				Seconds: int64(moment.Timestamp),
+				// timestamp is in seconds, so we need to convert nanoseconds to seconds
+				Nanos: int32((moment.Timestamp - float64(int64(moment.Timestamp))) * 1e9),
+			},
+			Duration: &durationpb.Duration{
+				Seconds: int64(moment.Duration),
+				// duration is in seconds, so we need to convert nanoseconds to seconds
+				Nanos: int32((moment.Duration - float64(int64(moment.Duration))) * 1e9),
+			},
+			Device: deviceInfo,
+		}
+		if moment.RuleName != "" {
+			event.Rule = &openDpsV1alpha1Resource.DiagnosisRule{
+				Name: moment.RuleName,
+			}
+		}
+		obtainEvent, err := reqClient.ObtainEvent(rc.ProjectName, &event)
+		if err != nil {
+			log.Errorf("obtain event failed: %v", err)
+		} else {
+			moment.Name = obtainEvent.GetName()
+			moment.IsNew = true
+		}
+
+		err = rc.Save()
+		if err != nil {
+			log.Errorf("save record cache failed: %v", err)
+		}
+	}
+}
+
+func triggerDeviceEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, moment *model.Moment, recordName string, reqClient *api.RequestClient, deviceConfig *config.DeviceConfig) {
+	if moment.Name != "" && moment.Event == nil {
+		diagnosisRuleId := ""
+		if diagnosisRuleName, err := name.NewDiagnosisRule(moment.RuleName); err == nil {
+			diagnosisRuleId = diagnosisRuleName.Id
+		}
+
+		deviceEvent := openAnaV1alpha1Resource.DeviceEvent{
+			Code:       moment.Code,
+			Parameters: moment.Metadata,
+			TriggerTime: &timestamppb.Timestamp{
+				Seconds: int64(moment.Timestamp),
+				Nanos:   int32((moment.Timestamp - float64(int64(moment.Timestamp))) * 1e9),
+			},
+			Duration: &durationpb.Duration{
+				Seconds: int64(moment.Duration),
+				Nanos:   int32((moment.Duration - float64(int64(moment.Duration))) * 1e9),
+			},
+			EventSource:     openAnaV1alpha1Enum.EventSourceEnum_DEVICE,
+			Moment:          moment.Name,
+			Device:          deviceInfo.GetName(),
+			Record:          recordName,
+			DiagnosisRuleId: diagnosisRuleId,
+			DeviceContext:   getDeviceExtraInfos(deviceConfig.ExtraFiles),
+		}
+
+		err := reqClient.TriggerDeviceEvent(rc.ProjectName, &deviceEvent)
+		if err != nil {
+			log.Errorf("trigger device event failed: %v", err)
+		}
+	}
+}
+
+func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, recordTitle string, reqClient *api.RequestClient) {
+	//nolint: nestif // we need to check if the task is new
+	if moment.Name != "" && moment.Task.Name == "" {
+		displayName := recordTitle
+		description := recordTitle
+		if moment.Title != "" {
+			displayName = moment.Title
+		}
+		if moment.Description != "" {
+			description = moment.Description
+		}
+		// Create new task
+		task := &openDpsV1alpha1Resource.Task{
+			Title:       displayName,
+			Description: description,
+			Assignee:    moment.Task.Assignee,
+			Category:    openDpsV1alpha1Enum.TaskCategoryEnum_COMMON,
+			State:       openDpsV1alpha1Enum.TaskStateEnum_PENDING,
+			Detail: &openDpsV1alpha1Resource.Task_CommonTaskDetail{
+				CommonTaskDetail: &openDpsV1alpha1Resource.CommonTaskDetail{
+					Related: &openDpsV1alpha1Resource.CommonTaskDetail_Event{
+						Event: moment.Name,
+					},
+				},
+			},
+		}
+		task.GetCommonTaskDetail().SetEvent(moment.Name)
+
+		upsertedTask, err := reqClient.UpsertTask(rc.ProjectName, task)
+		if err != nil {
+			log.Errorf("create task failed: %v", err)
+		} else {
+			// Update moment's task name with created task name
+			moment.Task.Name = upsertedTask.GetName()
+			err = rc.Save()
+			if err != nil {
+				log.Errorf("save record cache failed: %v", err)
+			}
+			if moment.Task.Name != "" && moment.Task.SyncTask {
+				t, err := reqClient.SyncTask(rc.ProjectName, moment.Task.Name)
+				if err != nil {
+					log.Errorf("sync task failed: %v", err)
+				} else {
+					log.Infof("sync task %s succeeded,response: %s", moment.Task.Name, t.GetName())
+				}
+			}
+		}
+	}
+}
+
 func createRelatedRecordResources(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient, deviceConfig config.DeviceConfig) {
 	if rc.Record["name"] == nil {
 		createRecord(deviceInfo, rc, reqClient)
@@ -223,133 +358,9 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 	recordTitle, _ := rc.Record["title"].(string)
 
 	for i := range rc.Moments {
-		moment := rc.Moments[i]
-		//nolint: nestif // we need to check if the moment is new
-		if moment.Name == "" {
-			displayName := recordTitle
-			description := recordTitle
-			if moment.Title != "" {
-				displayName = moment.Title
-			}
-			if moment.Description != "" {
-				description = moment.Description
-			}
-
-			sec, nanos := utils.NormalizeFloatTimestamp(moment.Timestamp)
-			moment.Timestamp = float64(sec) + float64(nanos)/1e9
-
-			event := openDpsV1alpha1Resource.Event{
-				Record:           recordName,
-				DisplayName:      displayName,
-				Description:      description,
-				CustomizedFields: moment.Metadata,
-				TriggerTime: &timestamppb.Timestamp{
-					Seconds: int64(moment.Timestamp),
-					// timestamp is in seconds, so we need to convert nanoseconds to seconds
-					Nanos: int32((moment.Timestamp - float64(int64(moment.Timestamp))) * 1e9),
-				},
-				Duration: &durationpb.Duration{
-					Seconds: int64(moment.Duration),
-					// duration is in seconds, so we need to convert nanoseconds to seconds
-					Nanos: int32((moment.Duration - float64(int64(moment.Duration))) * 1e9),
-				},
-				Device: deviceInfo,
-			}
-			if moment.RuleName != "" {
-				event.Rule = &openDpsV1alpha1Resource.DiagnosisRule{
-					Name: moment.RuleName,
-				}
-			}
-			obtainEvent, err := reqClient.ObtainEvent(rc.ProjectName, &event)
-			if err != nil {
-				log.Errorf("obtain event failed: %v", err)
-			} else {
-				rc.Moments[i].Name = obtainEvent.GetName()
-				rc.Moments[i].IsNew = true
-			}
-
-			err = rc.Save()
-			if err != nil {
-				log.Errorf("save record cache failed: %v", err)
-			}
-		}
-
-		if moment.Name != "" && moment.Event == nil {
-			diagnosisRuleId := ""
-			if diagnosisRuleName, err := name.NewDiagnosisRule(moment.RuleName); err == nil {
-				diagnosisRuleId = diagnosisRuleName.Id
-			}
-
-			deviceEvent := openAnaV1alpha1Resource.DeviceEvent{
-				Code:       moment.Code,
-				Parameters: moment.Metadata,
-				TriggerTime: &timestamppb.Timestamp{
-					Seconds: int64(moment.Timestamp),
-					Nanos:   int32((moment.Timestamp - float64(int64(moment.Timestamp))) * 1e9),
-				},
-				Duration: &durationpb.Duration{
-					Seconds: int64(moment.Duration),
-					Nanos:   int32((moment.Duration - float64(int64(moment.Duration))) * 1e9),
-				},
-				EventSource:     openAnaV1alpha1Enum.EventSourceEnum_DEVICE,
-				Moment:          moment.Name,
-				Device:          deviceInfo.GetName(),
-				Record:          recordName,
-				DiagnosisRuleId: diagnosisRuleId,
-				DeviceContext:   getDeviceExtraInfos(deviceConfig.ExtraFiles),
-			}
-
-			err := reqClient.TriggerDeviceEvent(rc.ProjectName, &deviceEvent)
-			if err != nil {
-				log.Errorf("trigger device event failed: %v", err)
-			}
-		}
-
-		//nolint: nestif // we need to check if the task is new
-		if moment.Name != "" && moment.Task.Name == "" {
-			displayName := recordTitle
-			description := recordTitle
-			if moment.Title != "" {
-				displayName = moment.Title
-			}
-			if moment.Description != "" {
-				description = moment.Description
-			}
-			// Create new task
-			task := &openDpsV1alpha1Resource.Task{
-				Title:       displayName,
-				Description: description,
-				Assignee:    moment.Task.Assignee,
-				Category:    openDpsV1alpha1Enum.TaskCategoryEnum_COMMON,
-				State:       openDpsV1alpha1Enum.TaskStateEnum_PENDING,
-				Detail: &openDpsV1alpha1Resource.Task_CommonTaskDetail{
-					CommonTaskDetail: &openDpsV1alpha1Resource.CommonTaskDetail{
-						Related: &openDpsV1alpha1Resource.CommonTaskDetail_Event{
-							Event: moment.Name,
-						},
-					},
-				},
-			}
-			task.GetCommonTaskDetail().SetEvent(moment.Name)
-
-			upsertedTask, err := reqClient.UpsertTask(rc.ProjectName, task)
-			if err != nil {
-				log.Errorf("create task failed: %v", err)
-			} else {
-				// Update moment's task name with created task name
-				moment.Task.Name = upsertedTask.GetName()
-				err = rc.Save()
-				if err != nil {
-					log.Errorf("save record cache failed: %v", err)
-				}
-				if moment.Task.Name != "" && moment.Task.SyncTask {
-					err = reqClient.SyncTask(rc.ProjectName, moment.Task.Name)
-					if err != nil {
-						log.Errorf("sync task failed: %v", err)
-					}
-				}
-			}
-		}
+		obtainEventFromMoment(deviceInfo, rc, &rc.Moments[i], recordName, recordTitle, reqClient)
+		triggerDeviceEventFromMoment(deviceInfo, rc, &rc.Moments[i], recordName, reqClient, &deviceConfig)
+		upsertTaskFromMoment(rc, &rc.Moments[i], recordTitle, reqClient)
 	}
 
 	//nolint: nestif // we need to check if the task is new

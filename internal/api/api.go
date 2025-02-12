@@ -634,7 +634,7 @@ func (r *RequestClient) getAuthToken() string {
 	return constant.BasicAuthPrefix + " " + base64.StdEncoding.EncodeToString([]byte(constant.BasicAuthUsername+":"+string(bytes)))
 }
 
-func (r *RequestClient) SyncTask(projectName, taskName string) error {
+func (r *RequestClient) SyncTask(projectName, taskName string) (*openDpsV1alpha1Resource.Task, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -644,13 +644,13 @@ func (r *RequestClient) SyncTask(projectName, taskName string) error {
 	apiReq := connect.NewRequest(&req)
 	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
 
-	_, err := r.taskCli.SyncTask(ctx, apiReq)
+	apiRes, err := r.taskCli.SyncTask(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to sync task %s", taskName)
-		return err
+		return nil, err
 	}
 
 	log.Infof("sync task %s succeeded", taskName)
 
-	return nil
+	return apiRes.Msg, nil
 }
