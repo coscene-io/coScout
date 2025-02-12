@@ -321,7 +321,7 @@ func createRecordRelatedResources(deviceInfo *openDpsV1alpha1Resource.Device, rc
 				Description: description,
 				Assignee:    moment.Task.Assignee,
 				Category:    openDpsV1alpha1Enum.TaskCategoryEnum_COMMON,
-				State:       openDpsV1alpha1Enum.TaskStateEnum_PROCESSING,
+				State:       openDpsV1alpha1Enum.TaskStateEnum_PENDING,
 				Detail: &openDpsV1alpha1Resource.Task_CommonTaskDetail{
 					CommonTaskDetail: &openDpsV1alpha1Resource.CommonTaskDetail{
 						Related: &openDpsV1alpha1Resource.CommonTaskDetail_Event{
