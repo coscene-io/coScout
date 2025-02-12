@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"path"
 	"sort"
@@ -95,11 +94,12 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			return err
 		}
 		if recordCache.Skipped || recordCache.Uploaded {
-			continue
+			log.Infof("record %s has been skipped or uploaded, break!", recordName)
+			return nil
 		}
 
 		if !utils.CheckReadPath(filePath) {
-			log.Warn(fmt.Sprintf("local file %s not exist", filePath))
+			log.Warnf("local file %s not exist", filePath)
 			continue
 		}
 
@@ -116,6 +116,11 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		} else {
 			log.Infof("upload file %s successfully", fileInfo.Path)
 
+			recordCache, err = recordCache.Reload()
+			if err != nil {
+				log.Errorf("failed to reload record cache: %v", err)
+				return err
+			}
 			recordCache.UploadedFilePaths = append(recordCache.UploadedFilePaths, filePath)
 			err = recordCache.Save()
 			if err != nil {
@@ -189,6 +194,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			return err
 		}
 
+		log.Infof("record upload finished: %s", recordName)
 		rcPath := recordCache.Clean()
 		log.Infof("record cache finished, clean up: %s", rcPath)
 	}

@@ -257,7 +257,7 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 			wg.Add(1)
 			go func(filename string) {
 				defer wg.Done()
-				defer func() { <-semaphore }() // 释放信号量
+				defer func() { <-semaphore }() // release the semaphore
 
 				c.processFileWithRule(filename)
 				log.Infof("Finished processing file: %v", filename)

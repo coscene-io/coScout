@@ -207,14 +207,31 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	}
 
 	files := make(map[string]model.FileInfo)
+	noPermissionFolders := make([]string, 0)
 	for _, folder := range taskFolders {
 		canRead := utils.CheckReadPath(folder)
 		if !canRead {
 			log.Warnf("Path %s is not readable, skip!", folder)
+
+			noPermissionFolders = append(noPermissionFolders, folder)
 			continue
 		}
 
-		err := filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
+		info, err := os.Stat(folder)
+		if err != nil {
+			log.Errorf("Failed to get folder info: %v", err)
+			continue
+		}
+		if !info.IsDir() {
+			files[folder] = model.FileInfo{
+				FileName: filepath.Base(folder),
+				Size:     info.Size(),
+				Path:     folder,
+			}
+			continue
+		}
+
+		err = filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
 			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
 				return nil
@@ -257,6 +274,16 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		if err != nil {
 			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
 		}
+
+		if len(noPermissionFolders) > 0 {
+			tags := make(map[string]string)
+			tags["noPermissionFiles"] = strings.Join(noPermissionFolders, ",")
+			_, err = c.reqClient.AddTaskTags(task.GetName(), tags)
+			if err != nil {
+				log.Errorf("Failed to add task tags: %v", err)
+			}
+		}
+
 		return
 	}
 
@@ -279,6 +306,9 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	log.Infof("Record cache saved for task %s", task.GetName())
 	tags := make(map[string]string)
 	tags["totalFiles"] = strconv.Itoa(len(files))
+	if len(noPermissionFolders) > 0 {
+		tags["noPermissionFiles"] = strings.Join(noPermissionFolders, ",")
+	}
 
 	_, err = c.reqClient.AddTaskTags(task.GetName(), tags)
 	if err != nil {
