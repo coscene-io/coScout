@@ -206,16 +206,11 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 }
 
 func obtainEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, moment *model.Moment, recordName, recordTitle string, reqClient *api.RequestClient) {
-	//nolint: nestif // we need to check if the moment is new
 	if moment.Name == "" {
-		displayName := recordTitle
-		description := recordTitle
-		if moment.Title != "" {
-			displayName = moment.Title
-		}
-		if moment.Description != "" {
-			description = moment.Description
-		}
+		// displayname: moment.Title->recordTitle
+		// description: moment.Description->recordTitle
+		displayName := utils.GetStringOrDefault(recordTitle, moment.Title)
+		description := utils.GetStringOrDefault(recordTitle, moment.Description)
 
 		sec, nanos := utils.NormalizeFloatTimestamp(moment.Timestamp)
 		moment.Timestamp = float64(sec) + float64(nanos)/1e9
@@ -293,14 +288,11 @@ func triggerDeviceEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc
 func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, recordTitle string, reqClient *api.RequestClient) {
 	//nolint: nestif // we need to check if the task is new
 	if moment.Name != "" && moment.Task.Name == "" {
-		displayName := recordTitle
-		description := recordTitle
-		if moment.Title != "" {
-			displayName = moment.Title
-		}
-		if moment.Description != "" {
-			description = moment.Description
-		}
+		// displayname: moment.Task.Title->moment.Title->recordTitle
+		// description: moment.Task.Description->moment.Description->recordTitle
+		displayName := utils.GetStringOrDefault(recordTitle, moment.Task.Title, moment.Title)
+		description := utils.GetStringOrDefault(recordTitle, moment.Task.Description, moment.Description)
+
 		// Create new task
 		task := &openDpsV1alpha1Resource.Task{
 			Title:       displayName,

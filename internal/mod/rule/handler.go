@@ -398,14 +398,10 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		}
 
 		// Get title and description from record if not set in moment
-		displayName := recordTitle
-		description := recordTitle
-		if moment.Title != "" {
-			displayName = moment.Title
-		}
-		if moment.Description != "" {
-			description = moment.Description
-		}
+		// displayname: moment.Title->recordTitle
+		// description: moment.Description->recordTitle
+		displayName := utils.GetStringOrDefault(recordTitle, moment.Title)
+		description := utils.GetStringOrDefault(recordTitle, moment.Description)
 
 		momentToCreate := model.Moment{
 			Title:       displayName,
