@@ -361,7 +361,7 @@ func (r *RequestClient) UpsertTask(projectName string, task *openDpsV1alpha1Reso
 	apiRes, err := r.taskCli.UpsertTask(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to upsert task: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to create task"))
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to upsert task"))
 	}
 	return apiRes.Msg, nil
 }
@@ -645,17 +645,18 @@ func (r *RequestClient) SyncTask(projectName, taskName string) (*openDpsV1alpha1
 	apiReq := connect.NewRequest(&req)
 	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
 
+	_, taskId, found := strings.Cut(taskName, "/tasks/")
+	if !found {
+		taskId = taskName
+	}
+
 	apiRes, err := r.taskCli.SyncTask(ctx, apiReq)
 	if err != nil {
-		_, taskId, found := strings.Cut(taskName, "/tasks/")
-		if !found {
-			taskId = taskName
-		}
 		log.Errorf("unable to sync task %s", taskId)
 		return nil, err
 	}
 
-	log.Infof("sync task %s succeeded", taskName)
+	log.Infof("sync task %s succeeded", taskId)
 
 	return apiRes.Msg, nil
 }
