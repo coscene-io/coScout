@@ -169,6 +169,7 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 				"white_list": lo.Filter(spec.Upload.GetWhiteList(), func(f string, _ int) bool {
 					return f != ""
 				}),
+				"upload_limit": spec.Upload.GetDeviceUploadLimit(),
 			}
 		case *resources.ActionSpec_CreateMoment:
 			actionName = "create_moment"

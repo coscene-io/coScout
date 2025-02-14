@@ -51,6 +51,7 @@ type CollectInfo struct {
 	DiagnosisTask map[string]interface{} `json:"diagnosis_task" yaml:"diagnosis_task"`
 	Cut           *CollectInfoCut        `json:"cut" yaml:"cut"`
 	Moments       []CollectInfoMoment    `json:"moments" yaml:"moments"`
+	Skip          bool                   `json:"skip" yaml:"skip"`
 
 	// id field does not need to be serialized
 	Id string `json:"-" yaml:"-"`
