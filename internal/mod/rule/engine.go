@@ -92,7 +92,7 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 			}
 			validatedRule.Metadata["rule_display_name"] = apiRule.GetDisplayName()
 
-			rule_with_current_scope := proto.Clone(apiRule).(*resources.DiagnosisRule)
+			rule_with_current_scope, _ := proto.Clone(apiRule).(*resources.DiagnosisRule)
 			fields := map[string]*structpb.Value{}
 			for k, v := range validatedRule.Scope {
 				fields[k] = structpb.NewStringValue(v)
