@@ -323,6 +323,8 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 	log.Infof("Collecting for files start: %v, end: %v", info.Cut.Start, info.Cut.End)
 
+	recordTitle, _ := info.Record["title"].(string)
+
 	// Get files
 	uploadWhiteListFilter := func(filename string, _ file_state_handler.FileState) bool {
 		if len(info.Cut.WhiteList) == 0 {
@@ -394,9 +396,16 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			log.Errorf("rule_name is not a string")
 			ruleName = ""
 		}
+
+		// Get title and description from record if not set in moment
+		// displayname: moment.Title->recordTitle
+		// description: moment.Description->recordTitle
+		displayName := utils.GetStringOrDefault(recordTitle, moment.Title)
+		description := utils.GetStringOrDefault(recordTitle, moment.Description)
+
 		momentToCreate := model.Moment{
-			Title:       moment.Title,
-			Description: moment.Description,
+			Title:       displayName,
+			Description: description,
 			Timestamp:   ts,
 			Duration:    duration,
 			Code:        moment.Code,
@@ -406,8 +415,8 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 		if moment.CreateTask {
 			momentToCreate.Task = model.Task{
-				Title:       moment.Title,
-				Description: moment.Description,
+				Title:       displayName,
+				Description: description,
 				Assignee:    moment.AssignTo,
 				SyncTask:    moment.SyncTask,
 			}
