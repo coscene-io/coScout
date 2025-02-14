@@ -70,7 +70,7 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		fileStateHandler: fileStateHandler,
 		listenChan:       make(chan string, 1000),
 		ruleItemChan:     make(chan rule_engine.RuleItem, 1000),
-		engine:           Engine{},
+		engine:           Engine{reqClient: reqClient},
 		pubSub:           pubSub,
 	}
 }
@@ -104,6 +104,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 					log.Errorf("get device info failed")
 					continue
 				}
+				c.engine.deviceName = device.GetName()
 
 				//nolint: contextcheck// context is checked in the parent goroutine
 				apiRules, err := c.reqClient.ListDeviceDiagnosisRules(device.GetName())
@@ -317,6 +318,12 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle() {
 
 // handleCollectInfo handles a single the collect info.
 func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
+	if info.Skip {
+		log.Infof("Skipping collect info: %v, cleaning", info.Id)
+		info.Clean()
+		return
+	}
+
 	if info.Cut == nil || time.Unix(info.Cut.End, 0).After(time.Now()) {
 		return
 	}

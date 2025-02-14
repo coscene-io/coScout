@@ -19,6 +19,7 @@ import (
 	"strconv"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
+	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/name"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
@@ -29,10 +30,15 @@ import (
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 	"github.com/sosodev/duration"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // Engine represents the rule engine that processes messages against rules.
 type Engine struct {
+	reqClient  api.RequestClient
+	deviceName string
+
 	rules        []*rule_engine.Rule
 	activeTopics mapset.Set[string]
 }
@@ -47,7 +53,7 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 		validatedRules, validationResult := rule_engine.ValidateApiRule(
 			apiRule,
 			map[string]rule_engine.ActionImpl{
-				"upload":        uploadActionImpl,
+				"upload":        e.uploadActionImpl,
 				"create_moment": createMomentActionImpl,
 			},
 		)
@@ -85,6 +91,15 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 				validatedRule.Metadata["rule_code"] = ""
 			}
 			validatedRule.Metadata["rule_display_name"] = apiRule.GetDisplayName()
+
+			rule_with_current_scope, _ := proto.Clone(apiRule).(*resources.DiagnosisRule)
+			fields := map[string]*structpb.Value{}
+			for k, v := range validatedRule.Scope {
+				fields[k] = structpb.NewStringValue(v)
+			}
+			rule_with_current_scope.SetEach([]*structpb.Struct{{Fields: fields}})
+			validatedRule.Metadata["rule"] = rule_with_current_scope
+
 			rules = append(rules, validatedRule)
 
 			activeTopics = activeTopics.Union(validatedRule.Topics)
@@ -137,7 +152,7 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 
 // uploadActionImpl is the implementation of "upload" function,
 // it stores the collect info in the database.
-func uploadActionImpl(kwargs map[string]interface{}) error {
+func (e *Engine) uploadActionImpl(kwargs map[string]interface{}) error {
 	log.Infof("triggered saving collect info")
 
 	// Extract required fields with type assertions
@@ -214,6 +229,21 @@ func uploadActionImpl(kwargs map[string]interface{}) error {
 		return errors.Errorf("collect_info_id must be a string")
 	}
 
+	uploadLimit, ok := kwargs["upload_limit"].(*resources.UploadLimit)
+	if !ok {
+		return errors.Errorf("upload_limit must be a UploadLimit object")
+	}
+
+	rule, ok := kwargs["rule"].(*resources.DiagnosisRule)
+	if !ok {
+		return errors.Errorf("rule must be a DiagnosisRule object")
+	}
+
+	canUpload := e.canUpload(uploadLimit, rule)
+	if err := e.reqClient.HitDiagnosisRule(rule, e.deviceName, canUpload); err != nil {
+		return errors.Wrap(err, "failed to hit diagnosis rule")
+	}
+
 	// Calculate start and end times
 	startTime := triggerTs.Add(-before.ToTimeDuration())
 	endTime := triggerTs.Add(after.ToTimeDuration())
@@ -243,10 +273,48 @@ func uploadActionImpl(kwargs map[string]interface{}) error {
 		End:        endTime.Unix(),
 		WhiteList:  whiteList,
 	}
+	collectInfo.Skip = !canUpload
 
 	// Save the collect info
-	defer log.Infof("saved collect info %s", collectInfoId)
-	return collectInfo.Save()
+	if err = collectInfo.Save(); err != nil {
+		return errors.Wrap(err, "failed to save collect info")
+	}
+	log.Infof("saved collect info %s", collectInfoId)
+
+	return nil
+}
+
+func (e *Engine) canUpload(uploadLimit *resources.UploadLimit, rule *resources.DiagnosisRule) bool {
+	if uploadLimit.HasDevice() {
+		count, err := e.reqClient.CountDiagnosisRuleHits(rule, e.deviceName)
+		if err != nil {
+			log.Errorf("failed to count diagnosis rule hits: %v, skipping", err)
+			return false
+		}
+
+		log.Infof("device count: %d, limit: %d", count, uploadLimit.GetDevice().GetTimes())
+
+		if count >= uploadLimit.GetDevice().GetTimes() {
+			log.Infof("device count %d exceeds limit %d, skipping", count, uploadLimit.GetDevice().GetTimes())
+			return false
+		}
+	}
+
+	if uploadLimit.HasGlobal() {
+		count, err := e.reqClient.CountDiagnosisRuleHits(rule, "")
+		if err != nil {
+			log.Errorf("failed to count diagnosis rule hits: %v, skipping", err)
+			return false
+		}
+
+		log.Infof("global count: %d, limit: %d", count, uploadLimit.GetGlobal().GetTimes())
+
+		if count >= uploadLimit.GetGlobal().GetTimes() {
+			log.Infof("global count %d exceeds limit %d, skipping", count, uploadLimit.GetGlobal().GetTimes())
+			return false
+		}
+	}
+	return true
 }
 
 // createMomentActionImpl is the implementation of "create_moment" function,
@@ -331,6 +399,10 @@ func createMomentActionImpl(kwargs map[string]interface{}) error {
 	}
 
 	// Save the collect info
-	defer log.Infof("saved collect info %s", collectInfoId)
-	return collectInfo.Save()
+	if err = collectInfo.Save(); err != nil {
+		return errors.Wrap(err, "failed to save collect info")
+	}
+	log.Infof("saved collect info %s", collectInfoId)
+
+	return nil
 }

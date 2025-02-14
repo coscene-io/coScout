@@ -48,7 +48,7 @@ func hintOptions() []TimestampFormat {
 func tsSchemas() []TimestampFormat {
 	return []TimestampFormat{
 		{regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}`), "2006-01-02 15:04:05.000", true, true},
-		{regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3}`), "2006-01-02 15:04:05.000", true, true},
+		{regexp.MustCompile(`\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3}`), "2006-01-02 15:04:05,000", true, true},
 		{regexp.MustCompile(`\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2}`), "2006/01/02 15:04:05", true, true},
 		{regexp.MustCompile(`\d{4}\s+\d{2}:\d{2}:\d{2}\.\d{6}`), "0102 15:04:05.000000", false, true},
 		{regexp.MustCompile(`[a-zA-Z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}`), "Jan 2 15:04:05", false, true},

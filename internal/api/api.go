@@ -455,7 +455,7 @@ func (r *RequestClient) ListDeviceDiagnosisRules(device string) ([]*openDpsV1alp
 	return apiRes.Msg.GetDeviceDiagnosisRules(), nil
 }
 
-func (r *RequestClient) HitDiagnosisRule(rule *openDpsV1alpha1Resource.DiagnosisRule, device string, upload bool) (*emptypb.Empty, error) {
+func (r *RequestClient) HitDiagnosisRule(rule *openDpsV1alpha1Resource.DiagnosisRule, device string, upload bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -467,12 +467,12 @@ func (r *RequestClient) HitDiagnosisRule(rule *openDpsV1alpha1Resource.Diagnosis
 	apiReq := connect.NewRequest(&req)
 	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
 
-	apiRes, err := r.diagCli.HitDiagnosisRule(ctx, apiReq)
+	_, err := r.diagCli.HitDiagnosisRule(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to hit diagnosis rule: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to hit diagnosis rule"))
+		return connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to hit diagnosis rule"))
 	}
-	return apiRes.Msg, nil
+	return nil
 }
 
 func (r *RequestClient) CountDiagnosisRuleHits(rule *openDpsV1alpha1Resource.DiagnosisRule, device string) (int32, error) {
