@@ -104,15 +104,20 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 		return
 	}
 
-	var targetTopics []string
-	for _, conn := range lo.Values(info.Channels) {
-		if activeTopics.Contains(conn.Topic) {
-			targetTopics = append(targetTopics, conn.Topic)
+	// targetTopics will be empty if there is no active topic
+	// else it will be the intersection of active topics and channels in the mcap file
+	targetTopics := make([]string, 0)
+	if activeTopics.Cardinality() > 0 {
+		for _, conn := range lo.Values(info.Channels) {
+			if activeTopics.Contains(conn.Topic) {
+				targetTopics = append(targetTopics, conn.Topic)
+			}
 		}
-	}
-	if len(targetTopics) == 0 {
-		log.Infof("no active topics found in MCAP file %s", filepath)
-		return
+
+		if len(targetTopics) == 0 {
+			log.Infof("no active topics found in MCAP file %s", filepath)
+			return
+		}
 	}
 	log.Infof("sending rule items for MCAP file %s with topics: %v", filepath, targetTopics)
 

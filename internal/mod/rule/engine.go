@@ -49,6 +49,8 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 		rules        []*rule_engine.Rule
 		activeTopics = mapset.NewSet[string]()
 	)
+	activeTopics.Add("/external_log")
+
 	for _, apiRule := range apiRules {
 		validatedRules, validationResult := rule_engine.ValidateApiRule(
 			apiRule,
@@ -102,14 +104,19 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 
 			rules = append(rules, validatedRule)
 
-			activeTopics = activeTopics.Union(validatedRule.Topics)
+			if validatedRule.Topics.Cardinality() == 0 {
+				activeTopics = mapset.NewSet[string]()
+			} else {
+				if activeTopics.Cardinality() > 0 {
+					activeTopics = activeTopics.Union(validatedRule.Topics)
+				}
+			}
 		}
 	}
 	e.rules = rules
 
 	configTopicSet := mapset.NewSet(configTopics...)
 	e.activeTopics = activeTopics.Intersect(configTopicSet)
-	e.activeTopics.Add("/external_log")
 
 	log.Infof("Updated %d valid rules", len(rules))
 }

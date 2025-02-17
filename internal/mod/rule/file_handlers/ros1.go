@@ -96,15 +96,20 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 		return
 	}
 
+	// targetTopics will be empty if there is no active topic
+	// else it will be the intersection of active topics and channels in the bag file
 	targetTopics := mapset.NewSet[string]()
-	for _, conn := range lo.Values(info.Connections) {
-		if activeTopics.Contains(conn.Topic) {
-			targetTopics.Add(conn.Topic)
+	if activeTopics.Cardinality() > 0 {
+		for _, conn := range lo.Values(info.Connections) {
+			if activeTopics.Contains(conn.Topic) {
+				targetTopics.Add(conn.Topic)
+			}
 		}
-	}
-	if targetTopics.Cardinality() == 0 {
-		log.Infof("no active topics found in ros1 file %s, skipping", filePath)
-		return
+
+		if targetTopics.Cardinality() == 0 {
+			log.Infof("no active topics found in ros1 file %s, skipping", filePath)
+			return
+		}
 	}
 	log.Infof("sending rule items for ros1 file %s with topics: %v", filePath, targetTopics)
 

@@ -225,7 +225,9 @@ func ValidateApiRule(apiRule *resources.DiagnosisRule, actionImpls map[string]Ac
 
 	// Get topics
 	topics := mapset.NewSet[string]()
-	topics.Add(apiRule.GetActiveTopics())
+	if apiRule.GetActiveTopics() != "" {
+		topics.Add(apiRule.GetActiveTopics())
+	}
 
 	// Parse debounce duration
 	debounceTime, _ := duration.Parse(apiRule.GetDebounceDuration())
