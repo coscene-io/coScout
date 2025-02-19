@@ -129,7 +129,7 @@ func (e *Engine) ActiveTopics() mapset.Set[string] {
 // ConsumeNext shows how to process a message through the rule engine.
 func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 	for _, rule := range e.rules {
-		if !rule.Topics.Contains(item.Topic) {
+		if rule.Topics.Cardinality() > 0 && !rule.Topics.Contains(item.Topic) {
 			continue
 		}
 
