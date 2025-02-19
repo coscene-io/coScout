@@ -52,12 +52,7 @@ func NewAction(
 		return nil, errors.New("implementation function cannot be nil")
 	}
 
-	env, err := cel.NewEnv(
-		cel.Variable("msg", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable("scope", cel.MapType(cel.StringType, cel.StringType)),
-		cel.Variable("topic", cel.StringType),
-		cel.Variable("ts", cel.DoubleType),
-	)
+	env, err := NewEnv()
 	if err != nil {
 		return nil, errors.Errorf("failed to create CEL environment: %v", err)
 	}

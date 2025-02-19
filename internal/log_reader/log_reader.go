@@ -71,6 +71,8 @@ type LogReader struct {
 	hint       *time.Time
 	tsFormat   TimestampFormat
 	name       string
+
+	location *time.Location
 }
 
 // NewLogReader creates a new LogReader instance.
@@ -79,6 +81,7 @@ func NewLogReader(reader io.ReadSeeker, name string) (*LogReader, error) {
 		reader:     reader,
 		name:       name,
 		bufferSize: 20,
+		location:   time.Now().Location(),
 	}
 
 	// Get timestamp hint from name or first line
@@ -197,7 +200,7 @@ func (lr *LogReader) getTimestampHint() (*time.Time, error) {
 func (lr *LogReader) getHintFromText(text string) *time.Time {
 	for _, opt := range hintOptions() {
 		if match := opt.regex.FindString(text); match != "" {
-			if t, err := time.ParseInLocation(opt.layout, match, time.FixedZone("UTC+8", 8*60*60)); err == nil {
+			if t, err := time.ParseInLocation(opt.layout, match, lr.location); err == nil {
 				return &t
 			}
 		}
@@ -225,7 +228,7 @@ func (lr *LogReader) analyzeTimestampSchema() (TimestampFormat, error) {
 		line := scanner.Text()
 		for i, schema := range schemas {
 			if match := schema.regex.FindString(line); match != "" {
-				if t, err := time.ParseInLocation(schema.layout, match, time.FixedZone("UTC+8", 8*60*60)); err == nil {
+				if t, err := time.ParseInLocation(schema.layout, match, lr.location); err == nil {
 					stampedLog := &StampedLog{
 						Timestamp: lr.adjustTimestamp(&t),
 						Line:      line,
@@ -257,7 +260,7 @@ func (lr *LogReader) analyzeTimestampSchema() (TimestampFormat, error) {
 
 func (lr *LogReader) parseLogLine(line string, offset int64) *StampedLog {
 	if match := lr.tsFormat.regex.FindString(line); match != "" {
-		if t, err := time.ParseInLocation(lr.tsFormat.layout, match, time.FixedZone("UTC+8", 8*60*60)); err == nil {
+		if t, err := time.ParseInLocation(lr.tsFormat.layout, match, lr.location); err == nil {
 			return &StampedLog{
 				Timestamp: lr.adjustTimestamp(&t),
 				Line:      line,
@@ -280,7 +283,7 @@ func (lr *LogReader) adjustTimestamp(t *time.Time) *time.Time {
 		if !lr.tsFormat.hasDay {
 			// Missing full date
 			candidate := time.Date(now.Year(), now.Month(), now.Day(),
-				t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.FixedZone("UTC+8", 8*60*60))
+				t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), lr.location)
 			if candidate.After(now) {
 				candidate = candidate.AddDate(0, 0, -1)
 			}
@@ -288,7 +291,7 @@ func (lr *LogReader) adjustTimestamp(t *time.Time) *time.Time {
 		} else if !lr.tsFormat.hasYear {
 			// Missing year
 			candidate := time.Date(now.Year(), t.Month(), t.Day(),
-				t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.FixedZone("UTC+8", 8*60*60))
+				t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), lr.location)
 			if candidate.After(now) {
 				candidate = candidate.AddDate(-1, 0, 0)
 			}
@@ -299,14 +302,14 @@ func (lr *LogReader) adjustTimestamp(t *time.Time) *time.Time {
 
 	if !lr.tsFormat.hasDay {
 		candidate := time.Date(lr.hint.Year(), lr.hint.Month(), lr.hint.Day(),
-			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.FixedZone("UTC+8", 8*60*60))
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), lr.location)
 		if candidate.Before(*lr.hint) {
 			candidate = candidate.AddDate(0, 0, 1)
 		}
 		return &candidate
 	} else if !lr.tsFormat.hasYear {
 		candidate := time.Date(lr.hint.Year(), t.Month(), t.Day(),
-			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.FixedZone("UTC+8", 8*60*60))
+			t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), lr.location)
 		if candidate.Before(*lr.hint) {
 			candidate = candidate.AddDate(1, 0, 0)
 		}
