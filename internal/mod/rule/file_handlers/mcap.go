@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coscene-io/coscout/pkg/mcap_ros2"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
 	"github.com/coscene-io/coscout/pkg/utils"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -104,15 +105,20 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 		return
 	}
 
-	var targetTopics []string
-	for _, conn := range lo.Values(info.Channels) {
-		if activeTopics.Contains(conn.Topic) {
-			targetTopics = append(targetTopics, conn.Topic)
+	// targetTopics will be empty if there is no active topic
+	// else it will be the intersection of active topics and channels in the mcap file
+	targetTopics := make([]string, 0)
+	if activeTopics.Cardinality() > 0 {
+		for _, conn := range lo.Values(info.Channels) {
+			if activeTopics.Contains(conn.Topic) {
+				targetTopics = append(targetTopics, conn.Topic)
+			}
 		}
-	}
-	if len(targetTopics) == 0 {
-		log.Infof("no active topics found in MCAP file %s", filepath)
-		return
+
+		if len(targetTopics) == 0 {
+			log.Infof("no active topics found in MCAP file %s", filepath)
+			return
+		}
 	}
 	log.Infof("sending rule items for MCAP file %s with topics: %v", filepath, targetTopics)
 
@@ -127,6 +133,7 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 	msgBuf := &bytes.Buffer{}
 	msgReader := &bytes.Reader{}
 	transcoders := make(map[uint16]*ros1msg.JSONTranscoder)
+	ros2Decoders := make(map[string]mcap_ros2.DecoderFunction)
 	descriptors := make(map[uint16]protoreflect.MessageDescriptor)
 
 	for {
@@ -172,6 +179,40 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 					continue
 				}
 
+			case "ros2msg":
+				decoder, ok := ros2Decoders[schema.Name]
+				if !ok {
+					dynamicDecoders, err := mcap_ros2.GenerateDynamic(schema.Name, string(schema.Data))
+					if err != nil {
+						log.Errorf("failed to generate dynamic schema decoder: %v", err)
+						continue
+					}
+
+					for schemaName, decoder := range dynamicDecoders {
+						ros2Decoders[schemaName] = decoder
+					}
+
+					var decoderOk bool
+					decoder, decoderOk = dynamicDecoders[schema.Name]
+					if !decoderOk {
+						log.Errorf("failed to find decoder for schema: %s", schema.Name)
+						continue
+					}
+				}
+
+				decoded, err := decoder(message.Data)
+				if err != nil {
+					log.Errorf("failed to decode message: %v", err)
+					continue
+				}
+
+				jsonData, err := json.Marshal(decoded)
+				if err != nil {
+					log.Errorf("failed to marshal decoded message: %v", err)
+					continue
+				}
+
+				msgBuf.Write(jsonData)
 			case "protobuf":
 				messageDescriptor, ok := descriptors[channel.SchemaID]
 				if !ok {

@@ -14,7 +14,9 @@
 
 package rule_engine
 
-import "github.com/google/cel-go/cel"
+import (
+	"github.com/google/cel-go/cel"
+)
 
 // ErrorSection represents the section where validation error occurred.
 type ErrorSection int
@@ -128,6 +130,7 @@ func NewEnv() (*cel.Env, error) {
 	)
 }
 
+// RuleItem represents an item to be evaluated by the rule engine.
 type RuleItem struct {
 	Msg     map[string]interface{} `json:"msg"`
 	Topic   string                 `json:"topic"`

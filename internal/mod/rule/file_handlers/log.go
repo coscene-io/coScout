@@ -70,7 +70,7 @@ func (h *logHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Tim
 }
 
 func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
-	if !activeTopics.Contains("/external_log") {
+	if activeTopics.Cardinality() > 0 && !activeTopics.Contains("/external_log") {
 		return
 	}
 
