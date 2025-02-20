@@ -68,20 +68,21 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 				//nolint: gosec// make work in some old machines.
 				InsecureSkipVerify: apiConfig.Insecure,
 			},
+			ForceAttemptHTTP2: true,
 		},
 	}
 	interceptors := connect.WithInterceptors(interceptor.NetworkUsageInterceptor(networkChan))
 
-	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	taskClient := openDpsV1alpha1Connect.NewTaskServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	recordClient := openDpsV1alpha1Connect.NewRecordServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	eventClient := openDpsV1alpha1Connect.NewEventServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	deviceEventClient := openAnaV1alpha1Connect.NewDeviceEventServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	securityTokenClient := openStorV1alpha1Connect.NewSecurityTokenServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	fileClient := openDpsV1alpha1Connect.NewFileServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	labelClient := openDpsV1alpha1Connect.NewLabelServiceClient(httpClient, apiConfig.ServerURL, interceptors)
-	diagClient := openDpsV1alpha1Connect.NewDiagnosisRuleServiceClient(httpClient, apiConfig.ServerURL, interceptors)
+	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	taskClient := openDpsV1alpha1Connect.NewTaskServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	recordClient := openDpsV1alpha1Connect.NewRecordServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	eventClient := openDpsV1alpha1Connect.NewEventServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	deviceEventClient := openAnaV1alpha1Connect.NewDeviceEventServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	securityTokenClient := openStorV1alpha1Connect.NewSecurityTokenServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	fileClient := openDpsV1alpha1Connect.NewFileServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	labelClient := openDpsV1alpha1Connect.NewLabelServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
+	diagClient := openDpsV1alpha1Connect.NewDiagnosisRuleServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
 
 	return &RequestClient{
 		deviceCli:        deviceClient,

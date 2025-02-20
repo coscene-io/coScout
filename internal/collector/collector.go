@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -489,11 +490,18 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 		})
 	}
 
+	metadata := make(map[string]string)
+	t := time.Now()
+	zone, offset := t.Zone()
+	metadata["deviceTimezoneOffset"] = strconv.Itoa(offset)
+	metadata["deviceTimezone"] = zone
+
 	record := &openDpsV1alpha1Resource.Record{
 		Title:       title,
 		Description: description,
 		Labels:      labels,
 		Device:      deviceInfo,
+		Metadata:    metadata,
 	}
 	ruleName, ok := recordCache.DiagnosisTask["rule_name"].(string)
 	if ok {
