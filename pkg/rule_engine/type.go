@@ -15,7 +15,13 @@
 package rule_engine
 
 import (
+	"time"
+
+	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/itchyny/timefmt-go"
 )
 
 // ErrorSection represents the section where validation error occurred.
@@ -127,6 +133,7 @@ func NewEnv() (*cel.Env, error) {
 		cel.Variable("scope", cel.MapType(cel.StringType, cel.StringType)),
 		cel.Variable("topic", cel.StringType),
 		cel.Variable("ts", cel.DoubleType),
+		cel.Lib(customFunctionLib{}),
 	)
 }
 
@@ -136,4 +143,103 @@ type RuleItem struct {
 	Topic   string                 `json:"topic"`
 	Ts      float64                `json:"ts"` // Timestamp in seconds
 	MsgType string                 `json:"msgType"`
+}
+
+type customFunctionLib struct{}
+
+func (customFunctionLib) CompileOptions() []cel.EnvOption {
+	return []cel.EnvOption{
+		cel.Function("timestamp",
+			cel.Overload("timestamp_double",
+				[]*cel.Type{cel.DoubleType},
+				cel.TimestampType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					timeFloat, ok := val.Value().(float64)
+					if !ok {
+						return types.NewErr("expected float64, got %v", val.Value())
+					}
+					sec, nsec := utils.NormalizeFloatTimestamp(timeFloat)
+					return types.Timestamp{Time: time.Unix(sec, int64(nsec))}
+				}),
+			),
+		),
+
+		cel.Function("format",
+			cel.MemberOverload("timestamp_format_string",
+				[]*cel.Type{cel.TimestampType, cel.StringType},
+				cel.StringType,
+				cel.BinaryBinding(func(target, arg ref.Val) ref.Val {
+					ts, ok := target.(types.Timestamp)
+					if !ok {
+						return types.NewErr("expected timestamp, got %v", target.Value())
+					}
+					format, ok := arg.Value().(string)
+					if !ok {
+						return types.NewErr("expected string, got %v", arg.Value())
+					}
+
+					return types.String("UTC: " + timefmt.Format(ts.Time.UTC(), format))
+				}),
+			),
+
+			cel.MemberOverload("timestamp_format_string_int",
+				[]*cel.Type{cel.TimestampType, cel.StringType, cel.IntType},
+				cel.StringType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					if len(args) != 3 {
+						return types.NewErr("format expects 3 arguments")
+					}
+
+					ts, ok := args[0].(types.Timestamp)
+					if !ok {
+						return types.NewErr("expected timestamp, got %v", args[0].Value())
+					}
+					format, ok := args[1].Value().(string)
+					if !ok {
+						return types.NewErr("expected string, got %v", args[1].Value())
+					}
+					offset, ok := args[2].Value().(int64)
+					if !ok {
+						return types.NewErr("expected int64, got %v", args[2].Value())
+					}
+
+					return types.String(timefmt.Format(ts.Time.UTC().Add(time.Duration(offset)*time.Second), format))
+				}),
+			),
+
+			cel.MemberOverload("timestamp_format_string_string",
+				[]*cel.Type{cel.TimestampType, cel.StringType, cel.StringType},
+				cel.StringType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					if len(args) != 3 {
+						return types.NewErr("format expects 3 arguments")
+					}
+
+					ts, ok := args[0].(types.Timestamp)
+					if !ok {
+						return types.NewErr("expected timestamp, got %v", args[0].Value())
+					}
+					format, ok := args[1].Value().(string)
+					if !ok {
+						return types.NewErr("expected string, got %v", args[1].Value())
+					}
+					tz, ok := args[2].Value().(string)
+					if !ok {
+						return types.NewErr("expected string, got %v", args[2].Value())
+					}
+
+					loc, err := time.LoadLocation(tz)
+					if err != nil {
+						return types.NewErr("invalid timezone")
+					}
+
+					return types.String(timefmt.Format(ts.Time.In(loc), format))
+				}),
+			),
+		),
+	}
+}
+
+func (customFunctionLib) ProgramOptions() []cel.ProgramOption {
+	return nil
 }
