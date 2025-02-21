@@ -24,7 +24,7 @@ if [ ! -e "$TEMP_DIR" ]; then
   exit 1
 fi
 
-COLINK_VERSION="1.0.0"
+COLINK_VERSION="1.0.1"
 COS_VERSION="latest"
 TRZSZ_VERSION="1.1.6"
 
@@ -107,7 +107,7 @@ for arch in "${SUPPORT_COS_ARCH[@]}"; do
       mesh_arch="amd64"
     fi
 
-    tar -cvzf "${HOME}/cos_binaries_${arch}.tar.gz" -C "${TEMP_DIR}/" "cos/${arch}" "virmesh/virmesh-${mesh_arch}" "trzsz_tar/trzsz_${TRZSZ_VERSION}_linux_${mesh_arch}.tar.gz"
+    tar -cvzf "${HOME}/cos_binaries_${arch}.tar.gz" -C "${TEMP_DIR}/" "cos/${arch}" "colink/colink-${mesh_arch}" "trzsz_tar/trzsz_${TRZSZ_VERSION}_linux_${mesh_arch}.tar.gz"
   fi
 done
 
