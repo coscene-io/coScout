@@ -70,6 +70,7 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 			},
 			ForceAttemptHTTP2: true,
 		},
+		Timeout: 30 * time.Second,
 	}
 	interceptors := connect.WithInterceptors(interceptor.NetworkUsageInterceptor(networkChan))
 
