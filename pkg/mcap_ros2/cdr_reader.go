@@ -2,6 +2,7 @@ package mcap_ros2
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"math"
 
 	"github.com/pkg/errors"
@@ -110,15 +111,15 @@ func (r *CdrReader) Uint64() (uint64, error) {
 }
 
 // Float32 reads a 32-bit floating point number.
-func (r *CdrReader) Float32() (float32, error) {
+func (r *CdrReader) Float32() (JSONFloat32, error) {
 	val, err := r.read(4)
-	return math.Float32frombits(r.byteOrder().Uint32(val)), err
+	return JSONFloat32(math.Float32frombits(r.byteOrder().Uint32(val))), err
 }
 
 // Float64 reads a 64-bit floating point number.
-func (r *CdrReader) Float64() (float64, error) {
+func (r *CdrReader) Float64() (JSONFloat64, error) {
 	val, err := r.read(8)
-	return math.Float64frombits(r.byteOrder().Uint64(val)), err
+	return JSONFloat64(math.Float64frombits(r.byteOrder().Uint64(val))), err
 }
 
 // String reads a string prefixed with its 32-bit length.
@@ -299,8 +300,8 @@ func (r *CdrReader) Uint64Array(length int) ([]uint64, error) {
 }
 
 // Float32Array reads an array of float32 values.
-func (r *CdrReader) Float32Array(length int) ([]float32, error) {
-	result := make([]float32, length)
+func (r *CdrReader) Float32Array(length int) ([]JSONFloat32, error) {
+	result := make([]JSONFloat32, length)
 	for i := range length {
 		val, err := r.Float32()
 		if err != nil {
@@ -312,8 +313,8 @@ func (r *CdrReader) Float32Array(length int) ([]float32, error) {
 }
 
 // Float64Array reads an array of float64 values.
-func (r *CdrReader) Float64Array(length int) ([]float64, error) {
-	result := make([]float64, length)
+func (r *CdrReader) Float64Array(length int) ([]JSONFloat64, error) {
+	result := make([]JSONFloat64, length)
 	for i := range length {
 		val, err := r.Float64()
 		if err != nil {
@@ -335,4 +336,42 @@ func (r *CdrReader) StringArray(length int) ([]string, error) {
 		result[i] = val
 	}
 	return result, nil
+}
+
+// JSONFloat64 is a float64 that marshals to a string, handling inf and nan.
+// TODO: inf would be represented as +Inf in JSON, and unmarshalling of that
+// will result in a string at the moment, but that should not hurt anything at the moment.
+type JSONFloat64 float64
+
+func (j JSONFloat64) MarshalJSON() ([]byte, error) {
+	v := float64(j)
+	switch {
+	case math.IsInf(v, 1):
+		return json.Marshal("+Inf")
+	case math.IsInf(v, -1):
+		return json.Marshal("-Inf")
+	case math.IsNaN(v):
+		return json.Marshal("NaN")
+	default:
+		return json.Marshal(v) // marshal result as standard float64
+	}
+}
+
+// JSONFloat32 is a float32 that marshals to a string, handling inf and nan.
+// TODO: inf would be represented as +Inf in JSON, and unmarshalling of that
+// will result in a string at the moment, but that should not hurt anything at the moment.
+type JSONFloat32 float32
+
+func (j JSONFloat32) MarshalJSON() ([]byte, error) {
+	v := float32(j)
+	switch {
+	case math.IsInf(float64(v), 1):
+		return json.Marshal("+Inf")
+	case math.IsInf(float64(v), -1):
+		return json.Marshal("-Inf")
+	case math.IsNaN(float64(v)):
+		return json.Marshal("NaN")
+	default:
+		return json.Marshal(v) // marshal result as standard float32
+	}
 }
