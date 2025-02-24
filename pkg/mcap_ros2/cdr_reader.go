@@ -345,14 +345,16 @@ type JSONFloat64 float64
 
 func (j JSONFloat64) MarshalJSON() ([]byte, error) {
 	v := float64(j)
-	if math.IsInf(v, 1) {
+	switch {
+	case math.IsInf(v, 1):
 		return json.Marshal("+Inf")
-	} else if math.IsInf(v, -1) {
+	case math.IsInf(v, -1):
 		return json.Marshal("-Inf")
-	} else if math.IsNaN(v) {
+	case math.IsNaN(v):
 		return json.Marshal("NaN")
+	default:
+		return json.Marshal(v) // marshal result as standard float64
 	}
-	return json.Marshal(v) // marshal result as standard float64
 }
 
 // JSONFloat32 is a float32 that marshals to a string, handling inf and nan.
@@ -362,12 +364,14 @@ type JSONFloat32 float32
 
 func (j JSONFloat32) MarshalJSON() ([]byte, error) {
 	v := float32(j)
-	if math.IsInf(float64(v), 1) {
+	switch {
+	case math.IsInf(float64(v), 1):
 		return json.Marshal("+Inf")
-	} else if math.IsInf(float64(v), -1) {
+	case math.IsInf(float64(v), -1):
 		return json.Marshal("-Inf")
-	} else if math.IsNaN(float64(v)) {
+	case math.IsNaN(float64(v)):
 		return json.Marshal("NaN")
+	default:
+		return json.Marshal(v) // marshal result as standard float32
 	}
-	return json.Marshal(v) // marshal result as standard float32
 }

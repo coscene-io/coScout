@@ -210,13 +210,13 @@ func parseConstant(line string) (Constant, error) {
 	// Split on = to separate type/name from value
 	parts := strings.SplitN(line, "=", 2)
 	if len(parts) != 2 {
-		return Constant{}, fmt.Errorf("not a valid constant")
+		return Constant{}, errors.New("not a valid constant")
 	}
 
 	// Split type and name
 	typeAndName := strings.Fields(parts[0])
 	if len(typeAndName) != 2 {
-		return Constant{}, fmt.Errorf("invalid constant format")
+		return Constant{}, errors.New("invalid constant format")
 	}
 
 	return Constant{
@@ -226,18 +226,18 @@ func parseConstant(line string) (Constant, error) {
 	}, nil
 }
 
-// parseField parses a field definition line
+// parseField parses a field definition line.
 func parseField(line string, currentPkg string) (Field, error) {
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
-		return Field{}, fmt.Errorf("invalid field format: %s", line)
+		return Field{}, errors.Errorf("invalid field format: %s", line)
 	}
 
 	// Check if this is a constant definition (contains =)
 	if strings.Contains(line, "=") {
 		_, err := parseConstant(line)
 		if err != nil {
-			return Field{}, fmt.Errorf("failed to parse constant: %w", err)
+			return Field{}, errors.Wrap(err, "failed to parse constant")
 		}
 		// Return empty field to signal this was a constant
 		return Field{}, nil
@@ -250,6 +250,7 @@ func parseField(line string, currentPkg string) (Field, error) {
 	isUpperBound := false
 
 	// Check for array type with size or upper bound
+	//nolint: nestif // this is a valid use of nested ifs
 	if idx := strings.Index(typeStr, "["); idx != -1 {
 		isArray = true
 		sizeStr := strings.TrimSuffix(typeStr[idx+1:], "]")
@@ -263,7 +264,7 @@ func parseField(line string, currentPkg string) (Field, error) {
 			}
 			size, err := strconv.Atoi(sizeStr)
 			if err != nil {
-				return Field{}, fmt.Errorf("invalid array size: %s", sizeStr)
+				return Field{}, errors.Errorf("invalid array size: %s", sizeStr)
 			}
 			arraySize = &size
 		}
@@ -404,7 +405,7 @@ func readField(
 	}
 
 	array := make([]interface{}, arrayLength)
-	for i := 0; i < arrayLength; i++ {
+	for i := range arrayLength {
 		value, err := readComplexType(nestedDef, msgDefs, reader)
 		if err != nil {
 			return nil, err
