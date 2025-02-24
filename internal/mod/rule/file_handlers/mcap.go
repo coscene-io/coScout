@@ -17,7 +17,6 @@ package file_handlers
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -213,7 +212,7 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 					defer func() {
 						if r := recover(); r != nil {
 							errTopics[channel.Topic] = struct{}{}
-							err = errors.New(fmt.Sprintf("panic occurred during message decoding: %v, skipping message on topic %s", r, channel.Topic))
+							err = errors.Errorf("panic occurred during message decoding: %v, skipping message on topic %s", r, channel.Topic)
 						}
 					}()
 					decoded, err = decoder(message.Data)
