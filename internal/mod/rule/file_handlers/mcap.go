@@ -105,32 +105,31 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 		return
 	}
 
-	// targetTopics will be empty if there is no active topic
-	// else it will be the intersection of active topics and channels in the mcap file
-	targetTopics := make([]string, 0)
+	// targetTopics will be empty if no active topics are provided
+	// else it will be the list of active topics in the MCAP file
+	targetTopics := mapset.NewSet[string]()
 	if activeTopics.Cardinality() > 0 {
 		for _, conn := range lo.Values(info.Channels) {
 			if activeTopics.Contains(conn.Topic) {
-				targetTopics = append(targetTopics, conn.Topic)
+				targetTopics.Add(conn.Topic)
 			}
 		}
 
-		if len(targetTopics) == 0 {
+		if targetTopics.Cardinality() == 0 {
 			log.Infof("no active topics found in MCAP file %s", filepath)
 			return
 		}
 	}
 	log.Infof("sending rule items for MCAP file %s with topics: %v", filepath, targetTopics)
 
-	iter, err := reader.Messages(mcap.WithTopics(targetTopics))
+	iter, err := reader.Messages(mcap.WithTopics(targetTopics.ToSlice()))
 	if err != nil {
 		log.Errorf("failed to create message iterator: %v", err)
 		return
 	}
 
-	// Create reusable buffers and transcoders
+	// Remove msgBuf since we'll decode directly to map where possible
 	msg := &mcap.Message{}
-	msgBuf := &bytes.Buffer{}
 	msgReader := &bytes.Reader{}
 	transcoders := make(map[uint16]*ros1msg.JSONTranscoder)
 	ros2Decoders := make(map[string]mcap_ros2.DecoderFunction)
@@ -152,14 +151,17 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 			continue
 		}
 
-		msgBuf.Reset()
+		var decoded map[string]interface{}
 
 		// Handle messages based on schema and encoding
 		//nolint: nestif // reduce nesting
 		if schema == nil || schema.Encoding == "" {
 			switch channel.MessageEncoding {
 			case "json":
-				msgBuf.Write(message.Data)
+				if err := json.Unmarshal(message.Data, &decoded); err != nil {
+					log.Errorf("failed to unmarshal JSON: %v", err)
+					continue
+				}
 			default:
 				log.Errorf("unsupported message encoding for schema-less channel: %s", channel.MessageEncoding)
 				continue
@@ -177,10 +179,15 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 					}
 					transcoders[channel.SchemaID] = transcoder
 				}
+				// Still need buffer for ros1msg transcoding
+				buf := &bytes.Buffer{}
 				msgReader.Reset(message.Data)
-				err = transcoder.Transcode(msgBuf, msgReader)
-				if err != nil {
+				if err := transcoder.Transcode(buf, msgReader); err != nil {
 					log.Errorf("failed to transcode: %v", err)
+					continue
+				}
+				if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+					log.Errorf("failed to unmarshal transcoded data: %v", err)
 					continue
 				}
 
@@ -205,30 +212,21 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 					}
 				}
 
-				// Add panic recovery for decoder
-				var decoded map[string]interface{}
-				var err error
+				var panicErr error
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
 							errTopics[channel.Topic] = struct{}{}
-							err = errors.Errorf("panic occurred during message decoding: %v, skipping message on topic %s", r, channel.Topic)
+							panicErr = errors.Errorf("panic occurred during message decoding: %v, skipping message on topic %s", r, channel.Topic)
 						}
 					}()
 					decoded, err = decoder(message.Data)
 				}()
-				if err != nil {
-					log.Errorf("failed to decode message: %v", err)
+				if panicErr != nil {
+					log.Errorf("failed to decode message: %v", panicErr)
 					continue
 				}
 
-				jsonData, err := json.Marshal(decoded)
-				if err != nil {
-					log.Errorf("failed to marshal decoded message: %v", err)
-					continue
-				}
-
-				msgBuf.Write(jsonData)
 			case "protobuf":
 				messageDescriptor, ok := descriptors[channel.SchemaID]
 				if !ok {
@@ -260,22 +258,21 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 					log.Errorf("failed to marshal protobuf to JSON: %v", err)
 					continue
 				}
-				msgBuf.Write(marshalledBytes)
+				if err := json.Unmarshal(marshalledBytes, &decoded); err != nil {
+					log.Errorf("failed to unmarshal protobuf JSON: %v", err)
+					continue
+				}
 
 			case "jsonschema":
-				msgBuf.Write(message.Data)
+				if err := json.Unmarshal(message.Data, &decoded); err != nil {
+					log.Errorf("failed to unmarshal JSON: %v", err)
+					continue
+				}
 
 			default:
 				log.Errorf("unsupported schema encoding: %s", schema.Encoding)
 				continue
 			}
-		}
-
-		// Parse JSON into map
-		var decoded map[string]interface{}
-		if err := json.NewDecoder(msgBuf).Decode(&decoded); err != nil {
-			log.Errorf("failed to decode JSON: %v", err)
-			continue
 		}
 
 		ruleItemChan <- rule_engine.RuleItem{
