@@ -17,6 +17,7 @@ package file_handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -135,6 +136,7 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 	transcoders := make(map[uint16]*ros1msg.JSONTranscoder)
 	ros2Decoders := make(map[string]mcap_ros2.DecoderFunction)
 	descriptors := make(map[uint16]protoreflect.MessageDescriptor)
+	errTopics := map[string]struct{}{}
 
 	for {
 		schema, channel, message, err := iter.NextInto(msg)
@@ -145,6 +147,10 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 				log.Errorf("error reading message: %v", err)
 			}
 			return
+		}
+
+		if _, ok := errTopics[channel.Topic]; ok {
+			continue
 		}
 
 		msgBuf.Reset()
@@ -200,7 +206,18 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 					}
 				}
 
-				decoded, err := decoder(message.Data)
+				// Add panic recovery for decoder
+				var decoded map[string]interface{}
+				var err error
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							errTopics[channel.Topic] = struct{}{}
+							err = errors.New(fmt.Sprintf("panic occurred during message decoding: %v, skipping message on topic %s", r, channel.Topic))
+						}
+					}()
+					decoded, err = decoder(message.Data)
+				}()
 				if err != nil {
 					log.Errorf("failed to decode message: %v", err)
 					continue
