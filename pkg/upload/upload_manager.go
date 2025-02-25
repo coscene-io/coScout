@@ -76,6 +76,7 @@ func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucke
 // If the file size is larger than minPartSize, it will use multipart upload.
 func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize int64, userTags map[string]string) error {
 	var err error
+	numThreads := uint(2)
 
 	u.client.TraceOn(log.StandardLogger().WriterLevel(log.DebugLevel))
 	ctx := context.Background()
@@ -90,11 +91,11 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 		u.uploadProgressChan <- FileUploadProgress{Name: absPath, Uploaded: -1, TotalSize: filesize}
 		//nolint: gosec // we are not using user input
 		err = u.FMultipartPutObject(ctx, bucket, key,
-			absPath, filesize, minio.PutObjectOptions{UserTags: userTags, PartSize: uint64(partSize)})
+			absPath, filesize, minio.PutObjectOptions{UserTags: userTags, PartSize: uint64(partSize), NumThreads: numThreads})
 	} else {
 		progress := newUploadProgressReader(absPath, filesize, u.uploadProgressChan)
 		_, err = u.client.FPutObject(ctx, bucket, key, absPath,
-			minio.PutObjectOptions{Progress: progress, UserTags: userTags})
+			minio.PutObjectOptions{Progress: progress, UserTags: userTags, NumThreads: numThreads})
 	}
 
 	return err
