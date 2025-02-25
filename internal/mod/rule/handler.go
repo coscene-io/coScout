@@ -153,7 +153,6 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case ruleItem := <-c.ruleItemChan:
-				log.Infof("channel received rule item: %+v", ruleItem)
 				c.engine.ConsumeNext(ruleItem)
 			case <-ctx.Done():
 				return
@@ -203,7 +202,6 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 				continue
 			}
 
-			log.Infof("Http received rule item: %+v", item)
 			c.ruleItemChan <- item
 			msg.Ack()
 		case <-ctx.Done():
