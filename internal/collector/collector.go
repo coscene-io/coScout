@@ -38,10 +38,10 @@ import (
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gopkg.in/yaml.v3"
 )
 
 func FindAllRecordCaches() []string {
@@ -562,7 +562,7 @@ func checkRecordCacheExpired(expiredHours int, timestamp int64, rcPath string) b
 }
 
 func getDeviceExtraInfos(extraFiles []string) *structpb.Value {
-	extraInfo := structpb.Value{}
+	extraInfoMap := make(map[string]interface{})
 
 	for _, file := range extraFiles {
 		if !utils.CheckReadPath(file) {
@@ -580,11 +580,22 @@ func getDeviceExtraInfos(extraFiles []string) *structpb.Value {
 			continue
 		}
 
-		err = protojson.Unmarshal(data, &extraInfo)
-		if err != nil {
-			log.Errorf("unmarshal extra file %s failed: %v", file, err)
+		var yamlData map[string]interface{}
+		if err := yaml.Unmarshal(data, &yamlData); err != nil {
+			log.Errorf("unmarshal yaml file %s failed: %v", file, err)
 			continue
 		}
+
+		for k, v := range yamlData {
+			extraInfoMap[k] = v
+		}
 	}
-	return &extraInfo
+
+	value, err := structpb.NewStruct(extraInfoMap)
+	if err != nil {
+		log.Errorf("convert extra info to structpb failed: %v", err)
+		return nil
+	}
+
+	return structpb.NewStructValue(value)
 }
