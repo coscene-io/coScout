@@ -49,7 +49,7 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 		rules        []*rule_engine.Rule
 		activeTopics = mapset.NewSet[string]()
 	)
-	activeTopics.Add("/external_log")
+	configTopics = append(configTopics, "/external_log")
 
 	for _, apiRule := range apiRules {
 		validatedRules, validationResult := rule_engine.ValidateApiRule(
@@ -94,13 +94,13 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 			}
 			validatedRule.Metadata["rule_display_name"] = apiRule.GetDisplayName()
 
-			rule_with_current_scope, _ := proto.Clone(apiRule).(*resources.DiagnosisRule)
+			ruleWithCurrentScope, _ := proto.Clone(apiRule).(*resources.DiagnosisRule)
 			fields := map[string]*structpb.Value{}
 			for k, v := range validatedRule.Scope {
 				fields[k] = structpb.NewStringValue(v)
 			}
-			rule_with_current_scope.SetEach([]*structpb.Struct{{Fields: fields}})
-			validatedRule.Metadata["rule"] = rule_with_current_scope
+			ruleWithCurrentScope.SetEach([]*structpb.Struct{{Fields: fields}})
+			validatedRule.Metadata["rule"] = ruleWithCurrentScope
 
 			rules = append(rules, validatedRule)
 
