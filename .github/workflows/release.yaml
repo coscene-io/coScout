@@ -83,8 +83,10 @@ jobs:
       - name: Install gzip
         run: sudo apt-get update && sudo apt-get install -y gzip
       - name: Build coScout agent
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
-          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} make build-binary VERSION=$VERSION
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} make build-binary VERSION="$VERSION"
           cp bin/cos cos
           chmod +x cos
       - name: Build metadata files
