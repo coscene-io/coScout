@@ -22,6 +22,7 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"time"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	"github.com/coscene-io/coscout/internal/api"
@@ -257,7 +258,13 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 			//nolint: gosec// InsecureSkipVerify is used to skip certificate verification
 			InsecureSkipVerify: appConfig.Api.Insecure,
 		},
+		MaxIdleConns:      1,
+		IdleConnTimeout:   30 * time.Second,
+		DisableKeepAlives: true,
+		ForceAttemptHTTP2: true,
 	}
+	defer transport.CloseIdleConnections()
+
 	mc, err := minio.New(generateSecurityTokenRes.GetEndpoint(), &minio.Options{
 		Creds:     credentials.NewStaticV4(generateSecurityTokenRes.GetAccessKeyId(), generateSecurityTokenRes.GetAccessKeySecret(), generateSecurityTokenRes.GetSessionToken()),
 		Secure:    true,
@@ -268,6 +275,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		log.Errorf("unable to create minio client: %v", err)
 		return err
 	}
+
 	um, err := upload.NewUploadManager(mc, storage, constant.MultiPartUploadBucket, reqClient.GetNetworkChan())
 	if err != nil {
 		log.Errorf("unable to create upload manager: %v", err)
