@@ -305,8 +305,14 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 			entryPath := filepath.Join(dir, entry.Name())
 			fileState, hasFileState := f.getFileState(entryPath)
 
-			// Skip unsupported files unless they were marked as too old
-			if hasFileState && fileState.Unsupported && !fileState.TooOld {
+			// Skip already processed files
+			if hasFileState && !fileState.Unsupported && fileState.ProcessState == processStateProcessed {
+				continue
+			}
+
+			info, err := entry.Info()
+			if err != nil {
+				log.Errorf("failed to get file info for %s: %v", entryPath, err)
 				continue
 			}
 
@@ -314,11 +320,6 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 			if handler == nil {
 				// No handler supported for file, mark as unsupported if not already
 				if !hasFileState || !fileState.Unsupported {
-					info, err := entry.Info()
-					if err != nil {
-						log.Errorf("failed to get file info for %s: %v", entryPath, err)
-						continue
-					}
 					f.setFileState(entryPath, FileState{
 						Size:        info.Size(),
 						Unsupported: true,
@@ -328,20 +329,13 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 			}
 
 			// Check if file is too old
-			if !entry.IsDir() {
-				info, err := entry.Info()
-				if err != nil {
-					log.Errorf("failed to get file info for %s: %v", entryPath, err)
-					continue
-				}
-				if info.ModTime().Before(time.Now().Add(-time.Duration(conf.SkipPeriodHours) * time.Hour)) {
-					f.setFileState(entryPath, FileState{
-						Size:        info.Size(),
-						Unsupported: true,
-						TooOld:      true,
-					})
-					continue
-				}
+			if !entry.IsDir() && info.ModTime().Before(time.Now().Add(-time.Duration(conf.SkipPeriodHours)*time.Hour)) {
+				f.setFileState(entryPath, FileState{
+					Size:        info.Size(),
+					Unsupported: true,
+					TooOld:      true,
+				})
+				continue
 			}
 
 			isListening := newListenDirs.Contains(dir)
