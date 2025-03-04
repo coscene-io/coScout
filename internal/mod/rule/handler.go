@@ -422,10 +422,11 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 		if moment.CreateTask {
 			momentToCreate.Task = model.Task{
-				Title:       displayName,
-				Description: description,
-				Assignee:    moment.AssignTo,
-				SyncTask:    moment.SyncTask,
+				ShouldCreate: true,
+				Title:        displayName,
+				Description:  description,
+				Assignee:     moment.AssignTo,
+				SyncTask:     moment.SyncTask,
 			}
 		}
 		rc.Moments = append(rc.Moments, momentToCreate)

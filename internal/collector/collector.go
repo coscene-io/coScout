@@ -287,6 +287,10 @@ func triggerDeviceEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc
 }
 
 func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, recordTitle string, reqClient *api.RequestClient) {
+	if !moment.Task.ShouldCreate {
+		return
+	}
+
 	//nolint: nestif // we need to check if the task is new
 	if moment.Name != "" && moment.Task.Name == "" {
 		// displayname: moment.Task.Title->moment.Title->recordTitle
