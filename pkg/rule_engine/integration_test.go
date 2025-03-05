@@ -94,7 +94,7 @@ func TestApiRuleToRuleSpec(t *testing.T) {
 		"msg": map[string]interface{}{
 			"message": "error 1",
 		},
-	}, time.Now())
+	}, nil, time.Now())
 	if !evalResult {
 		t.Errorf("Expected true, got false")
 	}

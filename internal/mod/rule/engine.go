@@ -17,6 +17,7 @@ package rule
 import (
 	"encoding/json"
 	"strconv"
+	"time"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"github.com/coscene-io/coscout/internal/api"
@@ -41,6 +42,8 @@ type Engine struct {
 
 	rules        []*rule_engine.Rule
 	activeTopics mapset.Set[string]
+
+	ruleDebounceTime map[string]*time.Time
 }
 
 // UpdateRules updates the rules in the rule engine.
@@ -138,7 +141,18 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 			"ts":    item.Ts,
 		}
 
-		if rule.EvalConditions(curActivation, utils.TimeFromFloat(item.Ts)) {
+		var prevActivationTime *time.Time
+		ruleName, ruleOk := rule.Metadata["rule_name"].(string)
+		if ruleOk && len(ruleName) > 0 {
+			prevActivationTime = e.ruleDebounceTime[ruleName]
+		}
+
+		msgTs := utils.TimeFromFloat(item.Ts)
+		if rule.EvalConditions(curActivation, prevActivationTime, msgTs) {
+			if ruleOk && len(ruleName) > 0 {
+				e.ruleDebounceTime[ruleName] = &msgTs
+			}
+
 			collectInfoId := uuid.New().String()
 			additionalArgs := map[string]interface{}{}
 			for k, v := range rule.Metadata {
