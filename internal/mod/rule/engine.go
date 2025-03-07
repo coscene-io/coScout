@@ -109,7 +109,7 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 
 			if validatedRule.Topics.Cardinality() == 0 {
 				activeTopics = mapset.NewSet[string]()
-			} else if activeTopics.Cardinality() > 0 {
+			} else if validatedRule.Topics.Cardinality() > 0 {
 				activeTopics = activeTopics.Union(validatedRule.Topics)
 			}
 		}
