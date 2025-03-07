@@ -420,11 +420,11 @@ fi
 if [[ -z $COLINK_ENDPOINT ]] || [[ -z $COLINK_ARCH ]]; then
   echo "coLink endpoint and mesh arch are empty, skip coLink installation."
 else
-  echo "Downloading new coLink binary..."
-
   if [[ -n $USE_LOCAL ]]; then
+    echo "Moving new coLink binary..."
     mv -f "$TEMP_DIR/cos_binaries/colink/colink-${COLINK_ARCH}" "$TEMP_DIR"/colink
   else
+    echo "Downloading new coLink binary..."
     download_file "$TEMP_DIR"/colink $COLINK_DOWNLOAD_URL $SKIP_VERIFY_CERT
   fi
 
@@ -434,10 +434,11 @@ else
 
   sudo mv -f "$TEMP_DIR"/colink /usr/local/bin/colink
 
-  echo "Downloading new trzsz binary..."
   if [[ -n $USE_LOCAL ]]; then
+    echo "Moving new trzsz binary..."
     cp "$TEMP_DIR/cos_binaries/trzsz_tar/trzsz_1.1.6_linux_${COLINK_ARCH}.tar.gz" "$TEMP_DIR"/trzsz.tar.gz
   else
+    echo "Downloading new trzsz binary..."
     download_file "$TEMP_DIR"/trzsz.tar.gz $TRZSZ_DOWNLOAD_URL $SKIP_VERIFY_CERT
   fi
 
