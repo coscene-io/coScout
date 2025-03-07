@@ -149,15 +149,13 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 		var prevActivationTime *time.Time
 		ruleName, ruleOk := rule.Metadata["rule_name"].(string)
 		if ruleOk && len(ruleName) > 0 {
-			sourceKey := ruleName + ":" + item.Source
-			prevActivationTime = e.ruleDebounceTime[sourceKey]
+			prevActivationTime = e.ruleDebounceTime[ruleName]
 		}
 
 		msgTs := utils.TimeFromFloat(item.Ts)
 		isActive, activationTime := rule.EvalConditions(curActivation, prevActivationTime, msgTs)
 		if ruleOk && len(ruleName) > 0 {
-			sourceKey := ruleName + ":" + item.Source
-			e.ruleDebounceTime[sourceKey] = activationTime
+			e.ruleDebounceTime[ruleName] = activationTime
 		}
 
 		if isActive {

@@ -76,7 +76,7 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, prevActivationT
 	case prevActivationTime == nil:
 		return true, &ts
 	case ts.Before(*prevActivationTime):
-		return false, prevActivationTime
+		return true, &ts
 	case ts.Sub(*prevActivationTime) > r.DebounceTime:
 		return true, &ts
 	default:
