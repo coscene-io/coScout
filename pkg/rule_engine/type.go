@@ -143,6 +143,7 @@ type RuleItem struct {
 	Topic   string                 `json:"topic"`
 	Ts      float64                `json:"ts"` // Timestamp in seconds
 	MsgType string                 `json:"msgType"`
+	Source  string                 `json:"source"` // filepath or topic of the message
 }
 
 type customFunctionLib struct{}

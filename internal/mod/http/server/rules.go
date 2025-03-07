@@ -42,6 +42,7 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 
 		// Publish messages
 		for _, message := range req.Messages {
+			message.Source = "http"
 			data, err := json.Marshal(message)
 			if err != nil {
 				log.Errorf("Failed to marshal message: %v", err)

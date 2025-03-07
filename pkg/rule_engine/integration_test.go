@@ -90,7 +90,7 @@ func TestApiRuleToRuleSpec(t *testing.T) {
 	if !validationResult.Success {
 		t.Fatalf("Failed to validate rule spec: %v", validationResult)
 	}
-	evalResult := rules[0].EvalConditions(map[string]interface{}{
+	evalResult, _ := rules[0].EvalConditions(map[string]interface{}{
 		"msg": map[string]interface{}{
 			"message": "error 1",
 		},

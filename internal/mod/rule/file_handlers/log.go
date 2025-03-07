@@ -114,8 +114,9 @@ func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[stri
 				"file":    filePath,
 				"level":   getLogLevel(stampedLog.Line),
 			},
-			Topic: "/external_log",
-			Ts:    tsFloat,
+			Topic:  "/external_log",
+			Ts:     tsFloat,
+			Source: filePath,
 		}
 	}
 }

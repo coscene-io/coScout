@@ -35,6 +35,11 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+const (
+	debounceMapSize     = 1000
+	debounceMaxDuration = 24 * time.Hour
+)
+
 // Engine represents the rule engine that processes messages against rules.
 type Engine struct {
 	reqClient  api.RequestClient
@@ -144,15 +149,18 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 		var prevActivationTime *time.Time
 		ruleName, ruleOk := rule.Metadata["rule_name"].(string)
 		if ruleOk && len(ruleName) > 0 {
-			prevActivationTime = e.ruleDebounceTime[ruleName]
+			sourceKey := ruleName + ":" + item.Source
+			prevActivationTime = e.ruleDebounceTime[sourceKey]
 		}
 
 		msgTs := utils.TimeFromFloat(item.Ts)
-		if rule.EvalConditions(curActivation, prevActivationTime, msgTs) {
-			if ruleOk && len(ruleName) > 0 {
-				e.ruleDebounceTime[ruleName] = &msgTs
-			}
+		isActive, activationTime := rule.EvalConditions(curActivation, prevActivationTime, msgTs)
+		if ruleOk && len(ruleName) > 0 {
+			sourceKey := ruleName + ":" + item.Source
+			e.ruleDebounceTime[sourceKey] = activationTime
+		}
 
+		if isActive {
 			collectInfoId := uuid.New().String()
 			additionalArgs := map[string]interface{}{}
 			for k, v := range rule.Metadata {
@@ -164,6 +172,18 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 				if err := action.Run(curActivation, additionalArgs); err != nil {
 					log.Errorf("failed to run action %s: %v", action.Name, err)
 				}
+			}
+		}
+	}
+
+	e.cleanupDebounceTime()
+}
+
+func (e *Engine) cleanupDebounceTime() {
+	if len(e.ruleDebounceTime) > debounceMapSize {
+		for key, ts := range e.ruleDebounceTime {
+			if ts != nil && time.Since(*ts) > debounceMaxDuration {
+				delete(e.ruleDebounceTime, key)
 			}
 		}
 	}

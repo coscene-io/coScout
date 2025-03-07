@@ -177,9 +177,10 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 		sec, nsec := utils.NormalizeFloatTimestamp(float64(msg.Time))
 		// Send JSON message through channel
 		ruleItemChan <- rule_engine.RuleItem{
-			Msg:   structuredData,
-			Ts:    float64(sec) + float64(nsec)/1e9,
-			Topic: conn.Topic,
+			Msg:    structuredData,
+			Ts:     float64(sec) + float64(nsec)/1e9,
+			Topic:  conn.Topic,
+			Source: filePath,
 		}
 	}
 	log.Infof("finished sending rule items for ros1 file %s", filePath)
