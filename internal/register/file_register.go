@@ -114,7 +114,7 @@ func getDeviceFromStructuredFile(snFile, snField string) (string, error) {
 		return "", errors.Wrap(err, "field not found or not a string")
 	}
 
-	return deviceID, nil
+	return strings.TrimSpace(deviceID), nil
 }
 
 func getDeviceFromText(snFile string) (string, error) {
@@ -123,7 +123,7 @@ func getDeviceFromText(snFile string) (string, error) {
 		return "", errors.Wrap(err, "failed to read device file")
 	}
 
-	return string(data), nil
+	return strings.TrimSpace(string(data)), nil
 }
 
 func getCustomTags() map[string]string {
