@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -464,6 +465,12 @@ func (f *fileStateHandler) Files(filters ...FileFilter) []FileState {
 			result = append(result, state)
 		}
 	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].StartTime < result[j].StartTime ||
+			result[i].EndTime < result[j].EndTime ||
+			result[i].Pathname < result[j].Pathname
+	})
 	return result
 }
 
