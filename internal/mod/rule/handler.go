@@ -70,7 +70,7 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		fileStateHandler: fileStateHandler,
 		listenChan:       make(chan string, 1000),
 		ruleItemChan:     make(chan rule_engine.RuleItem, 1000),
-		engine:           Engine{reqClient: reqClient},
+		engine:           Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
 		pubSub:           pubSub,
 	}
 }
@@ -422,10 +422,11 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 		if moment.CreateTask {
 			momentToCreate.Task = model.Task{
-				Title:       displayName,
-				Description: description,
-				Assignee:    moment.AssignTo,
-				SyncTask:    moment.SyncTask,
+				ShouldCreate: true,
+				Title:        displayName,
+				Description:  description,
+				Assignee:     moment.AssignTo,
+				SyncTask:     moment.SyncTask,
 			}
 		}
 		rc.Moments = append(rc.Moments, momentToCreate)

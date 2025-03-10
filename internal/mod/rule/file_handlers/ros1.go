@@ -98,6 +98,7 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 
 	// targetTopics will be empty if there is no active topic
 	// else it will be the intersection of active topics and channels in the bag file
+	// will read all topics if activeTopics is empty
 	targetTopics := mapset.NewSet[string]()
 	if activeTopics.Cardinality() > 0 {
 		for _, conn := range lo.Values(info.Connections) {
@@ -107,7 +108,7 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 		}
 
 		if targetTopics.Cardinality() == 0 {
-			log.Infof("no active topics found in ros1 file %s, skipping", filePath)
+			log.Infof("no active topics matched in ros1 file %s, skipping", filePath)
 			return
 		}
 	}
@@ -133,7 +134,7 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 			log.Errorf("failed to read message: %v", err)
 			continue
 		}
-		if !targetTopics.Contains(conn.Topic) {
+		if targetTopics.Cardinality() > 0 && !targetTopics.Contains(conn.Topic) {
 			continue
 		}
 
@@ -176,9 +177,10 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 		sec, nsec := utils.NormalizeFloatTimestamp(float64(msg.Time))
 		// Send JSON message through channel
 		ruleItemChan <- rule_engine.RuleItem{
-			Msg:   structuredData,
-			Ts:    float64(sec) + float64(nsec)/1e9,
-			Topic: conn.Topic,
+			Msg:    structuredData,
+			Ts:     float64(sec) + float64(nsec)/1e9,
+			Topic:  conn.Topic,
+			Source: filePath,
 		}
 	}
 	log.Infof("finished sending rule items for ros1 file %s", filePath)

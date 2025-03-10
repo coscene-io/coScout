@@ -27,13 +27,12 @@ func AllowedVersions() []string {
 
 // Rule represents a rule with conditions and actions.
 type Rule struct {
-	Conditions         []Condition
-	Actions            []Action
-	Scope              map[string]string
-	Topics             mapset.Set[string]
-	DebounceTime       time.Duration
-	prevActivationTime *time.Time
-	Metadata           map[string]interface{}
+	Conditions   []Condition
+	Actions      []Action
+	Scope        map[string]string
+	Topics       mapset.Set[string]
+	DebounceTime time.Duration
+	Metadata     map[string]interface{}
 }
 
 // NewRule creates a new Rule instance.
@@ -59,30 +58,28 @@ func NewRule(
 }
 
 // EvalConditions evaluates all conditions of the rule.
-func (r *Rule) EvalConditions(activation map[string]interface{}, ts time.Time) bool {
+func (r *Rule) EvalConditions(activation map[string]interface{}, prevActivationTime *time.Time, ts time.Time) (isActive bool, activationTime *time.Time) {
 	// Check all conditions
 	for _, cond := range r.Conditions {
 		if !cond.Evaluate(activation) {
-			return false
+			return false, prevActivationTime
 		}
 	}
 
 	// If no debounce time set, return true
 	if r.DebounceTime <= 0 {
-		return true
+		return true, &ts
 	}
 
 	// Handle debouncing
-	var activated bool
 	switch {
-	case r.prevActivationTime == nil:
-		activated = true
-	case ts.Sub(*r.prevActivationTime) > r.DebounceTime:
-		activated = true
+	case prevActivationTime == nil:
+		return true, &ts
+	case ts.Before(*prevActivationTime):
+		return true, &ts
+	case ts.Sub(*prevActivationTime) > r.DebounceTime:
+		return true, &ts
 	default:
-		activated = false
+		return false, &ts
 	}
-
-	r.prevActivationTime = &ts
-	return activated
 }

@@ -52,12 +52,13 @@ type Moment struct {
 }
 
 type Task struct {
-	Name        string `json:"name" yaml:"name"`
-	Title       string `json:"title" yaml:"title"`
-	Description string `json:"description" yaml:"description"`
-	RecordName  string `json:"record_name" yaml:"record_name"`
-	Assignee    string `json:"assignee" yaml:"assignee"`
-	SyncTask    bool   `json:"sync_task" yaml:"sync_task"`
+	ShouldCreate bool   `json:"should_create" yaml:"should_create"`
+	Name         string `json:"name" yaml:"name"`
+	Title        string `json:"title" yaml:"title"`
+	Description  string `json:"description" yaml:"description"`
+	RecordName   string `json:"record_name" yaml:"record_name"`
+	Assignee     string `json:"assignee" yaml:"assignee"`
+	SyncTask     bool   `json:"sync_task" yaml:"sync_task"`
 }
 
 type RecordCache struct {

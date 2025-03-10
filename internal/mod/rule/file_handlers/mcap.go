@@ -276,9 +276,10 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 		}
 
 		ruleItemChan <- rule_engine.RuleItem{
-			Msg:   decoded,
-			Ts:    utils.FloatSecFromTime(utils.TimeFromFloat(float64(msg.PublishTime))),
-			Topic: channel.Topic,
+			Msg:    decoded,
+			Ts:     utils.FloatSecFromTime(utils.TimeFromFloat(float64(msg.PublishTime))),
+			Topic:  channel.Topic,
+			Source: filepath,
 		}
 	}
 }

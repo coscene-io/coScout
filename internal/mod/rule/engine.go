@@ -17,6 +17,7 @@ package rule
 import (
 	"encoding/json"
 	"strconv"
+	"time"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"github.com/coscene-io/coscout/internal/api"
@@ -34,6 +35,11 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+const (
+	debounceMapSize     = 1000
+	debounceMaxDuration = 24 * time.Hour
+)
+
 // Engine represents the rule engine that processes messages against rules.
 type Engine struct {
 	reqClient  api.RequestClient
@@ -41,6 +47,8 @@ type Engine struct {
 
 	rules        []*rule_engine.Rule
 	activeTopics mapset.Set[string]
+
+	ruleDebounceTime map[string]*time.Time
 }
 
 // UpdateRules updates the rules in the rule engine.
@@ -106,7 +114,7 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 
 			if validatedRule.Topics.Cardinality() == 0 {
 				activeTopics = mapset.NewSet[string]()
-			} else if activeTopics.Cardinality() > 0 {
+			} else if validatedRule.Topics.Cardinality() > 0 {
 				activeTopics = activeTopics.Union(validatedRule.Topics)
 			}
 		}
@@ -138,7 +146,19 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 			"ts":    item.Ts,
 		}
 
-		if rule.EvalConditions(curActivation, utils.TimeFromFloat(item.Ts)) {
+		var prevActivationTime *time.Time
+		ruleName, ruleOk := rule.Metadata["rule_name"].(string)
+		if ruleOk && len(ruleName) > 0 {
+			prevActivationTime = e.ruleDebounceTime[ruleName]
+		}
+
+		msgTs := utils.TimeFromFloat(item.Ts)
+		isActive, activationTime := rule.EvalConditions(curActivation, prevActivationTime, msgTs)
+		if ruleOk && len(ruleName) > 0 {
+			e.ruleDebounceTime[ruleName] = activationTime
+		}
+
+		if isActive {
 			collectInfoId := uuid.New().String()
 			additionalArgs := map[string]interface{}{}
 			for k, v := range rule.Metadata {
@@ -150,6 +170,18 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 				if err := action.Run(curActivation, additionalArgs); err != nil {
 					log.Errorf("failed to run action %s: %v", action.Name, err)
 				}
+			}
+		}
+	}
+
+	e.cleanupDebounceTime()
+}
+
+func (e *Engine) cleanupDebounceTime() {
+	if len(e.ruleDebounceTime) > debounceMapSize {
+		for key, ts := range e.ruleDebounceTime {
+			if ts != nil && time.Since(*ts) > debounceMaxDuration {
+				delete(e.ruleDebounceTime, key)
 			}
 		}
 	}

@@ -506,9 +506,9 @@ EOF
 
       echo "Starting coLink service..."
       sudo systemctl is-active --quiet coLink && sudo systemctl stop coLink && sudo systemctl disable coLink && sudo rm -f /etc/systemd/system/coLink.service
-      sudo systemctl is-active --quiet colink && sudo systemctl stop colink && sudo systemctl disable colink && sudo rm -f /etc/systemd/system/colink.service
       sudo systemctl is-active --quiet virmesh && sudo systemctl stop virmesh && sudo systemctl disable virmesh && sudo rm -f /etc/systemd/system/virmesh.service
-      sudo systemctl is-active --quiet colink && sudo systemctl stop colink
+
+      sudo systemctl is-active --quiet colink && sudo systemctl stop colink && sudo systemctl disable colink
       sudo systemctl enable colink
       sudo systemctl start colink
       echo "Start coLink service done."
@@ -671,8 +671,8 @@ fi
 
 # Check if user specified local binary file
 if [[ -n $USE_LOCAL ]]; then
-  TMP_FILE="$TEMP_DIR/cos_binaries/cos/$OS-$ARCH.gz"
-  JSON_FILE="$TEMP_DIR/cos_binaries/cos/$OS-$ARCH.json"
+  TMP_FILE="$TEMP_DIR/cos_binaries/cos/$ARCH/$OS-$ARCH.gz"
+  JSON_FILE="$TEMP_DIR/cos_binaries/cos/$ARCH/$OS-$ARCH.json"
   if [[ ! -f $TMP_FILE || ! -f $JSON_FILE ]]; then
     echo "ERROR: Failed to find cos binary or JSON file. Exiting."
     exit 1

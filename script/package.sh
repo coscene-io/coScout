@@ -24,12 +24,12 @@ if [ ! -e "$TEMP_DIR" ]; then
   exit 1
 fi
 
-COLINK_VERSION="1.0.1"
+COLINK_VERSION="1.0.2"
 COS_VERSION="latest"
 TRZSZ_VERSION="1.1.6"
 
 SUPPORT_OS=("linux")
-SUPPORT_COS_ARCH=("x86_64" "arm64" "arm")
+SUPPORT_COS_ARCH=("amd64" "arm64" "arm")
 SUPPORT_MESH_ARCH=("amd64" "aarch64")
 
 MESH_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
