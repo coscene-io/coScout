@@ -396,6 +396,7 @@ func createRecordRelatedDiagnosisTasks(deviceInfo *openDpsV1alpha1Resource.Devic
 		State:       openDpsV1alpha1Enum.TaskStateEnum_PROCESSING,
 		Tags: map[string]string{
 			"recordName": recordName,
+			"totalFiles": strconv.Itoa(len(rc.OriginalFiles)),
 		},
 	}
 	diagnosisTaskDetail := openDpsV1alpha1Resource.DiagnosisTaskDetail{

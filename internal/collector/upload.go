@@ -143,6 +143,20 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 				}
 			}
 		}
+
+		if recordCache.DiagnosisTask != nil {
+			diagnosisTaskName, ok := recordCache.DiagnosisTask["name"].(string)
+			if ok && len(diagnosisTaskName) > 0 {
+				tags := make(map[string]string)
+				tags["uploadedFiles"] = strconv.Itoa(len(recordCache.UploadedFilePaths))
+
+				_, err := reqClient.AddTaskTags(diagnosisTaskName, tags)
+				if err != nil {
+					log.Errorf("failed to add task tags: %v", err)
+					return err
+				}
+			}
+		}
 	}
 
 	//nolint: nestif // no need to nest if
