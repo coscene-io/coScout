@@ -591,7 +591,8 @@ COS_SHELL_BASE="$CUR_USER_HOME/.local"
 # make some directories
 COS_CONFIG_DIR="$CUR_USER_HOME/.config/cos"
 COS_STATE_DIR="$CUR_USER_HOME/.local/state/cos"
-sudo -u "$CUR_USER" mkdir -p "$COS_CONFIG_DIR" "$COS_STATE_DIR" "$COS_SHELL_BASE/bin"
+COS_LOG_DIR="$CUR_USER_HOME/.local/state/cos/logs"
+sudo -u "$CUR_USER" mkdir -p "$COS_CONFIG_DIR" "$COS_STATE_DIR" "$COS_SHELL_BASE/bin" "$COS_LOG_DIR"
 
 # check provide serial number
 if [[ -n $SERIAL_NUM ]]; then
@@ -756,7 +757,7 @@ WorkingDirectory=$CUR_USER_HOME/.local/state/cos
 StandardOutput=syslog
 StandardError=syslog
 CPUQuota=10%
-ExecStart=$COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml
+ExecStart=$COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}
 SyslogIdentifier=cos
 RestartSec=60
 Restart=always
@@ -774,7 +775,7 @@ EOL
     sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user start cos
     echo "Start cos service done."
 
-    echo "Installation completed successfully 🎉, you can use 'journalctl --user-unit=cos -f -n 50' to check the logs."
+    echo "Installation completed successfully 🎉, you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
 
@@ -792,9 +793,9 @@ EOL
       fi
     fi
 
-    exec_command="exec $COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml"
+    exec_command="exec $COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}"
     if check_cgroup_tools; then
-      exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml"
+      exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}"
     fi
 
     sudo tee /etc/init/cos.conf >/dev/null <<EOF
@@ -855,7 +856,7 @@ EOF
     sudo initctl reload-configuration
     sudo initctl start $SERVICE_NAME
 
-    echo "Installation completed successfully 🎉, you can use 'tail -f /var/log/upstart/cos.log' to check the logs."
+    echo "Installation completed successfully 🎉, you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
   fi
 else
   echo "Skipping systemd service installation, just install cos binary..."

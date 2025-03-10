@@ -24,6 +24,7 @@ import (
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
 type RulesRequest struct {
@@ -31,7 +32,14 @@ type RulesRequest struct {
 }
 
 func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *http.Request) {
+	limiter := rate.NewLimiter(3, 10)
+
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !limiter.Allow() {
+			http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+			return
+		}
+
 		// Parse request
 		req := RulesRequest{}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

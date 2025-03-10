@@ -15,19 +15,24 @@
 package commands
 
 import (
+	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strconv"
 
 	"github.com/coscene-io/coscout"
+	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func NewCommand() *cobra.Command {
 	var (
-		cfgPath  = ""
-		logLevel = ""
+		cfgPath   = ""
+		logLevel  = ""
+		logFolder = ""
 	)
 
 	cmd := &cobra.Command{
@@ -50,12 +55,31 @@ func NewCommand() *cobra.Command {
 					return strconv.Itoa(frame.Line), fileName
 				},
 			})
+
+			if len(logFolder) > 0 && utils.CheckReadPath(logFolder) {
+				logFilepath := path.Join(logFolder, "cos.log")
+				logDir := filepath.Dir(logFilepath)
+				if err := os.MkdirAll(logDir, 0755); err != nil {
+					log.Fatalf("Failed to create log directory: %v", err)
+				}
+
+				log.SetOutput(&lumberjack.Logger{
+					Filename:   logFilepath,
+					MaxSize:    20,
+					MaxBackups: 5,
+					MaxAge:     30,
+					Compress:   false,
+					LocalTime:  true,
+				})
+			}
 		},
 		Version: coscout.GetVersion(),
 	}
 
-	cmd.PersistentFlags().StringVarP(&cfgPath, "config-path", "c", "$HOME/.config/cos/config.yaml", "config path")
+	defaultConfigPath := path.Join("$HOME", ".config", "cos", "config.yaml")
+	cmd.PersistentFlags().StringVarP(&cfgPath, "config-path", "c", defaultConfigPath, "config path")
 	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "set the logging level, one of: debug|info|warn|error")
+	cmd.PersistentFlags().StringVarP(&logFolder, "log-dir", "l", "", "log file directory")
 
 	cmd.AddCommand(NewVersionCommand())
 	cmd.AddCommand(NewDaemonCommand(&cfgPath))
