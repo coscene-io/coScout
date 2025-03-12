@@ -24,7 +24,7 @@ if [ ! -e "$TEMP_DIR" ]; then
   exit 1
 fi
 
-COLINK_VERSION="1.0.2"
+COLINK_VERSION="1.0.3"
 COS_VERSION="latest"
 TRZSZ_VERSION="1.1.6"
 
