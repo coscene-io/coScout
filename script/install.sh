@@ -97,12 +97,6 @@ if ! command -v tar &>/dev/null; then
   exit 1
 fi
 
-# Check if nc installed
-if ! command -v nc &>/dev/null; then
-  echo_error "nc is required but not installed. Please install it using: 'sudo apt-get install -y netcat'" >&2
-  exit 1
-fi
-
 # default value
 DEFAULT_IMPORT_CONFIG=cos://organizations/current/configMaps/device.collector
 
@@ -122,11 +116,9 @@ SERIAL_NUM=""
 USE_32BIT=0
 SKIP_VERIFY_CERT=0
 COLINK_ENDPOINT=""
-SSH_PORT=""
-CONTROL_PORT=""
 
-COLINK_VERSION=1.0.2
-ARTIFACT_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
+COLINK_VERSION=1.0.3
+ARTIFACT_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com
 COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/colink/v${COLINK_VERSION}/colink-${COLINK_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${COLINK_ARCH}.tar.gz
 
@@ -155,8 +147,6 @@ usage: $0 [OPTIONS]
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
     --skip_verify_cert      Skip verify certificate when download files
-    --ssh_port              The port of the local ssh service
-    --control_port          The port of the local control service
 EOF
 }
 
@@ -265,14 +255,6 @@ while test $# -gt 0; do
     ;;
   --coLink_network=*)
     COLINK_NETWORK="${1#*=}"
-    shift
-    ;;
-  --ssh_port=*)
-    SSH_PORT="${1#*=}"
-    shift
-    ;;
-  --control_port=*)
-    CONTROL_PORT="${1#*=}"
     shift
     ;;
   --use_32bit)
@@ -448,42 +430,6 @@ else
   chmod -R +x "$TEMP_DIR"/trzsz
   sudo mv -f "$TEMP_DIR"/trzsz/* /usr/local/bin/
   rm -rf "$TEMP_DIR"/trzsz.tar.gz
-
-  if [ -z "$SSH_PORT" ]; then
-    # auto detect running ssh port
-    if command -v netstat &> /dev/null; then
-      SSH_PORT=$(sudo netstat -tlnp | grep sshd | head -1 | awk '{print $4}' | awk -F: '{print $2}')
-    elif command -v ss &> /dev/null; then
-      SSH_PORT=$(sudo ss -tlnp | grep sshd | head -1 | awk '{print $4}' | awk -F: '{print $2}')
-    elif command -v lsof &> /dev/null; then
-      SSH_PORT=$(sudo lsof -i -nP | grep sshd | grep LISTEN | grep IPv4 | head -1 | awk '{print $9}' | awk -F: '{print $2}')
-    else
-      echo_error "Unable to detect running ssh port, please specify --ssh_port manually."
-      exit 1
-    fi
-    # check if SSH_PORT is a valid port number
-    if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] ; then
-      echo_error "Invalid port number: $SSH_PORT"
-      echo_error "Unable to detect running ssh port, please specify --ssh_port manually."
-      exit 1
-    fi
-  fi
-
-  if [ -z "$CONTROL_PORT" ]; then
-    CONTROL_PORT=18880
-    while [ $CONTROL_PORT -le 30000 ]; do
-      if ! nc -z 127.0.0.1 $CONTROL_PORT; then
-        break
-      fi
-      CONTROL_PORT=$((CONTROL_PORT + 1))
-    done
-    if [ $CONTROL_PORT -gt 30000 ]; then
-      echo_error "Unable to find a free port for colink control api, please specify --control_port manually."
-      exit 1
-    fi
-  fi
-
-
   # check systemd or upstart service
   if [[ $DISABLE_SERVICE -eq 0 ]]; then
     if [[ "$(ps --no-headers -o comm 1 2>&1)" == "systemd" ]] && command -v systemctl 2>&1; then
@@ -495,7 +441,7 @@ Description=coLink Client Daemon
 
 [Service]
 WorkingDirectory=/etc
-ExecStart=/usr/local/bin/colink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh --ssh-port ${SSH_PORT} --control-port ${CONTROL_PORT}
+ExecStart=/usr/local/bin/colink daemon --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
 Restart=always
 RestartSec=30
 
