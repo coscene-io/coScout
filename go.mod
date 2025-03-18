@@ -15,6 +15,7 @@ require (
 	github.com/google/cel-go v0.22.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
+	github.com/itchyny/timefmt-go v0.1.6
 	github.com/knadh/koanf v1.5.0
 	github.com/minio/minio-go/v7 v7.0.61
 	github.com/oriser/regroup v0.0.0-20210730155327-fca8d7531263
@@ -25,7 +26,9 @@ require (
 	github.com/spf13/cobra v1.8.1
 	go.etcd.io/bbolt v1.3.11
 	golang.org/x/sys v0.27.0
+	golang.org/x/time v0.3.0
 	google.golang.org/protobuf v1.36.3
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -39,7 +42,6 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/itchyny/timefmt-go v0.1.6 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect

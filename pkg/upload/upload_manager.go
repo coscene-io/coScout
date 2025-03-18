@@ -103,11 +103,13 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 
 func (u *Manager) handleUploadProgress() {
 	fileInfos := make(map[string]int64)
+	progressMilestones := []float64{0, 25, 50, 75, 90, 100}
 
 	for progress := range u.uploadProgressChan {
 		uploadKey := "upload:" + progress.Name
 		totalKey := "total:" + progress.Name
 
+		prevPercent := float64(fileInfos[uploadKey]) / float64(fileInfos[totalKey]) * 100
 		if progress.Uploaded > 0 {
 			diff := progress.Uploaded - fileInfos[uploadKey]
 			if diff > 0 {
@@ -128,7 +130,12 @@ func (u *Manager) handleUploadProgress() {
 		}
 
 		uploadedPercent := float64(fileInfos[uploadKey]) / float64(fileInfos[totalKey]) * 100
-		log.Infof("File: %s, uploaded: %d, total: %d, percent: %.1f", progress.Name, fileInfos[uploadKey], fileInfos[totalKey], uploadedPercent)
+		for _, milestone := range progressMilestones {
+			if prevPercent < milestone && uploadedPercent >= milestone {
+				log.Infof("File: %s, uploaded: %d, total: %d, percent: %.1f", progress.Name, fileInfos[uploadKey], fileInfos[totalKey], uploadedPercent)
+				break
+			}
+		}
 
 		if uploadedPercent >= 100 {
 			delete(fileInfos, uploadKey)
