@@ -32,7 +32,7 @@ SUPPORT_OS=("linux")
 SUPPORT_COS_ARCH=("amd64" "arm64" "arm")
 SUPPORT_MESH_ARCH=("amd64" "aarch64")
 
-MESH_BASE_URL=https://coscene-artifacts-production.oss-cn-hangzhou.aliyuncs.com
+MESH_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com
 COS_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com/coscout/v2
 
 # get user input
