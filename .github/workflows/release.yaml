@@ -136,7 +136,7 @@ jobs:
 
       - name: Replace download link in script/install.sh
         run: |
-            sed -i "s#https://download.coscene.cn#https://coscene-download.s3.us-east-1.amazonaws.com/#g" script/install.sh
+            sed -i "s#https://download.coscene.cn#https://coscene-download.s3.us-east-1.amazonaws.com#g" script/install.sh
 
       - name: Upload to S3
         run: |
