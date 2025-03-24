@@ -118,7 +118,7 @@ SKIP_VERIFY_CERT=0
 COLINK_ENDPOINT=""
 
 COLINK_VERSION=1.0.3
-ARTIFACT_BASE_URL=https://coscene-download.oss-cn-hangzhou.aliyuncs.com
+ARTIFACT_BASE_URL=https://download.coscene.cn
 COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/colink/v${COLINK_VERSION}/colink-${COLINK_ARCH}
 TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${COLINK_ARCH}.tar.gz
 
@@ -132,18 +132,18 @@ help() {
 usage: $0 [OPTIONS]
 
     --help                  Show this message
-    --server_url            Api server url, e.g. https://openapi.coscene.cn
+    --server_url            Api server url
     --project_slug          The slug of the project to upload to
     --org_slug              The slug of the organization device belongs to, project_slug or org_slug should be provided
     --remove_config         Remove all config files, current device will be treated as a new device
     --beta                  Use beta version for cos
-    --use_local             Use local binary file zip path e.g. /xx/path/xx.zip
+    --use_local             Use local binary file zip path e.g. /xx/path/cos_binaries.tar.gz
     --disable_service       Disable systemd or upstart service installation
-    --mod                   Select the mod to install - task, default or other custom mod (default is 'default')
+    --mod                   Select the mod to install - task, default or other mod (default is 'default')
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
     --serial_num            The serial number of the device, will skip sn_field and sn_file if provided
-    --coLink_endpoint       coLink endpoint, e.g. https://api.mesh.staging.coscene.cn/mesh, will skip if not provided
+    --coLink_endpoint       coLink endpoint, will skip if not provided
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
     --skip_verify_cert      Skip verify certificate when download files
@@ -518,10 +518,10 @@ if [[ $REMOVE_CONFIG -eq 1 ]]; then
 fi
 
 # set some variables
-LATEST_COS_URL="https://download.coscene.cn/coscout/v2/latest/$OS-$ARCH.gz"
-BETA_COS_URL="https://download.coscene.cn/coscout/v2/beta/$OS-$ARCH.gz"
-LATEST_COS_INFO_URL="https://download.coscene.cn/coscout/v2/latest/$OS-$ARCH.json"
-BETA_COS_INFO_URL="https://download.coscene.cn/coscout/v2/beta/$OS-$ARCH.json"
+LATEST_COS_URL="${ARTIFACT_BASE_URL}/coscout/v2/latest/$OS-$ARCH.gz"
+BETA_COS_URL="${ARTIFACT_BASE_URL}/coscout/v2/beta/$OS-$ARCH.gz"
+LATEST_COS_INFO_URL="${ARTIFACT_BASE_URL}/coscout/v2/latest/$OS-$ARCH.json"
+BETA_COS_INFO_URL="${ARTIFACT_BASE_URL}/coscout/v2/beta/$OS-$ARCH.json"
 
 DEFAULT_INFO_URL="$LATEST_COS_INFO_URL"
 DEFAULT_BINARY_URL="$LATEST_COS_URL"
@@ -691,7 +691,7 @@ if [[ $DISABLE_SERVICE -eq 0 ]]; then
     sudo -u "$CUR_USER" tee "$USER_SYSTEMD_DIR"/cos.service >/dev/null <<EOL
 [Unit]
 Description=coScout: Data Collector by coScene
-Documentation=https://github.com/coscene-io/sample-json-api-files
+Documentation=https://github.com/coscene-io/coScout
 Wants=network-online.target
 After=network.target network-online.target
 StartLimitBurst=10

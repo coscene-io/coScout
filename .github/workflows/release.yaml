@@ -51,8 +51,10 @@ jobs:
         run: |
           if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
             echo "IS_RELEASE=true" >> $GITHUB_ENV
+            echo "VERSION_TAG=latest" >> $GITHUB_ENV
           else
             echo "IS_RELEASE=false" >> $GITHUB_ENV
+            echo "VERSION_TAG=beta" >> $GITHUB_ENV
           fi
       - name: Checkout
         uses: actions/checkout@v4
@@ -131,3 +133,17 @@ jobs:
             cos.gz:/coscout/v2/beta/${{ matrix.os }}-${{ matrix.arch }}.gz
             ${{ matrix.os }}-${{ matrix.arch }}.json:/coscout/v2/beta/${{ matrix.os }}-${{ matrix.arch }}.json
             script/install.sh:/coscout/v2/install-beta.sh
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp cos.gz s3://coscene-download/coscout/v2/${{ env.VERSION_TAG }}/${{ matrix.os }}-${{ matrix.arch }}.gz
+          aws s3 cp ${{ matrix.os }}-${{ matrix.arch }}.json s3://coscene-download/coscout/v2/${{ env.VERSION_TAG }}/${{ matrix.os }}-${{ matrix.arch }}.json
+          if [ "${{ env.IS_RELEASE }}" == "true" ]; then
+            aws s3 cp script/install.sh s3://coscene-download/coscout/v2/install.sh
+          else
+            aws s3 cp script/install.sh s3://coscene-download/coscout/v2/install-beta.sh
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ARTIFACTS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_ARTIFACTS_ACCESS_SECRET }}
+          AWS_DEFAULT_REGION: 'us-east-1'
