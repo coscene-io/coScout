@@ -40,3 +40,14 @@ jobs:
             /home/runner/cos_binaries_arm64.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm64.tar.gz
             /home/runner/cos_binaries_arm.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm.tar.gz
             /home/runner/cos_binaries_x86_64.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_x86_64.tar.gz
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp /home/runner/cos_binaries.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries.tar.gz
+          aws s3 cp /home/runner/cos_binaries_arm64.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm64.tar.gz
+          aws s3 cp /home/runner/cos_binaries_arm.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm.tar.gz
+          aws s3 cp /home/runner/cos_binaries_x86_64.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_x86_64.tar.gz
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ARTIFACTS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_ARTIFACTS_ACCESS_SECRET }}
+          AWS_DEFAULT_REGION: 'us-east-1'
