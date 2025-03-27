@@ -558,6 +558,10 @@ func getRecordDescription(title string, rc *model.RecordCache) string {
 }
 
 func checkRecordCacheExpired(expiredHours int, timestamp int64, rcPath string) bool {
+	if expiredHours < 0 {
+		return false
+	}
+
 	fileTime := time.UnixMilli(timestamp)
 	if time.Since(fileTime).Hours() > float64(expiredHours) {
 		parentFolder := utils.GetParentFolder(utils.GetParentFolder(rcPath))
