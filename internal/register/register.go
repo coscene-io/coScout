@@ -80,7 +80,20 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 				continue
 			}
 
-			isSucceed, localDevice := r.registerDevice(modRegister.GetDevice())
+			getDevice := modRegister.GetDevice()
+			if getDevice == nil {
+				log.Warnf("failed to get device from config")
+
+				channel <- DeviceStatusResponse{
+					Authorized: false,
+					Exist:      false,
+				}
+
+				time.Sleep(config.DeviceAuthCheckInterval)
+				continue
+			}
+
+			isSucceed, localDevice := r.registerDevice(getDevice)
 			if !isSucceed {
 				channel <- DeviceStatusResponse{
 					Authorized: false,
