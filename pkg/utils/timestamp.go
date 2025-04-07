@@ -19,29 +19,33 @@ import (
 )
 
 // NormalizeFloatTimestamp normalizes a floating-point timestamp to seconds and nanoseconds.
+// keep the precision of the timestamp with microseconds precision.
 func NormalizeFloatTimestamp(timestamp float64) (int64, int32) {
 	switch {
 	case timestamp >= 1_000_000_000_000_000_000:
 		// timestamp in nanoseconds
 		sec := int64(timestamp / 1_000_000_000)
-		nsec := int64(timestamp) % 1_000_000_000
+		nsec := (int64(timestamp/1000) - sec*1_000_000) * 1_000
 		//nolint: gosec // ignore int64 to int32 conversion
 		return sec, int32(nsec)
 	case timestamp >= 1_000_000_000_000_000:
 		// timestamp in microseconds
 		sec := int64(timestamp / 1_000_000)
-		nsec := int64(timestamp) % 1_000_000 * 1_000
+		nsec := (int64(timestamp) - sec*1_000_000) * 1_000
 		//nolint: gosec // ignore int64 to int32 conversion
 		return sec, int32(nsec)
 	case timestamp >= 1_000_000_000_000:
 		// timestamp in milliseconds
 		sec := int64(timestamp / 1_000)
-		nsec := int64(timestamp) % 1_000 * 1_000_000
+		nsec := (int64(timestamp*1_000) - sec*1_000_000) * 1_000
 		//nolint: gosec // ignore int64 to int32 conversion
 		return sec, int32(nsec)
 	default:
-		// timestamp in seconds
-		return int64(timestamp), 0
+		// timestamp in seconds, with microseconds precision
+		sec := int64(timestamp)
+		nsec := (int64(timestamp*1000_000) - sec*1_000_000) * 1_000
+		//nolint: gosec // ignore int64 to int32 conversion
+		return sec, int32(nsec)
 	}
 }
 
