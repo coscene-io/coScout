@@ -5,6 +5,8 @@ import (
 )
 
 func TestNormalizeFloatTimestamp(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name      string
 		timestamp float64
@@ -57,6 +59,7 @@ func TestNormalizeFloatTimestamp(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			gotSec, gotNsec := NormalizeFloatTimestamp(tt.timestamp)
 			if gotSec != tt.wantSec {
 				t.Errorf("NormalizeFloatTimestamp() gotSec = %v, want %v", gotSec, tt.wantSec)
