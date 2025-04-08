@@ -16,6 +16,7 @@ package register
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 
@@ -70,6 +71,11 @@ func (f *FileModRegister) GetDevice() *openDpsV1alpha1Resource.Device {
 			return nil
 		}
 
+		if deviceID == "" {
+			log.Errorf("get empty device id from structured file: %s", f.conf.SnFile)
+			return nil
+		}
+
 		return &openDpsV1alpha1Resource.Device{
 			DisplayName:  deviceID,
 			SerialNumber: deviceID,
@@ -84,6 +90,12 @@ func (f *FileModRegister) GetDevice() *openDpsV1alpha1Resource.Device {
 		log.Errorf("failed to get device from text file: %v", err)
 		return nil
 	}
+
+	if deviceID == "" {
+		log.Errorf("get empty device id from text file: %s", f.conf.SnFile)
+		return nil
+	}
+
 	return &openDpsV1alpha1Resource.Device{
 		DisplayName:  deviceID,
 		SerialNumber: deviceID,
@@ -109,12 +121,13 @@ func getDeviceFromStructuredFile(snFile, snField string) (string, error) {
 		return "", errors.Wrap(err, "failed to parse device file")
 	}
 
-	deviceID, ok := result[snField].(string)
+	deviceID, ok := result[snField]
 	if !ok {
 		return "", errors.Wrap(err, "field not found or not a string")
 	}
 
-	return strings.TrimSpace(deviceID), nil
+	deviceIDStr := fmt.Sprintf("%v", deviceID)
+	return strings.TrimSpace(deviceIDStr), nil
 }
 
 func getDeviceFromText(snFile string) (string, error) {
