@@ -193,6 +193,11 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 	for {
 		select {
 		case msg := <-messages:
+			if msg == nil {
+				log.Warn("received nil message")
+				continue
+			}
+
 			item := rule_engine.RuleItem{}
 			err := json.Unmarshal(msg.Payload, &item)
 			if err != nil {

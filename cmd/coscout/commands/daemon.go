@@ -40,10 +40,10 @@ func NewDaemonCommand(cfgPath *string) *cobra.Command {
 			appConf := confManager.LoadOnce()
 			log.Infof("Load config file from %s", *cfgPath)
 
+			registerChan := make(chan model.DeviceStatusResponse, 1)
 			networkChan := make(chan *model.NetworkUsage, 100)
-			reqClient := api.NewRequestClient(appConf.Api, storageDB, networkChan)
+			reqClient := api.NewRequestClient(appConf.Api, storageDB, networkChan, registerChan)
 
-			registerChan := make(chan register.DeviceStatusResponse, 1)
 			reg := register.NewRegister(*reqClient, appConf, storageDB)
 			go reg.CheckOrRegisterDevice(registerChan)
 
@@ -60,7 +60,7 @@ func NewDaemonCommand(cfgPath *string) *cobra.Command {
 	return cmd
 }
 
-func run(confManager *config.ConfManager, reqClient *api.RequestClient, registerChan chan register.DeviceStatusResponse) {
+func run(confManager *config.ConfManager, reqClient *api.RequestClient, registerChan chan model.DeviceStatusResponse) {
 	startChan := make(chan bool, 1)
 	exitChan := make(chan bool, 1)
 	errorChan := make(chan error, 100)

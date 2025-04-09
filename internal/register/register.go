@@ -23,6 +23,7 @@ import (
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/pkg/errors"
@@ -45,11 +46,6 @@ func NewModRegister(conf config.RegisterConfig) (ModRegister, error) {
 	return nil, errors.New("invalid register provider")
 }
 
-type DeviceStatusResponse struct {
-	Authorized bool `json:"authorized"`
-	Exist      bool `json:"exist"`
-}
-
 type Register struct {
 	reqClient api.RequestClient
 	config    config.AppConfig
@@ -64,14 +60,14 @@ func NewRegister(reqClient api.RequestClient, config config.AppConfig, storage s
 	}
 }
 
-func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
+func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusResponse) {
 	for {
 		device := core.GetDeviceInfo(&r.storage)
 		// If device is not registered, register it
 		if device == nil || device.GetName() == "" {
 			modRegister, err := NewModRegister(r.config.Register)
 			if err != nil {
-				channel <- DeviceStatusResponse{
+				channel <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      false,
 				}
@@ -84,7 +80,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			if getDevice == nil {
 				log.Warnf("failed to get device from config")
 
-				channel <- DeviceStatusResponse{
+				channel <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      false,
 				}
@@ -95,7 +91,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 
 			isSucceed, localDevice := r.registerDevice(getDevice)
 			if !isSucceed {
-				channel <- DeviceStatusResponse{
+				channel <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      false,
 				}
@@ -111,7 +107,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 		// check device status
 		exist, state, err := r.getRemoteDeviceStatus(device.GetName())
 		if err != nil {
-			channel <- DeviceStatusResponse{
+			channel <- model.DeviceStatusResponse{
 				Authorized: false,
 				Exist:      false,
 			}
@@ -121,7 +117,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 		}
 
 		if !exist {
-			channel <- DeviceStatusResponse{
+			channel <- model.DeviceStatusResponse{
 				Authorized: false,
 				Exist:      false,
 			}
@@ -132,7 +128,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 		}
 
 		if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_REJECTED {
-			channel <- DeviceStatusResponse{
+			channel <- model.DeviceStatusResponse{
 				Authorized: false,
 				Exist:      true,
 			}
@@ -152,7 +148,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 		}
 
 		if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_PENDING {
-			channel <- DeviceStatusResponse{
+			channel <- model.DeviceStatusResponse{
 				Authorized: false,
 				Exist:      true,
 			}
@@ -167,7 +163,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 			// Check device auth token
 			valid := r.checkAuthToken()
 			if valid {
-				channel <- DeviceStatusResponse{
+				channel <- model.DeviceStatusResponse{
 					Authorized: true,
 					Exist:      true,
 				}
@@ -178,12 +174,12 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- DeviceStatusResponse) {
 
 			isSucceed := r.exchangeAuthToken(device.GetName())
 			if !isSucceed {
-				channel <- DeviceStatusResponse{
+				channel <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      true,
 				}
 			} else {
-				channel <- DeviceStatusResponse{
+				channel <- model.DeviceStatusResponse{
 					Authorized: true,
 					Exist:      true,
 				}

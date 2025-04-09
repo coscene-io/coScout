@@ -133,6 +133,11 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 		case <-ctx.Done():
 			return
 		case msg := <-messages:
+			if msg == nil {
+				log.Warn("received nil collect message, skip")
+				continue
+			}
+
 			log.Infof("Received collect message, start collecting for upload")
 			msg.Ack()
 
