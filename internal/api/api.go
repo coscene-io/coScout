@@ -61,7 +61,7 @@ type RequestClient struct {
 	diagCli          openDpsV1alpha1Connect.DiagnosisRuleServiceClient
 }
 
-func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, networkChan chan *model.NetworkUsage) *RequestClient {
+func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, networkChan chan *model.NetworkUsage, registerChan chan model.DeviceStatusResponse) *RequestClient {
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -72,7 +72,10 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 		},
 		Timeout: 30 * time.Second,
 	}
-	interceptors := connect.WithInterceptors(interceptor.NetworkUsageInterceptor(networkChan))
+	interceptors := connect.WithInterceptors(
+		interceptor.NetworkUsageInterceptor(networkChan),
+		interceptor.AuthInterceptor(storage, registerChan),
+	)
 
 	deviceClient := openDpsV1alpha1Connect.NewDeviceServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
 	configClient := openDpsV1alpha1Connect.NewConfigMapServiceClient(httpClient, apiConfig.ServerURL, connect.WithGRPC(), interceptors)
