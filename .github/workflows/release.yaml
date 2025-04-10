@@ -143,9 +143,9 @@ jobs:
           aws s3 cp cos.gz s3://coscene-download/coscout/v2/${{ env.VERSION_TAG }}/${{ matrix.os }}-${{ matrix.arch }}.gz
           aws s3 cp ${{ matrix.os }}-${{ matrix.arch }}.json s3://coscene-download/coscout/v2/${{ env.VERSION_TAG }}/${{ matrix.os }}-${{ matrix.arch }}.json
           if [ "${{ env.IS_RELEASE }}" == "true" ]; then
-            aws s3 cp script/install.sh s3://coscene-download/coscout/v2/install.sh
+            aws s3 cp script/install.sh s3://coscene-download/coscout/v2/install.sh --content-type application/x-sh
           else
-            aws s3 cp script/install.sh s3://coscene-download/coscout/v2/install-beta.sh
+            aws s3 cp script/install.sh s3://coscene-download/coscout/v2/install-beta.sh --content-type application/x-sh
           fi
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ARTIFACTS_ACCESS_KEY }}
