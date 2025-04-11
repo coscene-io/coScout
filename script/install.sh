@@ -24,10 +24,15 @@ set -Eeuo pipefail
 
 # ANSI color codes
 RED='\033[0;31m'
+GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
 echo_error() {
     echo -e "${RED}$*${NC}" >&2
+}
+
+echo_info() {
+    echo -e "${GREEN}$*${NC}"
 }
 
 # Error handling function
@@ -298,13 +303,13 @@ echo "User home directory: $CUR_USER_HOME"
 # get user input
 echo ""
 get_user_input SERVER_URL "please input server_url: " "${SERVER_URL}"
-echo "server_url is ${SERVER_URL}"
-echo "org_slug is ${ORG_SLUG}"
-echo "project_slug is ${PROJECT_SLUG}"
-echo "coLink_endpoint is ${COLINK_ENDPOINT}"
-echo "sn_file is ${SN_FILE}"
-echo "sn_field is ${SN_FIELD}"
-echo "serial_num is ${SERIAL_NUM}"
+echo "server_url:      ${SERVER_URL}"
+echo "org_slug:        ${ORG_SLUG}"
+echo "project_slug:    ${PROJECT_SLUG}"
+echo "coLink_endpoint: ${COLINK_ENDPOINT}"
+echo "sn_file:         ${SN_FILE}"
+echo "sn_field:        ${SN_FIELD}"
+echo "serial_num:      ${SERIAL_NUM}"
 
 # check org_slug and project_slug
 # Check if both ORG_SLUG and PROJECT_SLUG are empty
@@ -435,7 +440,6 @@ else
     if [[ "$(ps --no-headers -o comm 1 2>&1)" == "systemd" ]] && command -v systemctl 2>&1; then
       echo "Installing systemd service..."
       sudo tee /etc/systemd/system/colink.service >/dev/null <<EOF
-
 [Unit]
 Description=coLink Client Daemon
 
@@ -692,16 +696,12 @@ if [[ $DISABLE_SERVICE -eq 0 ]]; then
 [Unit]
 Description=coScout: Data Collector by coScene
 Documentation=https://github.com/coscene-io/coScout
-Wants=network-online.target
-After=network.target network-online.target
 StartLimitBurst=10
 StartLimitIntervalSec=86400
 
 [Service]
 Type=simple
 WorkingDirectory=$CUR_USER_HOME/.local/state/cos
-StandardOutput=syslog
-StandardError=syslog
 CPUQuota=10%
 ExecStart=$COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}
 SyslogIdentifier=cos
@@ -712,16 +712,36 @@ Restart=always
 WantedBy=default.target
 EOL
     echo "Created cos.service systemd file: $USER_SYSTEMD_DIR/cos.service"
+
+    echo ""
     echo "Starting cos service for $CUR_USER..."
 
     XDG_RUNTIME_DIR="/run/user/$(id -u "${CUR_USER}")"
-    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user daemon-reload
-    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user is-active --quiet cos && sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user stop cos
-    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user enable cos
-    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user start cos
-    echo "Start cos service done."
+    echo "Setting XDG_RUNTIME_DIR to $XDG_RUNTIME_DIR for user $CUR_USER"
 
-    echo "Installation completed successfully 🎉, you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
+    echo "Reloading systemd daemon..."
+    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user daemon-reload
+
+    echo "Checking if cos service is running..."
+    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user is-active --quiet cos && sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user stop cos && sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user disable cos
+    
+    echo "Enabling cos service..."
+    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user enable cos
+    
+    echo "Starting cos service..."
+    if sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user start cos; then 
+      echo "Cos service started successfully."
+    else
+      echo_error "Cos service failed to start."
+
+      echo_error "Checking service status for more details..."
+      sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user status cos || true
+      echo_error "Checking journal logs for more details..."
+      sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" journalctl --user -xe -u cos --no-pager | tail -n 50
+    fi
+    
+    echo ""
+    echo_info "🎉 Installation completed successfully , you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
   elif /sbin/init --version 2>&1 | grep -q upstart; then
     echo "Installing cos upstart service..."
 
@@ -802,11 +822,11 @@ EOF
     sudo initctl reload-configuration
     sudo initctl start $SERVICE_NAME
 
-    echo "Installation completed successfully 🎉, you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
+    echo_info "🎉 Installation completed successfully, you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
   fi
 else
   echo "Skipping systemd service installation, just install cos binary..."
 fi
 
-echo "Successfully installed cos."
+echo_info "Successfully installed cos."
 exit 0
