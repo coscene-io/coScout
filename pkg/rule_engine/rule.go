@@ -68,6 +68,7 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, prevActivationT
 		}
 	}
 
+	log.Infof("Rule %s: all conditions met, check debounce time", r.Metadata["rule_display_name"])
 	// If no debounce time set, return true
 	if r.DebounceTime <= 0 {
 		return true, &ts

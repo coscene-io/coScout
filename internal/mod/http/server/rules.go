@@ -48,6 +48,12 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 			return
 		}
 
+		if len(req.Messages) == 0 {
+			http.Error(w, "No messages in request", http.StatusBadRequest)
+			return
+		}
+
+		log.Infof("Received %d messages from colistener", len(req.Messages))
 		// Publish messages
 		for _, message := range req.Messages {
 			message.Source = "http"
@@ -63,7 +69,7 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 				continue
 			}
 
-			log.Infof("Published topic messages: %+v", message)
+			log.Debugf("Received request message: %s", string(data))
 		}
 
 		bytes, err := json.Marshal(map[string]string{"status": "ok"})
