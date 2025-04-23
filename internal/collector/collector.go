@@ -79,37 +79,48 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 	defer ticker.Stop()
 
 	go func(t *time.Ticker) {
-		defer log.Warn("collector ticker stopped")
+		defer log.Warn("Collector ticker stopped")
 		for {
 			select {
 			case <-t.C:
 				select {
 				case triggerChan <- struct{}{}:
+					log.Infof("Collector ticker triggered upload")
 				default: // Skip if there's already a pending trigger
 				}
 			case <-ctx.Done():
+				log.Infof("Collector ticker goroutine done")
 				return
 			}
 		}
 	}(ticker)
 
 	go func() {
-		defer log.Warn("collector goroutine stopped")
+		defer log.Warn("Collector goroutine stopped")
 		for {
 			select {
 			case <-ctx.Done():
+				log.Infof("Collector goroutine done")
 				return
 			case <-triggerChan:
-				appConfig := confManager.LoadWithRemote()
-				getStorage := confManager.GetStorage()
-
 				//nolint: contextcheck // context is checked in the parent goroutine
-				err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
-				if err != nil {
-					errorChan <- err
-				}
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Errorf("Collector goroutine panic: %v", r)
+						}
+					}()
 
-				time.Sleep(1 * time.Second)
+					appConfig := confManager.LoadWithRemote()
+					getStorage := confManager.GetStorage()
+
+					err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
+					if err != nil {
+						errorChan <- err
+					}
+
+					time.Sleep(1 * time.Second)
+				}()
 			}
 		}
 	}()
@@ -131,6 +142,7 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 	for {
 		select {
 		case <-ctx.Done():
+			log.Warnf("trigger upload context done")
 			return
 		case msg := <-messages:
 			if msg == nil {
@@ -145,6 +157,7 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 
 			select {
 			case triggerChan <- struct{}{}:
+				log.Infof("Received collect message, trigger upload")
 			default: // Skip if there's already a pending trigger
 			}
 		}
@@ -204,7 +217,12 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 		createRelatedRecordResources(deviceInfo, &rc, reqClient, config.Device)
 
 		if rcName, ok := rc.Record["name"].(string); ok && rcName != "" {
-			uploadChan <- &rc
+			select {
+			case uploadChan <- &rc:
+				log.Infof("Record cache %s is ready to upload", rcName)
+			default:
+				log.Infof("Upload channel is full, skip uploading record cache %s", rcName)
+			}
 		}
 	}
 	log.Infof("Finish collecting record caches")

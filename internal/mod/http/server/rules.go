@@ -62,8 +62,9 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 				log.Errorf("Failed to publish message: %v", err)
 				continue
 			}
+
+			log.Infof("Published topic messages: %+v", message)
 		}
-		log.Infof("Published %d messages", len(req.Messages))
 
 		bytes, err := json.Marshal(map[string]string{"status": "ok"})
 		if err != nil {

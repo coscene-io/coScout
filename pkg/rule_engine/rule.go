@@ -19,6 +19,7 @@ import (
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	mapset "github.com/deckarep/golang-set/v2"
+	log "github.com/sirupsen/logrus"
 )
 
 func AllowedVersions() []string {
@@ -62,6 +63,7 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, prevActivationT
 	// Check all conditions
 	for _, cond := range r.Conditions {
 		if !cond.Evaluate(activation) {
+			log.Debugf("Rule %s: condition %s not met", r.Metadata["rule_display_name"], cond.Raw)
 			return false, prevActivationTime
 		}
 	}
@@ -80,6 +82,7 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, prevActivationT
 	case ts.Sub(*prevActivationTime) > r.DebounceTime:
 		return true, &ts
 	default:
+		log.Infof("Rule %s: debounce time not met", r.Metadata["rule_display_name"])
 		return false, &ts
 	}
 }

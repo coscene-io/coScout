@@ -43,6 +43,8 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 		for {
 			select {
 			case err := <-c:
+				log.Errorf("runtime error: %v", err)
+
 				lastError.Err = err
 				lastError.Timestamp = time.Now().Unix()
 			case <-ctx.Done():
