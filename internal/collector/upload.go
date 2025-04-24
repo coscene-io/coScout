@@ -238,6 +238,10 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
 	log.Infof("prepare to upload file %s", fileInfo.Path)
+	if fileInfo.Path == "" {
+		log.Warn("file path is empty")
+		return errors.New("file path is empty")
+	}
 
 	cachedFileInfo := getCacheFileInfo(storage, fileInfo.Path)
 	if fileInfo.Size <= 0 {
@@ -290,6 +294,14 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 	if err != nil {
 		log.Errorf("unable to generate security token: %v", err)
 		return err
+	}
+	if generateSecurityTokenRes == nil {
+		log.Errorf("generate security token response is nil")
+		return errors.New("generate security token response is nil")
+	}
+	if generateSecurityTokenRes.GetEndpoint() == "" {
+		log.Errorf("generate security token endpoint is empty")
+		return errors.New("generate security token endpoint is empty")
 	}
 
 	transport := &http.Transport{
