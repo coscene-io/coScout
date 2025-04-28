@@ -25,6 +25,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
@@ -75,12 +77,17 @@ func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucke
 // FPutObject uploads a file to a bucket with a key and sha256.
 // If the file size is larger than minPartSize, it will use multipart upload.
 func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize int64, userTags map[string]string) error {
+	log.Infof("Start uploading file: %s, size: %d", absPath, filesize)
+	defer func() {
+		log.Infof("Finished uploading file: %s", absPath)
+	}()
+
 	var err error
 	numThreads := uint(2)
 
 	u.client.TraceOn(log.StandardLogger().WriterLevel(log.DebugLevel))
-	ctx := context.Background()
-	defer ctx.Done()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
 
 	if filesize > int64(minPartSize) {
 		partSize := filesize / int64(maxPartNumber)
@@ -103,7 +110,7 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 
 func (u *Manager) handleUploadProgress() {
 	fileInfos := make(map[string]int64)
-	progressMilestones := []float64{0, 25, 50, 75, 90, 100}
+	progressMilestones := []float64{0, 10, 25, 35, 50, 60, 75, 90, 100}
 
 	for progress := range u.uploadProgressChan {
 		uploadKey := "upload:" + progress.Name
@@ -126,7 +133,8 @@ func (u *Manager) handleUploadProgress() {
 		}
 
 		if fileInfos[totalKey] <= 0 {
-			return
+			log.Warnf("Missing file: %s total size, skip check upload progress", progress.Name)
+			continue
 		}
 
 		uploadedPercent := float64(fileInfos[uploadKey]) / float64(fileInfos[totalKey]) * 100
@@ -142,16 +150,16 @@ func (u *Manager) handleUploadProgress() {
 			delete(fileInfos, totalKey)
 
 			log.Infof("File: %s uploaded", progress.Name)
-			return
+			continue
 		}
 	}
 }
 
-// FMultipartPutObject uploads a file to a bucket with a key and sha256..
+// FMultipartPutObject uploads a file to a bucket with a key and sha256.
 func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key string, filePath string, fileSize int64, opts minio.PutObjectOptions) (err error) {
 	// Check for largest object size allowed.
 	if fileSize > int64(maxSinglePutObjectSize) {
-		return errors.Errorf("Your proposed upload size ‘%s’ exceeds the maximum allowed object size ‘%s’ for single PUT operation.", strconv.FormatInt(fileSize, 10), strconv.FormatInt(maxSinglePutObjectSize, 10))
+		return errors.Errorf("Your proposed upload size ' %s ' exceeds the maximum allowed object size ' %s ' for single PUT operation.", strconv.FormatInt(fileSize, 10), strconv.FormatInt(maxSinglePutObjectSize, 10))
 	}
 
 	c := minio.Core{Client: u.client}
@@ -230,13 +238,14 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	// Calculate the optimal parts info for a given size.
 	totalPartsCount, partSize, lastPartSize, err := minio.OptimalPartInfo(fileSize, opts.PartSize)
 	if err != nil {
+		log.Errorf("Optimal part info failed %v", err)
 		return errors.Wrap(err, "Optimal part info failed")
 	}
 
 	// Declare a channel that sends the next part number to be uploaded.
 	uploadPartsCh := make(chan int)
 	// Declare a channel that sends back the response of a part upload.
-	uploadedPartsCh := make(chan uploadedPartRes)
+	uploadedPartsCh := make(chan uploadedPartRes, totalPartsCount-len(partNumbers))
 	// Used for readability, lastPartNumber is always totalPartsCount.
 	lastPartNumber := totalPartsCount
 
@@ -271,47 +280,62 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 	// Starts parallel uploads.
 	// Receive the part number to upload from the uploadPartsCh channel.
-	//nolint: gosec // we are not using user input
-	for w := 1; w <= int(opts.NumThreads); w++ {
-		go func() {
-			for {
-				var partToUpload int
-				var ok bool
-				select {
-				case <-ctx.Done():
+	go func() {
+		semaphore := make(chan struct{}, opts.NumThreads)
+		var wg sync.WaitGroup
+
+		for {
+			select {
+			case partToUpload, ok := <-uploadPartsCh:
+				if !ok {
+					wg.Wait()
 					return
-				case partToUpload, ok = <-uploadPartsCh:
-					if !ok {
-						return
-					}
 				}
 
-				// Calculate the offset and size for the part to be uploaded.
-				readOffset := int64(partToUpload-1) * partSize
-				curPartSize := partSize
-				if partToUpload == lastPartNumber {
-					curPartSize = lastPartSize
-				}
+				semaphore <- struct{}{}
 
-				sectionReader := io.NewSectionReader(fileReader, readOffset, curPartSize)
-				log.Debugf("Uploading part: %d", partToUpload)
-				objPart, err := c.PutObjectPart(ctx, bucket, key, uploadId, partToUpload, sectionReader, curPartSize, minio.PutObjectPartOptions{
-					SSE: opts.ServerSideEncryption,
-				})
-				if err != nil {
-					log.Debugf("Upload part: %d failed: %v", partToUpload, err)
-					uploadedPartsCh <- uploadedPartRes{
-						Error: err,
+				wg.Add(1)
+				go func(partToUpload int) {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Errorf("upload part goroutine panic: %v", r)
+							uploadedPartsCh <- uploadedPartRes{Error: errors.Wrapf(err, "upload panic, recover")}
+						}
+					}()
+
+					defer wg.Done()
+					defer func() { <-semaphore }() // release the semaphore
+
+					// Calculate the offset and size for the part to be uploaded.
+					readOffset := int64(partToUpload-1) * partSize
+					curPartSize := partSize
+					if partToUpload == lastPartNumber {
+						curPartSize = lastPartSize
 					}
-				} else {
-					log.Debugf("Upload part: %d success", partToUpload)
-					uploadedPartsCh <- uploadedPartRes{
-						Part: objPart,
+
+					sectionReader := io.NewSectionReader(fileReader, readOffset, curPartSize)
+					log.Debugf("Uploading part: %d", partToUpload)
+					objPart, err := c.PutObjectPart(ctx, bucket, key, uploadId, partToUpload, sectionReader, curPartSize, minio.PutObjectPartOptions{
+						SSE: opts.ServerSideEncryption,
+					})
+					if err != nil {
+						log.Errorf("Upload part: %d failed: %v", partToUpload, err)
+						uploadedPartsCh <- uploadedPartRes{
+							Error: err,
+						}
+					} else {
+						log.Debugf("Upload part: %d success", partToUpload)
+						uploadedPartsCh <- uploadedPartRes{
+							Part: objPart,
+						}
 					}
-				}
+				}(partToUpload)
+			case <-ctx.Done():
+				wg.Wait()
+				return
 			}
-		}()
-	}
+		}
+	}()
 
 	// Gather the responses as they occur and update any progress bar
 	numToUpload := totalPartsCount - len(partNumbers)
@@ -374,6 +398,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 	// Verify if we uploaded all the data.
 	if uploadedSize != fileSize {
+		log.Errorf("Uploaded size: %d, file size: %d, does not match", uploadedSize, fileSize)
 		return errors.Wrapf(err, "Uploaded size: %d, file size: %d, does not match", uploadedSize, fileSize)
 	}
 
@@ -384,6 +409,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 	_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 	if err != nil {
+		log.Errorf("Complete multipart upload failed: %v", err)
 		return errors.Wrapf(err, "Complete multipart upload failed")
 	}
 
@@ -416,10 +442,15 @@ func newUploadProgressReader(absPath string, total int64, uploadProgressChan cha
 }
 
 func (r *uploadProgressReader) Read(b []byte) (int, error) {
-	n := int64(len(b))
-	r.uploaded += n
-	r.uploadProgressChan <- FileUploadProgress{Name: r.absPath, Uploaded: r.uploaded, TotalSize: -1}
-	return int(n), nil
+	n := len(b)
+	r.uploaded += int64(n)
+	select {
+	case r.uploadProgressChan <- FileUploadProgress{Name: r.absPath, Uploaded: r.uploaded, TotalSize: r.total}:
+	default:
+		log.Warnf("Upload progress channel is full, skipping progress update")
+	}
+
+	return n, nil
 }
 
 // uploadedPartRes - the response received from a part upload.
