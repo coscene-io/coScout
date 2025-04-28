@@ -434,6 +434,7 @@ type uploadProgressReader struct {
 	total              int64
 	uploaded           int64
 	uploadProgressChan chan FileUploadProgress
+	mu                 sync.Mutex
 }
 
 func newUploadProgressReader(absPath string, total int64, uploadProgressChan chan FileUploadProgress) *uploadProgressReader {
@@ -443,9 +444,13 @@ func newUploadProgressReader(absPath string, total int64, uploadProgressChan cha
 
 func (r *uploadProgressReader) Read(b []byte) (int, error) {
 	n := len(b)
+	r.mu.Lock()
 	r.uploaded += int64(n)
+	uploaded := r.uploaded
+	r.mu.Unlock()
+
 	select {
-	case r.uploadProgressChan <- FileUploadProgress{Name: r.absPath, Uploaded: r.uploaded, TotalSize: r.total}:
+	case r.uploadProgressChan <- FileUploadProgress{Name: r.absPath, Uploaded: uploaded, TotalSize: r.total}:
 	default:
 		log.Warnf("Upload progress channel is full, skipping progress update")
 	}
