@@ -166,9 +166,12 @@ func (f *fileStateHandler) loadState() error {
 		return errors.Errorf("failed to read state file: %v", err)
 	}
 
-	var savedState SavedState
-	if err := json.Unmarshal(data, &savedState); err != nil {
-		return errors.Errorf("failed to unmarshal state: %v", err)
+	savedState := SavedState{
+		State: make(map[string]FileState),
+	}
+	err = json.Unmarshal(data, &savedState)
+	if err != nil {
+		log.Warnf("Invalid file state file: %v, reset to init", err)
 	}
 
 	f.state = savedState.State

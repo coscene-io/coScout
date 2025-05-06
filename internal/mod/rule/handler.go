@@ -155,6 +155,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case ruleItem := <-c.ruleItemChan:
 				c.engine.ConsumeNext(ruleItem)
 			case <-ctx.Done():
+				log.Infof("rule item channel closed")
 				return
 			}
 		}
@@ -171,6 +172,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 
 				c.scanCollectInfosAndHandle()
 			case <-ctx.Done():
+				log.Infof("collect info handler stopped")
 				return
 			}
 		}
@@ -317,6 +319,7 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle() {
 			continue
 		}
 
+		log.Infof("Found collect info: %v", collectInfoId)
 		c.handleCollectInfo(*collectInfo)
 	}
 }
@@ -330,6 +333,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 	}
 
 	if info.Cut == nil || time.Unix(info.Cut.End, 0).After(time.Now()) {
+		log.Infof("Collect info is not reached: %v", info.Id)
 		return
 	}
 
@@ -364,6 +368,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		}
 
 		if !utils.CheckReadPath(extraFileAbs) {
+			log.Warnf("Path %s is not readable, skip!", extraFileAbs)
 			continue
 		}
 

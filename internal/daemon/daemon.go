@@ -48,7 +48,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	defer func(pubSub *gochannel.GoChannel) {
 		err := pubSub.Close()
 		if err != nil {
-			log.Errorf("unable to close pubsub: %v", err)
+			log.Errorf("Unable to close pubsub: %v", err)
 		}
 	}(pubSub)
 
@@ -70,7 +70,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 				//nolint: contextcheck // context is checked in the parent goroutine
 				refreshRemoteConfig(confManager, reqClient)
 			case <-ctx.Done():
-				log.Infof("Daemon context done")
+				log.Infof("Daemon ticker goroutine done")
 				return
 			}
 		}
@@ -98,18 +98,18 @@ func refreshRemoteConfig(confManager *config.ConfManager, reqClient *api.Request
 		name := strings.TrimPrefix(f, config.RemoteFilePrefix)
 		remoteCache, err := reqClient.GetConfigMapWithCache(name)
 		if err != nil {
-			log.Errorf("unable to get remote config: %v", err)
+			log.Errorf("Unable to get remote config: %v", err)
 			continue
 		}
 
 		if remoteCache == nil || remoteCache.GetValue() == nil {
-			log.Errorf("remote config is empty")
+			log.Errorf("Remote config is empty")
 			continue
 		}
 
 		value, err := protojson.Marshal(remoteCache.GetValue())
 		if err != nil {
-			log.Errorf("unable to marshal remote config: %v", err)
+			log.Errorf("Unable to marshal remote config: %v", err)
 			continue
 		}
 

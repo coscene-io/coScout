@@ -134,8 +134,11 @@ func (e *Engine) ActiveTopics() mapset.Set[string] {
 
 // ConsumeNext shows how to process a message through the rule engine.
 func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
+	log.Debugf("consuming message: %+v", item)
+
 	for _, rule := range e.rules {
 		if rule.Topics.Cardinality() > 0 && !rule.Topics.Contains(item.Topic) {
+			log.Debugf("rule %s topics %v does not match topic %s, skipping", rule.Metadata["rule_display_name"], rule.Topics, item.Topic)
 			continue
 		}
 
@@ -158,7 +161,10 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 			e.ruleDebounceTime[ruleName] = activationTime
 		}
 
+		log.Debugf("rule %s: isActive: %v, preActivationTime: %v, msgTs: %v", rule.Metadata["rule_display_name"], isActive, prevActivationTime, msgTs)
 		if isActive {
+			log.Infof("rule %s met, save collect info", rule.Metadata["rule_display_name"])
+
 			collectInfoId := uuid.New().String()
 			additionalArgs := map[string]interface{}{}
 			for k, v := range rule.Metadata {

@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"net"
 	"net/http"
 	"path"
 	"sort"
@@ -41,24 +42,37 @@ import (
 )
 
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan *model.RecordCache, errorChan chan error) {
+	log.Infof("Start upload goroutine")
+
 	for {
 		select {
 		case recordCache := <-uploadChan:
-			if recordCache == nil {
-				log.Warn("record cache is nil, skip")
-				continue
-			}
-			if !utils.CheckReadPath(recordCache.GetRecordCachePath()) {
-				log.Warnf("record cache %s not exist", recordCache.GetRecordCachePath())
-				continue
-			}
-
 			//nolint: contextcheck // context is checked in the parent goroutine
-			err := uploadFiles(reqClient, confManager, recordCache)
-			if err != nil {
-				errorChan <- err
-			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("upload goroutine panic recovered: %v", r)
+						errorChan <- errors.Errorf("upload goroutine panic: %v", r)
+					}
+				}()
+
+				if recordCache == nil {
+					log.Warn("record cache is nil, skip")
+					return
+				}
+				if !utils.CheckReadPath(recordCache.GetRecordCachePath()) {
+					log.Warnf("record cache %s not exist", recordCache.GetRecordCachePath())
+					return
+				}
+
+				log.Infof("start to upload record %s", recordCache.GetRecordCachePath())
+				err := uploadFiles(reqClient, confManager, recordCache)
+				if err != nil {
+					errorChan <- err
+				}
+			}()
 		case <-ctx.Done():
+			log.Info("upload goroutine done")
 			return
 		}
 	}
@@ -68,6 +82,12 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	allCompleted := true
 	appConfig := confManager.LoadWithRemote()
 	getStorage := confManager.GetStorage()
+
+	recordCache, err := recordCache.Reload()
+	if err != nil {
+		log.Errorf("failed to reload record cache: %v", err)
+		return err
+	}
 
 	recordName, ok := recordCache.Record["name"].(string)
 	if !ok || len(recordName) == 0 {
@@ -217,6 +237,12 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 }
 
 func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
+	log.Infof("prepare to upload file %s", fileInfo.Path)
+	if fileInfo.Path == "" {
+		log.Warn("file path is empty")
+		return errors.New("file path is empty")
+	}
+
 	cachedFileInfo := getCacheFileInfo(storage, fileInfo.Path)
 	if fileInfo.Size <= 0 {
 		if cachedFileInfo.Size > 0 {
@@ -235,11 +261,14 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		if cachedFileInfo.Sha256 != "" {
 			fileInfo.Sha256 = cachedFileInfo.Sha256
 		} else {
+			log.Infof("file %s sha256 is empty, calculate it", fileInfo.Path)
 			sha256, _, err := utils.CalSha256AndSize(fileInfo.Path, fileInfo.Size)
 			if err != nil {
 				log.Errorf("failed to calculate sha256: %v", err)
 				return err
 			}
+
+			log.Infof("file %s sha256 is %s", fileInfo.Path, sha256)
 			fileInfo.Sha256 = sha256
 		}
 	}
@@ -266,16 +295,28 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		log.Errorf("unable to generate security token: %v", err)
 		return err
 	}
+	if generateSecurityTokenRes == nil {
+		log.Errorf("generate security token response is nil")
+		return errors.New("generate security token response is nil")
+	}
+	if generateSecurityTokenRes.GetEndpoint() == "" {
+		log.Errorf("generate security token endpoint is empty")
+		return errors.New("generate security token endpoint is empty")
+	}
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			//nolint: gosec// InsecureSkipVerify is used to skip certificate verification
 			InsecureSkipVerify: appConfig.Api.Insecure,
 		},
-		MaxIdleConns:      1,
-		IdleConnTimeout:   30 * time.Second,
-		DisableKeepAlives: true,
-		ForceAttemptHTTP2: true,
+		MaxIdleConns:          3,
+		IdleConnTimeout:       30 * time.Second,
+		DisableKeepAlives:     true,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 10 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout: 10 * time.Second,
+		}).DialContext,
 	}
 	defer transport.CloseIdleConnections()
 
@@ -296,6 +337,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		return err
 	}
 
+	log.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
 	tags := map[string]string{}
 	err = um.FPutObject(fileInfo.Path, constant.UploadBucket, fileResourceName.String(), fileInfo.Size, tags)
 	if err != nil {

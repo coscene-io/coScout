@@ -63,6 +63,7 @@ func (c *CustomTaskHandler) Run(ctx context.Context) {
 			case <-t.C:
 				ticker.Reset(config.TaskCheckInterval)
 
+				log.Infof("Starting task handler")
 				c.run(ctx)
 			case <-ctx.Done():
 				return
