@@ -51,9 +51,13 @@ func AuthInterceptor(storage storage.Storage, register chan model.DeviceStatusRe
 					log.Errorf("failed to delete device auth key: %v", storageErr)
 				}
 
-				register <- model.DeviceStatusResponse{
+				select {
+				case register <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      true,
+				}:
+				default:
+					log.Warn("register channel is full, dropping message")
 				}
 				log.Infof("device auth expired, try to re-auth!")
 			}
