@@ -116,7 +116,11 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 
 					err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
 					if err != nil {
-						errorChan <- err
+						select {
+						case errorChan <- err:
+						default:
+							log.Warnf("Error channel is full, dropping error: %v", err)
+						}
 					}
 
 					time.Sleep(1 * time.Second)

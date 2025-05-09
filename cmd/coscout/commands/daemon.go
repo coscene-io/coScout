@@ -17,6 +17,7 @@ package commands
 import (
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/coscene-io/coscout/internal/api"
@@ -29,6 +30,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type authState struct {
+	isAuthed atomic.Bool
+}
+
 func NewDaemonCommand(cfgPath *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -40,7 +45,7 @@ func NewDaemonCommand(cfgPath *string) *cobra.Command {
 			appConf := confManager.LoadOnce()
 			log.Infof("Load config file from %s", *cfgPath)
 
-			registerChan := make(chan model.DeviceStatusResponse, 1)
+			registerChan := make(chan model.DeviceStatusResponse, 10)
 			networkChan := make(chan *model.NetworkUsage, 100)
 			reqClient := api.NewRequestClient(appConf.Api, storageDB, networkChan, registerChan)
 
@@ -65,23 +70,24 @@ func run(confManager *config.ConfManager, reqClient *api.RequestClient, register
 	exitChan := make(chan bool, 1)
 	errorChan := make(chan error, 100)
 
-	isAuthed := false
+	state := &authState{}
+	state.isAuthed.Store(false)
 	for deviceStatus := range registerChan {
 		if deviceStatus.Authorized {
 			log.Info("Device is authorized. Performing actions...")
 
-			if !isAuthed {
+			if !state.isAuthed.Load() {
 				go daemon.Run(confManager, reqClient, startChan, exitChan, errorChan)
 				startChan <- true
 			}
-			isAuthed = true
+			state.isAuthed.Store(true)
 		} else {
 			log.Warn("Device is not authorized, waiting...")
 
-			if isAuthed {
+			if state.isAuthed.Load() {
 				exitChan <- true
 			}
-			isAuthed = false
+			state.isAuthed.Store(false)
 		}
 	}
 }

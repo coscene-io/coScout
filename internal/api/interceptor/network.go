@@ -19,6 +19,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/coscene-io/coscout/internal/model"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -44,7 +45,11 @@ func NetworkUsageInterceptor(networkChan chan *model.NetworkUsage) connect.Unary
 				}
 			}
 
-			networkChan <- &nu
+			select {
+			case networkChan <- &nu:
+			default:
+				log.Warn("network usage channel is full, dropping message")
+			}
 			return res, err
 		}
 	}

@@ -52,7 +52,11 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 				defer func() {
 					if r := recover(); r != nil {
 						log.Errorf("upload goroutine panic recovered: %v", r)
-						errorChan <- errors.Errorf("upload goroutine panic: %v", r)
+						select {
+						case errorChan <- errors.Errorf("upload goroutine panic: %v", r):
+						default:
+							log.Warnf("error channel is full, skip: %v", r)
+						}
 					}
 				}()
 
@@ -68,7 +72,11 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 				log.Infof("start to upload record %s", recordCache.GetRecordCachePath())
 				err := uploadFiles(reqClient, confManager, recordCache)
 				if err != nil {
-					errorChan <- err
+					select {
+					case errorChan <- err:
+					default:
+						log.Warnf("Error channel is full, dropping error: %v", err)
+					}
 				}
 			}()
 		case <-ctx.Done():

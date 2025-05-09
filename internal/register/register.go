@@ -61,133 +61,141 @@ func NewRegister(reqClient api.RequestClient, config config.AppConfig, storage s
 }
 
 func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusResponse) {
-	for {
-		device := core.GetDeviceInfo(&r.storage)
-		// If device is not registered, register it
-		if device == nil || device.GetName() == "" {
-			modRegister, err := NewModRegister(r.config.Register)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		ticker.Reset(config.DeviceAuthCheckInterval)
+
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Errorf("CheckOrRegisterDevice panic: %v", err)
+					channel <- model.DeviceStatusResponse{
+						Authorized: false,
+						Exist:      false,
+					}
+				}
+			}()
+
+			log.Debug("Starting device status check")
+			device := core.GetDeviceInfo(&r.storage)
+			// If device is not registered, register it
+			if device == nil || device.GetName() == "" {
+				modRegister, err := NewModRegister(r.config.Register)
+				if err != nil {
+					log.Errorf("failed to create mod register: %v", err)
+					channel <- model.DeviceStatusResponse{
+						Authorized: false,
+						Exist:      false,
+					}
+					return
+				}
+
+				getDevice := modRegister.GetDevice()
+				if getDevice == nil {
+					log.Warnf("failed to get device from config")
+
+					channel <- model.DeviceStatusResponse{
+						Authorized: false,
+						Exist:      false,
+					}
+
+					return
+				}
+
+				isSucceed, localDevice := r.registerDevice(getDevice)
+				if !isSucceed {
+					channel <- model.DeviceStatusResponse{
+						Authorized: false,
+						Exist:      false,
+					}
+
+					return
+				}
+				device = localDevice
+			}
+
+			log.Infof("Current device serial number: %s", device.GetSerialNumber())
+
+			// check device status
+			exist, state, err := r.getRemoteDeviceStatus(device.GetName())
 			if err != nil {
 				channel <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      false,
 				}
 
-				time.Sleep(config.DeviceAuthCheckInterval)
-				continue
+				return
 			}
 
-			getDevice := modRegister.GetDevice()
-			if getDevice == nil {
-				log.Warnf("failed to get device from config")
-
+			if !exist {
 				channel <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      false,
 				}
 
-				time.Sleep(config.DeviceAuthCheckInterval)
-				continue
+				log.Infof("Remote device %s already deleted.", device.GetSerialNumber())
+				return
 			}
 
-			isSucceed, localDevice := r.registerDevice(getDevice)
-			if !isSucceed {
-				channel <- model.DeviceStatusResponse{
-					Authorized: false,
-					Exist:      false,
-				}
-
-				time.Sleep(config.DeviceAuthCheckInterval)
-				continue
-			}
-			device = localDevice
-		}
-
-		log.Infof("Current device serial number: %s", device.GetSerialNumber())
-
-		// check device status
-		exist, state, err := r.getRemoteDeviceStatus(device.GetName())
-		if err != nil {
-			channel <- model.DeviceStatusResponse{
-				Authorized: false,
-				Exist:      false,
-			}
-
-			time.Sleep(config.DeviceAuthCheckInterval)
-			continue
-		}
-
-		if !exist {
-			channel <- model.DeviceStatusResponse{
-				Authorized: false,
-				Exist:      false,
-			}
-
-			log.Infof("Remote device %s already deleted.", device.GetSerialNumber())
-			time.Sleep(config.DeviceAuthCheckInterval * 10)
-			continue
-		}
-
-		if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_REJECTED {
-			channel <- model.DeviceStatusResponse{
-				Authorized: false,
-				Exist:      true,
-			}
-
-			log.Infof("Remote device %s already be rejected", device.GetSerialNumber())
-			err := r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExpireKey))
-			if err != nil {
-				log.Warnf("unable to delete device auth token expireTime: %v", err)
-			}
-
-			err = r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthKey))
-			if err != nil {
-				log.Warnf("unable to delete device auth token: %v", err)
-			}
-			time.Sleep(config.DeviceAuthCheckInterval)
-			continue
-		}
-
-		if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_PENDING {
-			channel <- model.DeviceStatusResponse{
-				Authorized: false,
-				Exist:      true,
-			}
-
-			log.Infof("Remote device %s is pending", device.GetSerialNumber())
-			time.Sleep(config.DeviceAuthCheckInterval)
-			continue
-		}
-
-		// If device is approved, exchange auth token
-		if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_APPROVED {
-			// Check device auth token
-			valid := r.checkAuthToken()
-			if valid {
-				channel <- model.DeviceStatusResponse{
-					Authorized: true,
-					Exist:      true,
-				}
-
-				time.Sleep(config.DeviceAuthCheckInterval)
-				continue
-			}
-
-			isSucceed := r.exchangeAuthToken(device.GetName())
-			if !isSucceed {
+			if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_REJECTED {
 				channel <- model.DeviceStatusResponse{
 					Authorized: false,
 					Exist:      true,
 				}
-			} else {
+
+				log.Infof("Remote device %s already be rejected", device.GetSerialNumber())
+				err := r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExpireKey))
+				if err != nil {
+					log.Warnf("unable to delete device auth token expireTime: %v", err)
+				}
+
+				err = r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthKey))
+				if err != nil {
+					log.Warnf("unable to delete device auth token: %v", err)
+				}
+				return
+			}
+
+			if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_PENDING {
 				channel <- model.DeviceStatusResponse{
-					Authorized: true,
+					Authorized: false,
 					Exist:      true,
 				}
-			}
-		}
 
-		time.Sleep(config.DeviceAuthCheckInterval)
-		continue
+				log.Infof("Remote device %s is pending", device.GetSerialNumber())
+				return
+			}
+
+			// If device is approved, exchange auth token
+			if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_APPROVED {
+				// Check device auth token
+				valid := r.checkAuthToken()
+				if valid {
+					channel <- model.DeviceStatusResponse{
+						Authorized: true,
+						Exist:      true,
+					}
+
+					return
+				}
+
+				isSucceed := r.exchangeAuthToken(device.GetName())
+				if !isSucceed {
+					channel <- model.DeviceStatusResponse{
+						Authorized: false,
+						Exist:      true,
+					}
+				} else {
+					channel <- model.DeviceStatusResponse{
+						Authorized: true,
+						Exist:      true,
+					}
+				}
+			}
+			log.Debug("Completed device status check")
+		}()
 	}
 }
 

@@ -55,7 +55,11 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	go func() {
 		err := collector.Collect(ctx, reqClient, confManager, pubSub, errorChan)
 		if err != nil {
-			errorChan <- err
+			select {
+			case errorChan <- err:
+			default:
+				log.Warnf("Error channel is full, dropping error: %v", err)
+			}
 		}
 	}()
 
@@ -76,10 +80,10 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		}
 	}(ticker)
 
+	go core.SendHeartbeat(ctx, reqClient, confManager.GetStorage(), errorChan)
 	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.TaskModType).Run(ctx)
 	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.RuleModType).Run(ctx)
 	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.HttpModType).Run(ctx)
-	go core.SendHeartbeat(ctx, reqClient, confManager.GetStorage(), errorChan)
 
 	<-finishChan
 }
