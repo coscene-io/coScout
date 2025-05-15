@@ -363,7 +363,8 @@ func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, recordTit
 }
 
 func createRelatedRecordResources(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, reqClient *api.RequestClient, deviceConfig config.DeviceConfig) {
-	if rc.Record["name"] == nil {
+	recordName, ok := rc.Record["name"].(string)
+	if !ok || recordName == "" {
 		createRecord(deviceInfo, rc, reqClient)
 	}
 

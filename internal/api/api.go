@@ -593,7 +593,7 @@ func (r *RequestClient) getLabel(projectName string, displayName string) (*openD
 
 	req := openDpsV1alpha1Service.ListLabelsRequest{
 		Parent:   projectName,
-		Filter:   "displayName=" + displayName,
+		Filter:   fmt.Sprintf("displayName=\"%s\"", displayName),
 		PageSize: 10,
 	}
 	apiReq := connect.NewRequest(&req)
