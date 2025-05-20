@@ -312,16 +312,19 @@ echo "sn_field:        ${SN_FIELD}"
 echo "serial_num:      ${SERIAL_NUM}"
 
 # check org_slug and project_slug
-# Check if both ORG_SLUG and PROJECT_SLUG are empty
-if [[ -z $ORG_SLUG && -z $PROJECT_SLUG ]]; then
-  echo_error "ERROR: Both org_slug and project_slug cannot be empty. One of them must be specified. Exiting." >&2
+if [[ -z "$ORG_SLUG" ]]; then
+  # ORG_SLUG is mandatory for all operations as per the new requirements.
+  echo_error "ERROR: --org_slug must be provided. Exiting." >&2
   exit 1
 fi
 
-# Check if both ORG_SLUG and PROJECT_SLUG are not empty
-if [[ -n $ORG_SLUG && -n $PROJECT_SLUG ]]; then
-  echo_error "ERROR: Both org_slug and project_slug cannot be specified at the same time. Only one of them must be specified. Exiting."
-  exit 1
+if [[ -n "$PROJECT_SLUG" ]]; then
+  # PROJECT_SLUG is provided along with ORG_SLUG.
+  echo_info "INFO: Using organization '$ORG_SLUG' and project '$PROJECT_SLUG'."
+  echo_info "INFO: If project '$PROJECT_SLUG' does not exist under organization '$ORG_SLUG', the device will be installed to the organization, and a warning may be issued by the coScout service."
+else
+  # Only ORG_SLUG is provided. PROJECT_SLUG is empty.
+  echo_info "INFO: Using organization '$ORG_SLUG'. Device will be installed to the organization by default."
 fi
 
 # check colink endpoint and network
