@@ -292,6 +292,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	rc := model.RecordCache{
 		ProjectName: projectName,
 		Timestamp:   time.Now().UnixMilli(),
+		Labels:      taskDetail.GetLabels(),
 		UploadTask: map[string]interface{}{
 			"name":  task.GetName(),
 			"title": task.GetTitle(),
