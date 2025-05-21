@@ -565,12 +565,24 @@ if [[ $SKIP_VERIFY_CERT -eq 1 ]]; then
   INSECURE=true
 fi
 
+# Prepare slug configuration for config.yaml
+API_SLUG_CONFIG_LINE=""
+if [[ -n "$PROJECT_SLUG" ]]; then
+  # Both ORG_SLUG (mandatory) and PROJECT_SLUG are provided.
+  # The project_slug in config.yaml should be $ORG_SLUG/$PROJECT_SLUG.
+  # config.yaml should contain project_slug, but not org_slug.
+  API_SLUG_CONFIG_LINE="project_slug: $ORG_SLUG/$PROJECT_SLUG"
+else
+  # Only ORG_SLUG is provided.
+  # config.yaml should contain org_slug, but not project_slug.
+  API_SLUG_CONFIG_LINE="org_slug: $ORG_SLUG"
+fi
+
 # create config file ~/.config/cos/config.yaml
 sudo -u "$CUR_USER" tee "${COS_CONFIG_DIR}/config.yaml" >/dev/null <<EOL
 api:
   server_url: $SERVER_URL
-  project_slug: $PROJECT_SLUG
-  org_slug: $ORG_SLUG
+  ${API_SLUG_CONFIG_LINE}
   insecure: $INSECURE
 
 register:
