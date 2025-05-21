@@ -322,6 +322,8 @@ if [[ -n "$PROJECT_SLUG" ]]; then
   # PROJECT_SLUG is provided along with ORG_SLUG.
   echo_info "INFO: Using organization '$ORG_SLUG' and project '$PROJECT_SLUG'."
   echo_info "INFO: If project '$PROJECT_SLUG' does not exist under organization '$ORG_SLUG', the device will be installed to the organization, and a warning may be issued by the coScout service."
+  PROJECT_SLUG=$ORG_SLUG/$PROJECT_SLUG
+  ORG_SLUG=
 else
   # Only ORG_SLUG is provided. PROJECT_SLUG is empty.
   echo_info "INFO: Using organization '$ORG_SLUG'. Device will be installed to the organization by default."
@@ -565,24 +567,12 @@ if [[ $SKIP_VERIFY_CERT -eq 1 ]]; then
   INSECURE=true
 fi
 
-# Prepare slug configuration for config.yaml
-API_SLUG_CONFIG_LINE=""
-if [[ -n "$PROJECT_SLUG" ]]; then
-  # Both ORG_SLUG (mandatory) and PROJECT_SLUG are provided.
-  # The project_slug in config.yaml should be $ORG_SLUG/$PROJECT_SLUG.
-  # config.yaml should contain project_slug, but not org_slug.
-  API_SLUG_CONFIG_LINE="project_slug: $ORG_SLUG/$PROJECT_SLUG"
-else
-  # Only ORG_SLUG is provided.
-  # config.yaml should contain org_slug, but not project_slug.
-  API_SLUG_CONFIG_LINE="org_slug: $ORG_SLUG"
-fi
-
 # create config file ~/.config/cos/config.yaml
 sudo -u "$CUR_USER" tee "${COS_CONFIG_DIR}/config.yaml" >/dev/null <<EOL
 api:
   server_url: $SERVER_URL
-  ${API_SLUG_CONFIG_LINE}
+  project_slug: $PROJECT_SLUG
+  org_slug: $ORG_SLUG
   insecure: $INSECURE
 
 register:
