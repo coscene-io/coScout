@@ -18,7 +18,7 @@ require (
 	github.com/itchyny/timefmt-go v0.1.6
 	github.com/knadh/koanf v1.5.0
 	github.com/minio/minio-go/v7 v7.0.61
-	github.com/oriser/regroup v0.0.0-20210730155327-fca8d7531263
+	github.com/oriser/regroup f6bb0e08289e
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.47.0
 	github.com/sirupsen/logrus v1.9.3
