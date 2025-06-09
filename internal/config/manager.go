@@ -74,7 +74,8 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 		Mod: ModConfConfig{
 			Name: "default",
 			Config: DefaultModConfConfig{
-				SkipPeriodHours: 2,
+				SkipPeriodHours:     2,
+				RecursivelyWalkDirs: false,
 			},
 		},
 		HttpServer: HttpServerConfig{

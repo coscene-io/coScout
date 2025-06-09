@@ -299,86 +299,54 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 			continue
 		}
 
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			log.Errorf("Failed to read directory %s, skipping: %v", dir, err)
-			continue
-		}
-
-		for _, entry := range entries {
-			entryPath := filepath.Join(dir, entry.Name())
-			fileState, hasFileState := f.getFileState(entryPath)
-
-			// Skip already processed files
-			if hasFileState && !fileState.Unsupported && fileState.ProcessState == processStateProcessed {
-				continue
-			}
-
-			info, err := entry.Info()
-			if err != nil {
-				log.Errorf("failed to get file info for %s: %v", entryPath, err)
-				continue
-			}
-
-			handler := f.GetFileHandler(entryPath)
-			if handler == nil {
-				// No handler supported for file, mark as unsupported if not already
-				if !hasFileState || !fileState.Unsupported {
-					f.setFileState(entryPath, FileState{
-						Size:        info.Size(),
-						Unsupported: true,
-					})
-				}
-				continue
-			}
-
-			// Check if file is too old
-			if !entry.IsDir() && info.ModTime().Before(time.Now().Add(-time.Duration(conf.SkipPeriodHours)*time.Hour)) {
-				f.setFileState(entryPath, FileState{
-					Size:        info.Size(),
-					Unsupported: true,
-					TooOld:      true,
-				})
-				continue
-			}
-
-			isListening := newListenDirs.Contains(dir)
-			isCollecting := newCollectDirs.Contains(dir)
-			isPrevListening := f.listenDirs.Contains(dir)
-
-			// Check if file needs to skip process
-			curFileSize, err := handler.GetFileSize(entryPath)
-			if err != nil {
-				return errors.Errorf("error getting file size for %s: %v", entryPath, err)
-			}
-
-			// Update state
-			newState := fileState
-			if !hasFileState || fileState.Size != curFileSize {
-				startTime, endTime, err := handler.GetStartTimeEndTime(entryPath)
+		// Check should recursively walk directories
+		if conf.RecursivelyWalkDirs {
+			err := filepath.WalkDir(dir, func(entryPath string, d os.DirEntry, err error) error {
 				if err != nil {
-					log.Errorf("Error getting start and end time for %s: %v", entryPath, err)
-					f.setFileState(entryPath, FileState{
-						Size:        curFileSize,
-						Unsupported: true,
-					})
+					log.Errorf("Failed to process path %s: %v", entryPath, err)
+					return nil
+				}
+
+				// Skip if the entry is a directory
+				if d.IsDir() {
+					return nil
+				}
+
+				// Check if the entry is readable
+				if !utils.CheckReadPath(entryPath) {
+					log.Warnf("Skipping file %s due to insufficient permissions", entryPath)
+					return nil
+				}
+
+				// Process the file
+				return f.processFile(dir, entryPath, d, newCollectDirs, newListenDirs, conf.SkipPeriodHours)
+			})
+			if err != nil {
+				log.Errorf("Failed to walk directory %s: %v", dir, err)
+			}
+		} else {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				log.Errorf("Failed to read directory %s, skipping: %v", dir, err)
+				continue
+			}
+
+			for _, entry := range entries {
+				if entry.IsDir() {
 					continue
 				}
-				newState = FileState{
-					Size:      curFileSize,
-					StartTime: startTime.Unix(),
-					EndTime:   endTime.Unix(),
+				// Get absolute path of the entry
+				absPath := filepath.Join(dir, entry.Name())
+				if !utils.CheckReadPath(absPath) {
+					log.Warnf("Skipping file %s due to insufficient permissions", absPath)
+					continue
+				}
+
+				// Process the file
+				if err := f.processFile(dir, absPath, entry, newCollectDirs, newListenDirs, conf.SkipPeriodHours); err != nil {
+					log.Errorf("Failed to process file %s: %v", entry.Name(), err)
 				}
 			}
-
-			newState.IsListening = isListening
-			newState.IsCollecting = isCollecting
-			// change the process state to processed if the file is not being listened to all the time
-			if !isListening || !isPrevListening {
-				newState.ProcessState = processStateProcessed
-			}
-
-			f.setFileState(entryPath, newState)
 		}
 	}
 
@@ -397,6 +365,83 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 	}
 
 	log.Infof("Finished updating directories")
+	return nil
+}
+
+func (f *fileStateHandler) processFile(baseFolder string, absPath string, entry os.DirEntry, collectingDirs mapset.Set[string], listeningDirs mapset.Set[string], skipPeriodHours int) error {
+	fileState, hasFileState := f.getFileState(absPath)
+
+	// Skip already processed files
+	if hasFileState && !fileState.Unsupported && fileState.ProcessState == processStateProcessed {
+		return nil
+	}
+
+	info, err := entry.Info()
+	if err != nil {
+		log.Errorf("failed to get file info for %s: %v", absPath, err)
+		return err
+	}
+
+	handler := f.GetFileHandler(absPath)
+	if handler == nil {
+		// No handler supported for file, mark as unsupported if not already
+		if !hasFileState || !fileState.Unsupported {
+			f.setFileState(absPath, FileState{
+				Size:        info.Size(),
+				Unsupported: true,
+			})
+		}
+		return nil
+	}
+
+	// Check if file is too old
+	if !entry.IsDir() && info.ModTime().Before(time.Now().Add(-time.Duration(skipPeriodHours)*time.Hour)) {
+		f.setFileState(absPath, FileState{
+			Size:        info.Size(),
+			Unsupported: true,
+			TooOld:      true,
+		})
+		return nil
+	}
+
+	isListening := listeningDirs.Contains(baseFolder)
+	isCollecting := collectingDirs.Contains(baseFolder)
+	isPrevListening := f.listenDirs.Contains(baseFolder)
+
+	// Check if file needs to skip process
+	curFileSize, err := handler.GetFileSize(absPath)
+	if err != nil {
+		log.Errorf("Error getting file size for %s: %v", absPath, err)
+		return errors.Errorf("error getting file size for %s: %v", absPath, err)
+	}
+
+	// Update state
+	newState := fileState
+	if !hasFileState || fileState.Size != curFileSize {
+		startTime, endTime, err := handler.GetStartTimeEndTime(absPath)
+		if err != nil {
+			log.Errorf("Error getting start and end time for %s: %v", absPath, err)
+			f.setFileState(absPath, FileState{
+				Size:        curFileSize,
+				Unsupported: true,
+			})
+			return nil
+		}
+		newState = FileState{
+			Size:      curFileSize,
+			StartTime: startTime.Unix(),
+			EndTime:   endTime.Unix(),
+		}
+	}
+
+	newState.IsListening = isListening
+	newState.IsCollecting = isCollecting
+	// change the process state to processed if the file is not being listened to all the time
+	if !isListening || !isPrevListening {
+		newState.ProcessState = processStateProcessed
+	}
+
+	f.setFileState(absPath, newState)
 	return nil
 }
 
