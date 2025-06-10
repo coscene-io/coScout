@@ -18,8 +18,6 @@ jobs:
         uses: extractions/netrc@v2
         with:
           machine: buf.build
-          username: ${{ secrets.BUF_USERNAME }}
-          password: ${{ secrets.BUF_TOKEN }}
       - name: Set up github netrc
         uses: extractions/netrc@v2
         with:
