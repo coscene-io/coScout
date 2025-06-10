@@ -19,4 +19,5 @@ type Storage interface {
 	Get(bucket, key []byte) ([]byte, error)
 	Delete(bucket, key []byte) error
 	Close() error
+	Iter(bucket []byte, fn func(key, value []byte) error) error
 }

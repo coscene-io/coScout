@@ -300,6 +300,7 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 		}
 
 		// Check should recursively walk directories
+		//nolint: nestif // complexity is acceptable for this function
 		if conf.RecursivelyWalkDirs {
 			err := filepath.WalkDir(dir, func(entryPath string, d os.DirEntry, err error) error {
 				if err != nil {
