@@ -63,7 +63,7 @@ jobs:
       - name: Set up go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.23.x
+          go-version: 1.24.x
           check-latest: true
           cache: true
       - name: Set up CD tools
