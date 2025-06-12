@@ -35,6 +35,22 @@ func NewBoltDB(filepath string) Storage {
 	return &BoltDB{db: db}
 }
 
+func (bb *BoltDB) Iter(bucket []byte, fn func(key []byte, value []byte) error) error {
+	return bb.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+
+		return b.ForEach(func(key, value []byte) error {
+			if err := fn(key, value); err != nil {
+				return errors.Wrap(err, "iterate bucket")
+			}
+			return nil
+		})
+	})
+}
+
 func (bb *BoltDB) Put(bucket, key, value []byte) error {
 	return bb.db.Update(func(tx *bbolt.Tx) error {
 		createdBucket, err := tx.CreateBucketIfNotExists(bucket)

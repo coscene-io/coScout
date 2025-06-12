@@ -76,6 +76,7 @@ type DefaultModConfConfig struct {
 	Ros2CustomizedMsgDirs []string `koanf:"ros2_customized_msgs_dirs" yaml:"ros2_customized_msgs_dirs" json:"ros2_customized_msgs_dirs"`
 	UploadFiles           []string `koanf:"upload_files" yaml:"upload_files" json:"upload_files"`
 	SkipPeriodHours       int      `koanf:"skip_period_hours" yaml:"skip_period_hours" json:"skip_period_hours"`
+	RecursivelyWalkDirs   bool     `koanf:"recursively_walk_dirs" yaml:"recursively_walk_dirs" json:"recursively_walk_dirs"`
 }
 
 type HttpServerConfig struct {

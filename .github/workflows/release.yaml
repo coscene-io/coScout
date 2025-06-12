@@ -74,8 +74,6 @@ jobs:
         uses: extractions/netrc@v2
         with:
           machine: buf.build
-          username: ${{ secrets.BUF_USERNAME }}
-          password: ${{ secrets.BUF_TOKEN }}
       - name: Set up github netrc
         uses: extractions/netrc@v2
         with:
@@ -102,8 +100,8 @@ jobs:
       - name: Upload cos agent to oss
         uses: tvrcgo/oss-action@master
         with:
-          key-id: ${{ secrets.ACK_ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACK_ACCESS_KEY_SECRET }}
+          key-id: ${{ secrets.OSS_ARTIFACTS_ACCESS_KEY }}
+          key-secret: ${{ secrets.OSS_ARTIFACTS_ACCESS_SECRET }}
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
@@ -113,8 +111,8 @@ jobs:
         if: env.IS_RELEASE == 'true'
         uses: tvrcgo/oss-action@master
         with:
-          key-id: ${{ secrets.ACK_ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACK_ACCESS_KEY_SECRET }}
+          key-id: ${{ secrets.OSS_ARTIFACTS_ACCESS_KEY }}
+          key-secret: ${{ secrets.OSS_ARTIFACTS_ACCESS_SECRET }}
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
@@ -125,8 +123,8 @@ jobs:
         if: env.IS_RELEASE == 'false'
         uses: tvrcgo/oss-action@master
         with:
-          key-id: ${{ secrets.ACK_ACCESS_KEY_ID }}
-          key-secret: ${{ secrets.ACK_ACCESS_KEY_SECRET }}
+          key-id: ${{ secrets.OSS_ARTIFACTS_ACCESS_KEY }}
+          key-secret: ${{ secrets.OSS_ARTIFACTS_ACCESS_SECRET }}
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |

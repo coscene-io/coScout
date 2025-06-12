@@ -44,6 +44,27 @@ import (
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan *model.RecordCache, errorChan chan error) {
 	log.Infof("Start upload goroutine")
 
+	go func() {
+		// Clean up cache file info periodically
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				ticker.Reset(24 * time.Hour) // Reset ticker to 24 hours
+
+				log.Info("Cleaning cache file info")
+				if err := cleanCacheFileInfo(confManager.GetStorage()); err != nil {
+					log.Errorf("failed to clean cache file info: %v", err)
+				}
+			case <-ctx.Done():
+				log.Info("clean cache file info goroutine done")
+				return
+			}
+		}
+	}()
+
 	for {
 		select {
 		case recordCache := <-uploadChan:
@@ -372,6 +393,14 @@ func getCacheFileInfo(storage *storage.Storage, file string) *model.FileInfo {
 		log.Errorf("failed to unmarshal file info: %v", err)
 		return &info
 	}
+	fileSize, err := utils.GetFileSize(file)
+	if err == nil && fileSize >= 0 {
+		if info.Size != fileSize {
+			log.Warnf("file size mismatch for %s, cached: %d, actual: %d", file, info.Size, fileSize)
+			return &model.FileInfo{Size: -1}
+		}
+	}
+
 	return &info
 }
 
@@ -385,4 +414,26 @@ func saveCacheFileInfo(storage *storage.Storage, info *model.FileInfo) {
 	if err := (*storage).Put([]byte(constant.FileInfoBucket), []byte(info.Path), bytes); err != nil {
 		log.Errorf("failed to save file info: %v", err)
 	}
+}
+
+func cleanCacheFileInfo(storage *storage.Storage) error {
+	if storage == nil {
+		log.Warn("storage is nil, skip cleaning cache file info")
+		return nil
+	}
+
+	log.Info("cleaning cache file info")
+	err := (*storage).Iter([]byte(constant.FileInfoBucket), func(key []byte, value []byte) error {
+		if utils.CheckReadPath(string(key)) {
+			return nil
+		}
+
+		if err := (*storage).Delete([]byte(constant.FileInfoBucket), key); err != nil {
+			log.Errorf("failed to delete file info: %v", err)
+			return err
+		}
+		log.Infof("deleted cache file info for %s", string(key))
+		return nil
+	})
+	return err
 }
