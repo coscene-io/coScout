@@ -20,7 +20,6 @@ import (
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
-	"github.com/coscene-io/x/conf"
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/parsers/yaml"
@@ -74,7 +73,8 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 		Mod: ModConfConfig{
 			Name: "default",
 			Config: DefaultModConfConfig{
-				SkipPeriodHours: 2,
+				SkipPeriodHours:     2,
+				RecursivelyWalkDirs: false,
 			},
 		},
 		HttpServer: HttpServerConfig{
@@ -86,7 +86,7 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 func (c ConfManager) LoadOnce() AppConfig {
 	appConf := c.getDefaultConfig()
 
-	if err := conf.ParseYAML(c.cfg, &appConf); err != nil {
+	if err := utils.ParseYAML(c.cfg, &appConf); err != nil {
 		log.Fatalf("unable to load cos config: %v", err)
 	}
 	for _, f := range appConf.Import {
@@ -100,7 +100,7 @@ func (c ConfManager) LoadOnce() AppConfig {
 			continue
 		}
 
-		if err := conf.ParseYAML(localPath, &appConf); err != nil {
+		if err := utils.ParseYAML(localPath, &appConf); err != nil {
 			log.Fatalf("unable to load cos config: %v", err)
 		}
 	}

@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/coscene-io/coscout/internal/config"
@@ -62,6 +63,8 @@ type Task struct {
 }
 
 type RecordCache struct {
+	mu sync.RWMutex
+
 	Uploaded    bool   `json:"uploaded" yaml:"uploaded"`
 	Skipped     bool   `json:"skipped" yaml:"skipped"`
 	EventCode   string `json:"event_code" yaml:"event_code"`
@@ -85,6 +88,14 @@ type RecordCache struct {
 }
 
 func (rc *RecordCache) GetBaseFolder() string {
+	// use read lock to protect concurrent access
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+
+	return rc.getBaseFolder()
+}
+
+func (rc *RecordCache) getBaseFolder() string {
 	baseFolder := config.GetRecordCacheFolder()
 
 	seconds := rc.Timestamp / 1000
@@ -97,7 +108,11 @@ func (rc *RecordCache) GetBaseFolder() string {
 }
 
 func (rc *RecordCache) Save() error {
-	baseFolder := rc.GetBaseFolder()
+	// use write lock to protect concurrent writes
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	baseFolder := rc.getBaseFolder()
 	dirPath := filepath.Join(baseFolder, ".cos")
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
@@ -120,7 +135,11 @@ func (rc *RecordCache) Save() error {
 }
 
 func (rc *RecordCache) Reload() (*RecordCache, error) {
-	baseFolder := rc.GetBaseFolder()
+	// use write lock to protect concurrent access
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
+	baseFolder := rc.getBaseFolder()
 	file := filepath.Join(baseFolder, ".cos", "state.json")
 	if _, err := os.Stat(file); os.IsNotExist(err) {
 		return nil, errors.Wrap(err, "record cache file not exist")
@@ -139,7 +158,11 @@ func (rc *RecordCache) Reload() (*RecordCache, error) {
 }
 
 func (rc *RecordCache) Clean() string {
-	baseFolder := rc.GetBaseFolder()
+	// use read lock to protect concurrent access
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+
+	baseFolder := rc.getBaseFolder()
 	if utils.CheckReadPath(baseFolder) {
 		if utils.DeleteDir(baseFolder) {
 			return baseFolder
@@ -149,6 +172,10 @@ func (rc *RecordCache) Clean() string {
 }
 
 func (rc *RecordCache) GetRecordCachePath() string {
-	baseFolder := rc.GetBaseFolder()
+	// use read lock to protect concurrent access
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+
+	baseFolder := rc.getBaseFolder()
 	return filepath.Join(baseFolder, ".cos", "state.json")
 }

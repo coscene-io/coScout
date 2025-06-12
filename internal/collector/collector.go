@@ -476,6 +476,12 @@ func createRecordRelatedDiagnosisTasks(deviceInfo *openDpsV1alpha1Resource.Devic
 		if err != nil {
 			log.Errorf("save record cache failed: %v", err)
 		}
+
+		_, err := reqClient.UpdateTaskState(task.GetName(), openDpsV1alpha1Enum.TaskStateEnum_PROCESSING.Enum())
+		if err != nil {
+			log.Errorf("update task state failed: %v", err)
+		}
+		log.Infof("Created diagnosis task: %s", task.GetName())
 	}
 }
 

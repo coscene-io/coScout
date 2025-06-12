@@ -1,14 +1,13 @@
 module github.com/coscene-io/coscout
 
-go 1.22.2
+go 1.23.4
 
 require (
-	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250509083617-08f8efe5d0d6.1
-	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.6-20250509083617-08f8efe5d0d6.1
+	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250612032226-499b812be2d0.1
+	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.6-20250612032226-499b812be2d0.1
 	connectrpc.com/connect v1.18.1
 	github.com/ThreeDotsLabs/watermill v1.4.4
-	github.com/bmatcuk/doublestar/v4 v4.8.0
-	github.com/coscene-io/x v0.0.0-20241217064456-1ad08bd128a7
+	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/deckarep/golang-set/v2 v2.7.0
 	github.com/foxglove/go-rosbag v0.0.7
 	github.com/foxglove/mcap/go/mcap v1.7.3
@@ -18,7 +17,7 @@ require (
 	github.com/itchyny/timefmt-go v0.1.6
 	github.com/knadh/koanf v1.5.0
 	github.com/minio/minio-go/v7 v7.0.61
-	github.com/oriser/regroup v0.0.0-20210730155327-fca8d7531263
+	github.com/oriser/regroup v0.0.0-20240925165441-f6bb0e08289e
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.47.0
 	github.com/sirupsen/logrus v1.9.3
@@ -40,7 +39,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
-	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
@@ -70,5 +68,4 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20241021214115-324edc3d5d38 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241021214115-324edc3d5d38 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
