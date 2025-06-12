@@ -6,7 +6,7 @@ require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250612032226-499b812be2d0.1
 	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.6-20250612032226-499b812be2d0.1
 	connectrpc.com/connect v1.18.1
-	github.com/ThreeDotsLabs/watermill v1.4.4
+	github.com/ThreeDotsLabs/watermill v1.4.6
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/deckarep/golang-set/v2 v2.7.0
 	github.com/foxglove/go-rosbag v0.0.7
