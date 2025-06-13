@@ -354,8 +354,9 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		Timestamp:   time.Now().UnixMilli(),
 		Labels:      taskDetail.GetLabels(),
 		UploadTask: map[string]interface{}{
-			"name":  task.GetName(),
-			"title": task.GetTitle(),
+			"name":        task.GetName(),
+			"title":       task.GetTitle(),
+			"description": task.GetDescription(),
 		},
 		OriginalFiles: files,
 	}
