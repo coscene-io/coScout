@@ -423,17 +423,26 @@ func cleanCacheFileInfo(storage *storage.Storage) error {
 	}
 
 	log.Info("cleaning cache file info")
+	expiredFiles := make([]string, 0)
 	err := (*storage).Iter([]byte(constant.FileInfoBucket), func(key []byte, value []byte) error {
 		if utils.CheckReadPath(string(key)) {
 			return nil
 		}
 
-		if err := (*storage).Delete([]byte(constant.FileInfoBucket), key); err != nil {
-			log.Errorf("failed to delete file info: %v", err)
-			return err
-		}
-		log.Infof("deleted cache file info for %s", string(key))
+		expiredFiles = append(expiredFiles, string(key))
 		return nil
 	})
-	return err
+
+	if err != nil {
+		log.Errorf("failed to iterate cache file info: %v", err)
+		return err
+	}
+
+	for _, file := range expiredFiles {
+		log.Infof("deleting cache file info for %s", file)
+		if err := (*storage).Delete([]byte(constant.FileInfoBucket), []byte(file)); err != nil {
+			log.Errorf("failed to delete cache file info for %s: %v", file, err)
+		}
+	}
+	return nil
 }

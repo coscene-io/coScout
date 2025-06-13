@@ -202,6 +202,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	startTime := taskDetail.GetStartTime()
 	endTime := taskDetail.GetEndTime()
 	taskFolders := taskDetail.GetScanFolders()
+	additionalFiles := taskDetail.GetAdditionalFiles()
 
 	if len(taskFolders) == 0 {
 		return
@@ -270,6 +271,65 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		}
 	}
 
+	for _, file := range additionalFiles {
+		canRead := utils.CheckReadPath(file)
+		if !canRead {
+			log.Warnf("Path %s is not readable, skip!", file)
+
+			noPermissionFolders = append(noPermissionFolders, file)
+			continue
+		}
+
+		info, err := os.Stat(file)
+		if err != nil {
+			log.Errorf("Failed to get folder info: %v", err)
+			continue
+		}
+		if !info.IsDir() {
+			files[file] = model.FileInfo{
+				FileName: filepath.Base(file),
+				Size:     info.Size(),
+				Path:     file,
+			}
+			continue
+		}
+
+		err = filepath.Walk(file, func(path string, info os.FileInfo, err error) error {
+			if !utils.CheckReadPath(path) {
+				log.Warnf("Path %s is not readable, skip!", path)
+				return nil
+			}
+
+			if err != nil {
+				log.Errorf("Failed to walk through folder %s", path)
+				//nolint: nilerr // skip file
+				return nil
+			}
+
+			if info.IsDir() {
+				return nil
+			}
+
+			filename, err := filepath.Rel(file, path)
+			if err != nil {
+				log.Errorf("Failed to get relative path: %v", err)
+				filename = filepath.Base(path)
+			}
+
+			files[path] = model.FileInfo{
+				FileName: filename,
+				Size:     info.Size(),
+				Path:     path,
+			}
+			return nil
+		})
+
+		if err != nil {
+			log.Errorf("Failed to walk through folder %s: %v", file, err)
+			continue
+		}
+	}
+
 	if len(files) == 0 {
 		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum())
 		if err != nil {
@@ -294,8 +354,9 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		Timestamp:   time.Now().UnixMilli(),
 		Labels:      taskDetail.GetLabels(),
 		UploadTask: map[string]interface{}{
-			"name":  task.GetName(),
-			"title": task.GetTitle(),
+			"name":        task.GetName(),
+			"title":       task.GetTitle(),
+			"description": task.GetDescription(),
 		},
 		OriginalFiles: files,
 	}

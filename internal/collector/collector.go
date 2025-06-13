@@ -419,7 +419,7 @@ func createRecordRelatedDiagnosisTasks(deviceInfo *openDpsV1alpha1Resource.Devic
 
 	diaTask := openDpsV1alpha1Resource.Task{
 		Title:       recordTitle,
-		Description: getRecordDescription(recordTitle, rc),
+		Description: getRecordDescription(rc),
 		Category:    openDpsV1alpha1Enum.TaskCategoryEnum_DIAGNOSIS,
 		State:       openDpsV1alpha1Enum.TaskStateEnum_PROCESSING,
 		Tags: map[string]string{
@@ -520,7 +520,7 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 	}
 
 	title := getRecordTitle(recordCache)
-	description := getRecordDescription(title, recordCache)
+	description := getRecordDescription(recordCache)
 
 	labels := make([]*openDpsV1alpha1Resource.Label, 0)
 	for _, label := range recordCache.Labels {
@@ -582,13 +582,18 @@ func getRecordTitle(rc *model.RecordCache) string {
 	return "Record at " + triggerTime
 }
 
-func getRecordDescription(title string, rc *model.RecordCache) string {
+func getRecordDescription(rc *model.RecordCache) string {
 	desc, ok := rc.Record["description"].(string)
 	if ok && desc != "" {
 		return desc
 	}
 
-	return title
+	taskDesc, ok := rc.UploadTask["description"].(string)
+	if ok && taskDesc != "" {
+		return taskDesc
+	}
+
+	return ""
 }
 
 func checkRecordCacheExpired(expiredHours int, timestamp int64, rcPath string) bool {
