@@ -79,11 +79,19 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, prevActivationT
 	case prevActivationTime == nil:
 		return true, &ts
 	case ts.Before(*prevActivationTime):
+		source, ok := activation["source"].(string)
+		// http means from HTTP source(such as ros listener), we need time sequence check, should increase time sequence.
+		if ok && source == "http" {
+			log.Warnf("Rule %s: activation time is before previous activation timem, ignoring", r.Metadata["rule_display_name"])
+			return false, prevActivationTime
+		}
+
+		// otherwise, may read from file, we should not check time sequence.
 		return true, &ts
 	case ts.Sub(*prevActivationTime) > r.DebounceTime:
 		return true, &ts
 	default:
-		log.Infof("Rule %s: debounce time not met", r.Metadata["rule_display_name"])
+		log.Infof("Rule %s: met but in debounce period", r.Metadata["rule_display_name"])
 		return false, &ts
 	}
 }

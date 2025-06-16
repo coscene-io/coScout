@@ -17,6 +17,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	"github.com/ThreeDotsLabs/watermill"
 	gcmessage "github.com/ThreeDotsLabs/watermill/message"
@@ -55,6 +56,16 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 
 		log.Infof("Received %d messages from colistener", len(req.Messages))
 		// Publish messages
+
+		slices.SortFunc(req.Messages, func(a, b rule_engine.RuleItem) int {
+			if a.Ts < b.Ts {
+				return -1
+			} else if a.Ts > b.Ts {
+				return 1
+			}
+			return 0
+		})
+
 		for _, message := range req.Messages {
 			message.Source = "http"
 			data, err := json.Marshal(message)
