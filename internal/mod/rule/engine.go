@@ -143,10 +143,11 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 		}
 
 		curActivation := map[string]interface{}{
-			"msg":   item.Msg,
-			"scope": rule.Scope,
-			"topic": item.Topic,
-			"ts":    item.Ts,
+			"msg":    item.Msg,
+			"scope":  rule.Scope,
+			"topic":  item.Topic,
+			"ts":     item.Ts,
+			"source": item.Source,
 		}
 
 		var prevActivationTime *time.Time
@@ -185,10 +186,21 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 
 func (e *Engine) cleanupDebounceTime() {
 	if len(e.ruleDebounceTime) > debounceMapSize {
+		log.Infof("cleaning up debounce time map, current size: %d", len(e.ruleDebounceTime))
+
+		deleteKeys := make([]string, 0, len(e.ruleDebounceTime))
 		for key, ts := range e.ruleDebounceTime {
 			if ts != nil && time.Since(*ts) > debounceMaxDuration {
-				delete(e.ruleDebounceTime, key)
+				deleteKeys = append(deleteKeys, key)
 			}
+		}
+
+		for _, key := range deleteKeys {
+			log.Infof("deleting debounce time for rule %s", key)
+			if key == "" {
+				continue
+			}
+			delete(e.ruleDebounceTime, key)
 		}
 	}
 }

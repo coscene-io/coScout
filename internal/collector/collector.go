@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -67,6 +68,8 @@ func FindAllRecordCaches() []string {
 	if err != nil {
 		log.Errorf("walk through cache directory failed: %v", err)
 	}
+
+	slices.Sort(records)
 	return records
 }
 
