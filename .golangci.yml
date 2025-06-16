@@ -16,7 +16,7 @@ linters-settings:
   godox:
     # TODO, OPT, etc. comments are fine to commit. Use FIXME comments for
     # temporary hacks, and use godox to prevent committing them.
-    keywords: [FIXME]
+    keywords: [ FIXME ]
   importas:
     no-unaliased: true
   varnamelen:
