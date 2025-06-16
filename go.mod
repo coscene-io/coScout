@@ -1,6 +1,6 @@
 module github.com/coscene-io/coscout
 
-go 1.23.4
+go 1.24.4
 
 require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250613072610-46122efff246.1
@@ -9,6 +9,7 @@ require (
 	github.com/ThreeDotsLabs/watermill v1.4.6
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/deckarep/golang-set/v2 v2.8.0
+	github.com/djherbis/times v1.6.0
 	github.com/foxglove/go-rosbag v0.0.7
 	github.com/foxglove/mcap/go/mcap v1.7.3
 	github.com/google/cel-go v0.25.0
@@ -62,7 +63,7 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
-	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1 // indirect
+	golang.org/x/exp v0.0.0-20230515195305-f3d0a9c9a5cc // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241021214115-324edc3d5d38 // indirect

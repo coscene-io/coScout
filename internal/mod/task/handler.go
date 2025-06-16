@@ -35,6 +35,7 @@ import (
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
+	"github.com/djherbis/times"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -249,6 +250,8 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 				return nil
 			}
 
+			log.Infof("file %s, mod time: %s", path, info.ModTime().String())
+			//nolint: nestif // check file modification time
 			if info.ModTime().After(startTime.AsTime()) && info.ModTime().Before(endTime.AsTime()) {
 				filename, err := filepath.Rel(folder, path)
 				if err != nil {
@@ -261,7 +264,32 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 					Size:     info.Size(),
 					Path:     path,
 				}
+			} else {
+				stat, err := times.Stat(path)
+				if err != nil {
+					log.Errorf("Failed to get file times for %s: %v", path, err)
+					return nil
+				}
+
+				if stat.HasBirthTime() {
+					log.Infof("File %s has birth time: %s", path, stat.BirthTime().String())
+
+					if stat.BirthTime().After(startTime.AsTime()) && stat.BirthTime().Before(endTime.AsTime()) {
+						filename, err := filepath.Rel(folder, path)
+						if err != nil {
+							log.Errorf("Failed to get relative path: %v", err)
+							filename = filepath.Base(path)
+						}
+
+						files[path] = model.FileInfo{
+							FileName: filename,
+							Size:     info.Size(),
+							Path:     path,
+						}
+					}
+				}
 			}
+
 			return nil
 		})
 
