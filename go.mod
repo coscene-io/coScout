@@ -9,6 +9,7 @@ require (
 	github.com/ThreeDotsLabs/watermill v1.4.6
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/deckarep/golang-set/v2 v2.8.0
+	github.com/djherbis/times v1.6.0
 	github.com/foxglove/go-rosbag v0.0.7
 	github.com/foxglove/mcap/go/mcap v1.7.3
 	github.com/google/cel-go v0.25.0
