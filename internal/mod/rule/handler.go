@@ -489,31 +489,40 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 		}
 
 		baseDir := filepath.Dir(fileState.Pathname)
+		filePaths, err := utils.GetAllFilePaths(fileState.Pathname, &utils.SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: true,
+			SkipEmptyFiles:       true,
+			MaxFiles:             99999,
+		})
+		if err != nil {
+			log.Errorf("failed to get all file paths: %v", err)
+			continue
+		}
 
-		err := filepath.Walk(fileState.Pathname, func(path string, info os.FileInfo, err error) error {
+		for _, filePath := range filePaths {
+			info, err := os.Stat(filePath)
 			if err != nil {
-				log.Errorf("failed to walk through path %s", path)
-				//nolint: nilerr // continue walking
-				return nil
+				log.Errorf("failed to stat file %s: %v", filePath, err)
+				continue
 			}
 
 			if info.IsDir() {
-				return nil
+				continue
 			}
 
-			filename, err := filepath.Rel(baseDir, path)
+			filename, err := filepath.Rel(baseDir, filePath)
 			if err != nil {
 				log.Errorf("failed to get relative path: %v", err)
-				filename = filepath.Base(path)
+				filename = filepath.Base(filePath)
 			}
 
-			files[path] = model.FileInfo{
+			files[filePath] = model.FileInfo{
 				FileName: filename,
 				Size:     info.Size(),
-				Path:     path,
+				Path:     filePath,
 			}
-			return nil
-		})
+		}
 		log.Errorf("failed to walk through dir %s: %v", fileState.Pathname, err)
 	}
 	return files

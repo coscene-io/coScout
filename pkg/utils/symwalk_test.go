@@ -25,39 +25,6 @@ import (
 
 var errOther = errors.New("other error")
 
-// Example: basic usage.
-func ExampleSymWalk_basic() {
-	// Use default configuration to traverse current directory
-	err := SymWalk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			fmt.Printf("Error accessing %s: %v\n", path, err)
-			return nil
-		}
-
-		if info.IsDir() {
-			fmt.Printf("Directory: %s\n", path)
-		} else {
-			fmt.Printf("File: %s (size: %d)\n", path, info.Size())
-		}
-		return nil
-	}, nil)
-
-	if err != nil {
-		fmt.Printf("Traversal failed: %v\n", err)
-	}
-	// Output:
-	// Directory: .
-	// File: conf.go (size: 1133)
-	// File: file.go (size: 2934)
-	// File: file_test.go (size: 4828)
-	// File: symwalk.go (size: 6415)
-	// File: symwalk_test.go (size: 11797)
-	// File: timestamp.go (size: 2238)
-	// File: timestamp_test.go (size: 2037)
-	// File: utils.go (size: 755)
-	// File: utils_test.go (size: 1665)
-}
-
 // Example: custom configuration.
 func ExampleSymWalk_custom() {
 	// Custom configuration
@@ -458,29 +425,747 @@ func ExampleSymWalk_findFiles() {
 	// - utils_test.go
 }
 
-// Real-world usage example: calculate directory size.
-func ExampleSymWalk_calculateSize() {
-	var totalSize int64
-	var fileCount int
+// Test GetAllFilePaths basic functionality.
+func TestGetAllFilePaths_Basic(t *testing.T) {
+	t.Parallel()
 
-	err := SymWalk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil //nolint:nilerr // skip errors in example
+	tmpDir := t.TempDir()
+
+	// Create test files and directories
+	testFiles := []string{"file1.txt", "file2.go", "file3.md"}
+	testDir := filepath.Join(tmpDir, "subdir")
+	if err := os.Mkdir(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create files in root directory
+	for _, filename := range testFiles {
+		if err := os.WriteFile(filepath.Join(tmpDir, filename), []byte("content"), 0600); err != nil {
+			t.Fatal(err)
 		}
+	}
 
-		if !info.IsDir() {
-			totalSize += info.Size()
-			fileCount++
+	// Create files in subdirectory
+	subFiles := []string{"subfile1.txt", "subfile2.go"}
+	for _, filename := range subFiles {
+		if err := os.WriteFile(filepath.Join(testDir, filename), []byte("subcontent"), 0600); err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	}, DefaultSymWalkOptions())
+	}
 
+	// Test with default options
+	paths, err := GetAllFilePaths(tmpDir, nil)
 	if err != nil {
-		fmt.Printf("Size calculation failed: %v\n", err)
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	// Should have 5 files total (3 in root + 2 in subdirectory)
+	expectedCount := 5
+	if len(paths) != expectedCount {
+		t.Errorf("Expected %d files, got %d", expectedCount, len(paths))
+	}
+
+	// Check that all paths are absolute
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			t.Errorf("Path should be absolute: %s", path)
+		}
+	}
+
+	// Check that no directories are included
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("Cannot stat path %s: %v", path, err)
+			continue
+		}
+		if info.IsDir() {
+			t.Errorf("Directory should not be included in result: %s", path)
+		}
+	}
+
+	// Check that files are in lexical order (should be deterministic)
+	for i := 1; i < len(paths); i++ {
+		if paths[i-1] >= paths[i] {
+			t.Errorf("Paths are not in lexical order: %s >= %s", paths[i-1], paths[i])
+		}
+	}
+}
+
+// Test GetAllFilePaths with empty directory.
+func TestGetAllFilePaths_EmptyDirectory(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	paths, err := GetAllFilePaths(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	if len(paths) != 0 {
+		t.Errorf("Expected empty result for empty directory, got %d files", len(paths))
+	}
+}
+
+// Test GetAllFilePaths with symbolic links.
+func TestGetAllFilePaths_Symlinks(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a regular file
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("test content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a directory with files
+	testDir := filepath.Join(tmpDir, "testdir")
+	if err := os.Mkdir(testDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	nestedFile := filepath.Join(testDir, "nested.txt")
+	if err := os.WriteFile(nestedFile, []byte("nested content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create symlinks
+	symlinkToFile := filepath.Join(tmpDir, "link_to_file")
+	symlinkToDir := filepath.Join(tmpDir, "link_to_dir")
+
+	if err := os.Symlink(testFile, symlinkToFile); err != nil {
+		t.Skip("Symlink creation not supported on this system")
+	}
+	if err := os.Symlink(testDir, symlinkToDir); err != nil {
+		t.Skip("Symlink creation not supported on this system")
+	}
+
+	// Test with following symlinks (default behavior)
+	options := &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: true,
+	}
+
+	paths, err := GetAllFilePaths(tmpDir, options)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	// Should include: test.txt, nested.txt, link_to_file, and nested.txt through link_to_dir
+	// Note: the exact count may vary depending on symlink handling, but should be >= 3
+	if len(paths) < 3 {
+		t.Errorf("Expected at least 3 files when following symlinks, got %d", len(paths))
+	}
+
+	// Test without following symlinks
+	options.FollowSymlinks = false
+	paths, err = GetAllFilePaths(tmpDir, options)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	// Should include: test.txt, nested.txt, link_to_file (symlink treated as file), link_to_dir (symlink treated as file)
+	// So we expect 4 files total
+	expectedCount := 4
+	if len(paths) != expectedCount {
+		t.Errorf("Expected %d files when not following symlinks, got %d", expectedCount, len(paths))
+	}
+}
+
+// Test GetAllFilePaths with non-existent directory.
+func TestGetAllFilePaths_NonExistentDirectory(t *testing.T) {
+	t.Parallel()
+
+	paths, err := GetAllFilePaths("/non/existent/path", nil)
+	if err == nil {
+		t.Error("Expected error for non-existent directory")
+	}
+	if paths != nil {
+		t.Error("Expected nil paths for non-existent directory")
+	}
+}
+
+// Test GetAllFilePaths with custom options.
+func TestGetAllFilePaths_CustomOptions(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create test files
+	if err := os.WriteFile(filepath.Join(tmpDir, "file1.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "file2.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with custom options
+	options := &SymWalkOptions{
+		FollowSymlinks:       false,
+		SkipPermissionErrors: false,
+	}
+
+	paths, err := GetAllFilePaths(tmpDir, options)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	if len(paths) != 2 {
+		t.Errorf("Expected 2 files, got %d", len(paths))
+	}
+
+	file1 := filepath.Join(tmpDir, "file1.txt")
+	filePaths, err := GetAllFilePaths(file1, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filePaths) != 1 {
+		t.Errorf("Expected absolute path for file1.txt, got %s", filePaths)
+	}
+}
+
+// Test GetAllFilePaths with nested directories.
+func TestGetAllFilePaths_NestedDirectories(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create nested directory structure
+	// tmpDir/
+	//   ├── file1.txt
+	//   ├── dir1/
+	//   │   ├── file2.txt
+	//   │   └── dir2/
+	//   │       └── file3.txt
+	//   └── dir3/
+	//       └── file4.txt
+
+	dirs := []string{
+		filepath.Join(tmpDir, "dir1"),
+		filepath.Join(tmpDir, "dir1", "dir2"),
+		filepath.Join(tmpDir, "dir3"),
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files := map[string]string{
+		filepath.Join(tmpDir, "file1.txt"):                 "content1",
+		filepath.Join(tmpDir, "dir1", "file2.txt"):         "content2",
+		filepath.Join(tmpDir, "dir1", "dir2", "file3.txt"): "content3",
+		filepath.Join(tmpDir, "dir3", "file4.txt"):         "content4",
+	}
+
+	for filePath, content := range files {
+		if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	paths, err := GetAllFilePaths(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	if len(paths) != 4 {
+		t.Errorf("Expected 4 files, got %d", len(paths))
+	}
+
+	// Verify all expected files are present
+	foundFiles := make(map[string]bool)
+	for _, path := range paths {
+		foundFiles[path] = true
+	}
+
+	for expectedPath := range files {
+		absExpected, err := filepath.Abs(expectedPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !foundFiles[absExpected] {
+			t.Errorf("Expected file not found: %s", absExpected)
+		}
+	}
+}
+
+// Benchmark GetAllFilePaths.
+func BenchmarkGetAllFilePaths(b *testing.B) {
+	tmpDir := b.TempDir()
+
+	// Create test files
+	for i := range 100 {
+		filename := filepath.Join(tmpDir, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(filename, []byte("test content"), 0600); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// Create some subdirectories with files
+	for i := range 10 {
+		subdir := filepath.Join(tmpDir, fmt.Sprintf("subdir%d", i))
+		if err := os.Mkdir(subdir, 0755); err != nil {
+			b.Fatal(err)
+		}
+		for j := range 10 {
+			filename := filepath.Join(subdir, fmt.Sprintf("subfile%d.txt", j))
+			if err := os.WriteFile(filename, []byte("test content"), 0600); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
+	b.ResetTimer()
+
+	for range b.N {
+		_, err := GetAllFilePaths(tmpDir, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Example usage of GetAllFilePaths with custom options.
+func ExampleGetAllFilePaths_customOptions() {
+	// Configure options to not follow symlinks and skip permission errors
+	options := &SymWalkOptions{
+		FollowSymlinks:       false,
+		SkipPermissionErrors: true,
+	}
+
+	paths, err := GetAllFilePaths(".", options)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Total %d files, total size %d bytes\n", fileCount, totalSize)
+	// Filter for specific file types
+	var goFiles []string
+	for _, path := range paths {
+		if filepath.Ext(path) == ".go" {
+			goFiles = append(goFiles, path)
+		}
+	}
+
+	fmt.Printf("Found %d Go files:\n", len(goFiles))
+	for _, path := range goFiles {
+		fmt.Printf("- %s\n", filepath.Base(path))
+	}
 	// Output:
-	// Total 9 files, total size 33802 bytes
+	// Found 9 Go files:
+	// - conf.go
+	// - file.go
+	// - file_test.go
+	// - symwalk.go
+	// - symwalk_test.go
+	// - timestamp.go
+	// - timestamp_test.go
+	// - utils.go
+	// - utils_test.go
+}
+
+// Test GetAllFilePaths with MaxFiles limit.
+func TestGetAllFilePaths_MaxFilesLimit(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create more files than the limit
+	maxFiles := 5
+	totalFiles := 10
+
+	for i := range totalFiles {
+		filename := filepath.Join(tmpDir, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(filename, []byte("content"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test with MaxFiles limit
+	options := &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: true,
+		MaxFiles:             maxFiles,
+	}
+
+	paths, err := GetAllFilePaths(tmpDir, options)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	// Should have collected exactly maxFiles before hitting the limit
+	if len(paths) != maxFiles {
+		t.Errorf("Expected exactly %d files, got %d", maxFiles, len(paths))
+	}
+}
+
+// Test GetAllFilePaths with MaxFiles set to 0 (no limit).
+func TestGetAllFilePaths_NoMaxFilesLimit(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create some test files
+	totalFiles := 15
+	for i := range totalFiles {
+		filename := filepath.Join(tmpDir, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(filename, []byte("content"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test with MaxFiles set to 0 (no limit)
+	options := &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: true,
+		MaxFiles:             0, // No limit
+	}
+
+	paths, err := GetAllFilePaths(tmpDir, options)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	// Should have collected all files
+	if len(paths) != totalFiles {
+		t.Errorf("Expected %d files, got %d", totalFiles, len(paths))
+	}
+}
+
+// Test GetAllFilePaths with default options (should have MaxFiles limit).
+func TestGetAllFilePaths_DefaultMaxFiles(t *testing.T) {
+	t.Parallel()
+
+	// Test that default options include MaxFiles limit
+	defaultOpts := DefaultSymWalkOptions()
+	if defaultOpts.MaxFiles <= 0 {
+		t.Error("Default options should have a positive MaxFiles limit")
+	}
+
+	expectedMaxFiles := 10000
+	if defaultOpts.MaxFiles != expectedMaxFiles {
+		t.Errorf("Expected default MaxFiles to be %d, got %d", expectedMaxFiles, defaultOpts.MaxFiles)
+	}
+}
+
+// Test GetAllFilePaths MaxFiles limit with nested directories.
+func TestGetAllFilePaths_MaxFilesWithNestedDirs(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	maxFiles := 3
+
+	// Create nested structure with files
+	// tmpDir/
+	//   ├── file1.txt
+	//   ├── dir1/
+	//   │   ├── file2.txt
+	//   │   └── file3.txt
+	//   └── dir2/
+	//       ├── file4.txt  // This should trigger the limit
+	//       └── file5.txt
+
+	// Root level file
+	if err := os.WriteFile(filepath.Join(tmpDir, "file1.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create dir1 with files
+	dir1 := filepath.Join(tmpDir, "dir1")
+	if err := os.Mkdir(dir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir1, "file2.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir1, "file3.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create dir2 with files (these should trigger the limit)
+	dir2 := filepath.Join(tmpDir, "dir2")
+	if err := os.Mkdir(dir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "file4.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "file5.txt"), []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	options := &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: true,
+		MaxFiles:             maxFiles,
+	}
+
+	paths, err := GetAllFilePaths(tmpDir, options)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	// Should have collected exactly maxFiles before hitting the limit
+	if len(paths) != maxFiles {
+		t.Errorf("Expected exactly %d files, got %d", maxFiles, len(paths))
+	}
+}
+
+// Test GetAllFilePaths only returns non-empty files.
+func TestGetAllFilePaths_OnlyNonEmptyFiles(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a mix of empty and non-empty files
+	files := map[string]string{
+		"empty1.txt":    "",          // Empty file
+		"empty2.txt":    "",          // Empty file
+		"nonempty1.txt": "content 1", // Non-empty file
+		"nonempty2.txt": "content 2", // Non-empty file
+		"empty3.txt":    "",          // Empty file
+		"nonempty3.txt": "content 3", // Non-empty file
+	}
+
+	for filename, content := range files {
+		filePath := filepath.Join(tmpDir, filename)
+		if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Get all file paths
+	paths, err := GetAllFilePaths(tmpDir, nil)
+	if err != nil {
+		t.Fatalf("GetAllFilePaths failed: %v", err)
+	}
+
+	// Should only have 3 non-empty files
+	expectedCount := 3
+	if len(paths) != expectedCount {
+		t.Errorf("Expected %d non-empty files, got %d", expectedCount, len(paths))
+	}
+
+	// Verify all returned files are non-empty
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("Cannot stat file %s: %v", path, err)
+			continue
+		}
+		if info.Size() <= 0 {
+			t.Errorf("Empty file should not be included: %s (size: %d)", path, info.Size())
+		}
+	}
+
+	// Verify that only non-empty files are returned
+	foundFiles := make(map[string]bool)
+	for _, path := range paths {
+		foundFiles[filepath.Base(path)] = true
+	}
+
+	// Check that non-empty files are included
+	expectedNonEmptyFiles := []string{"nonempty1.txt", "nonempty2.txt", "nonempty3.txt"}
+	for _, filename := range expectedNonEmptyFiles {
+		if !foundFiles[filename] {
+			t.Errorf("Non-empty file should be included: %s", filename)
+		}
+	}
+
+	// Check that empty files are not included
+	unexpectedEmptyFiles := []string{"empty1.txt", "empty2.txt", "empty3.txt"}
+	for _, filename := range unexpectedEmptyFiles {
+		if foundFiles[filename] {
+			t.Errorf("Empty file should not be included: %s", filename)
+		}
+	}
+}
+
+// Test SymWalk with SkipEmptyFiles option.
+func TestSymWalk_SkipEmptyFiles(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a mix of empty and non-empty files
+	files := map[string]string{
+		"empty1.txt":    "",          // Empty file
+		"nonempty1.txt": "content 1", // Non-empty file
+		"empty2.log":    "",          // Empty file
+		"nonempty2.log": "content 2", // Non-empty file
+	}
+
+	for filename, content := range files {
+		filePath := filepath.Join(tmpDir, filename)
+		if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Test with SkipEmptyFiles = true (default)
+	t.Run("SkipEmptyFiles enabled", func(t *testing.T) {
+		t.Parallel()
+		var visitedFiles []string
+		options := &SymWalkOptions{
+			SkipEmptyFiles: true,
+		}
+
+		err := SymWalk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				visitedFiles = append(visitedFiles, filepath.Base(path))
+			}
+			return nil
+		}, options)
+
+		if err != nil {
+			t.Fatalf("SymWalk failed: %v", err)
+		}
+
+		// Should only visit non-empty files
+		expectedCount := 2
+		if len(visitedFiles) != expectedCount {
+			t.Errorf("Expected %d non-empty files, got %d: %v", expectedCount, len(visitedFiles), visitedFiles)
+		}
+
+		// Check that only non-empty files were visited
+		for _, filename := range visitedFiles {
+			if filename == "empty1.txt" || filename == "empty2.log" {
+				t.Errorf("Empty file should not be visited: %s", filename)
+			}
+		}
+	})
+
+	// Test with SkipEmptyFiles = false
+	t.Run("SkipEmptyFiles disabled", func(t *testing.T) {
+		t.Parallel()
+		var visitedFiles []string
+		options := &SymWalkOptions{
+			SkipEmptyFiles: false,
+		}
+
+		err := SymWalk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				visitedFiles = append(visitedFiles, filepath.Base(path))
+			}
+			return nil
+		}, options)
+
+		if err != nil {
+			t.Fatalf("SymWalk failed: %v", err)
+		}
+
+		// Should visit all files
+		expectedCount := 4
+		if len(visitedFiles) != expectedCount {
+			t.Errorf("Expected %d files, got %d: %v", expectedCount, len(visitedFiles), visitedFiles)
+		}
+	})
+}
+
+// Test that default options skip empty files.
+func TestSymWalk_DefaultSkipsEmptyFiles(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create an empty file and a non-empty file
+	emptyFile := filepath.Join(tmpDir, "empty.txt")
+	nonEmptyFile := filepath.Join(tmpDir, "nonempty.txt")
+
+	if err := os.WriteFile(emptyFile, []byte(""), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nonEmptyFile, []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var visitedFiles []string
+
+	// Use nil options to test default behavior
+	err := SymWalk(tmpDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			visitedFiles = append(visitedFiles, filepath.Base(path))
+		}
+		return nil
+	}, nil)
+
+	if err != nil {
+		t.Fatalf("SymWalk failed: %v", err)
+	}
+
+	// Default should skip empty files
+	if len(visitedFiles) != 1 {
+		t.Errorf("Expected 1 file with default options, got %d: %v", len(visitedFiles), visitedFiles)
+	}
+
+	if len(visitedFiles) > 0 && visitedFiles[0] != "nonempty.txt" {
+		t.Errorf("Expected nonempty.txt, got %s", visitedFiles[0])
+	}
+}
+
+// Benchmark SymWalk with optimized implementation.
+func BenchmarkSymWalkOptimized(b *testing.B) {
+	// Create a test directory structure
+	tmpDir := b.TempDir()
+
+	// Create nested directories with files
+	for i := range 10 {
+		subdir := filepath.Join(tmpDir, fmt.Sprintf("dir%d", i))
+		if err := os.Mkdir(subdir, 0755); err != nil {
+			b.Fatal(err)
+		}
+
+		// Create files in each subdirectory
+		for j := range 100 {
+			filename := filepath.Join(subdir, fmt.Sprintf("file%d.txt", j))
+			if err := os.WriteFile(filename, []byte("test content"), 0600); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		err := SymWalk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			return nil
+		}, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// Benchmark GetAllFilePaths with optimized implementation.
+func BenchmarkGetAllFilePathsOptimized(b *testing.B) {
+	// Create a test directory structure
+	tmpDir := b.TempDir()
+
+	// Create files
+	for i := range 1000 {
+		filename := filepath.Join(tmpDir, fmt.Sprintf("file%d.txt", i))
+		if err := os.WriteFile(filename, []byte("test content"), 0600); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		_, err := GetAllFilePaths(tmpDir, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

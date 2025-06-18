@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"sort"
 	"syscall"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // SymWalkOptions contains simple configuration options for SymWalk.
@@ -30,6 +32,16 @@ type SymWalkOptions struct {
 	// SkipPermissionErrors when true, skips directories/files that cannot be accessed due to permission errors
 	// instead of returning an error.
 	SkipPermissionErrors bool
+
+	// MaxFiles limits the maximum number of files to collect in GetAllFilePaths.
+	// When set to 0, no limit is applied. Default is 10000.
+	// This helps prevent memory issues when traversing large directory structures
+	// or when symbolic links point to root directories.
+	MaxFiles int
+
+	// SkipEmptyFiles when true, skips files with size 0 to save processing time and memory.
+	// This is useful when empty files are not relevant for the use case.
+	SkipEmptyFiles bool
 }
 
 // DefaultSymWalkOptions returns a default configuration.
@@ -37,13 +49,18 @@ func DefaultSymWalkOptions() *SymWalkOptions {
 	return &SymWalkOptions{
 		FollowSymlinks:       true,
 		SkipPermissionErrors: true,
+		MaxFiles:             10000,
+		SkipEmptyFiles:       true,
 	}
 }
 
 // SymWalk walks the file tree rooted at root, calling walkFn for each file or
 // directory in the tree, including root. It supports following symbolic links
 // safely by preventing infinite loops. The files are walked in lexical order,
-// which makes the output deterministic.
+// which makes the output deterministic. By default, empty files (size 0) are
+// skipped to save processing time and memory.
+//
+// This implementation uses os.DirEntry to reduce system calls and improve performance.
 //
 // root: the starting path for traversal
 // walkFn: the function called for each file or directory (uses standard filepath.WalkFunc)
@@ -69,42 +86,6 @@ func SymWalk(root string, walkFn filepath.WalkFunc, options *SymWalkOptions) err
 		return nil
 	}
 	return err
-}
-
-// readDirNames reads the directory named by dirname and returns
-// a sorted list of directory entries.
-func readDirNames(dirname string) ([]string, error) {
-	f, err := os.Open(dirname)
-	if err != nil {
-		return nil, err
-	}
-	names, err := f.Readdirnames(-1)
-	f.Close()
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(names)
-	return names, nil
-}
-
-// symwalk recursively descends path, calling walkFn.
-func symwalk(path string, info os.FileInfo, walkFn filepath.WalkFunc, visited map[string]bool, options *SymWalkOptions) error {
-	// Handle symbolic links
-	if IsSymlink(info) && options.FollowSymlinks {
-		return handleSymlink(path, info, walkFn, visited, options)
-	}
-
-	// Call walkFn for current file/directory
-	if err := walkFn(path, info, nil); err != nil {
-		return err
-	}
-
-	// If it's not a directory, we're done
-	if !info.IsDir() {
-		return nil
-	}
-
-	return walkDirectory(path, info, walkFn, visited, options)
 }
 
 // handleSymlink processes symbolic links.
@@ -147,38 +128,97 @@ func handleSymlink(path string, info os.FileInfo, walkFn filepath.WalkFunc, visi
 	return nil
 }
 
-// walkDirectory processes directory contents.
-func walkDirectory(path string, info os.FileInfo, walkFn filepath.WalkFunc, visited map[string]bool, options *SymWalkOptions) error {
-	// Read directory contents in sorted order
-	names, err := readDirNames(path)
+// symwalk is the optimized recursive walker using os.DirEntry.
+func symwalk(path string, info os.FileInfo, walkFn filepath.WalkFunc, visited map[string]bool, options *SymWalkOptions) error {
+	// Handle symbolic links
+	if IsSymlink(info) && options.FollowSymlinks {
+		return handleSymlink(path, info, walkFn, visited, options)
+	}
+
+	// Skip empty files if configured to do so
+	if options.SkipEmptyFiles && !info.IsDir() && info.Size() == 0 {
+		return nil
+	}
+
+	// Call walkFn for current file/directory
+	if err := walkFn(path, info, nil); err != nil {
+		return err
+	}
+
+	// If it's not a directory, we're done
+	if !info.IsDir() {
+		return nil
+	}
+
+	return walkDirectory(path, walkFn, visited, options)
+}
+
+// walkDirectory uses os.ReadDir for better performance.
+func walkDirectory(path string, walkFn filepath.WalkFunc, visited map[string]bool, options *SymWalkOptions) error {
+	// Read directory entries (more efficient than readDirNames + Lstat)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		if options.SkipPermissionErrors && isPermissionError(err) {
 			return nil
 		}
+		// Call walkFn with the error for the directory
+		info, _ := os.Lstat(path)
 		return walkFn(path, info, err)
 	}
 
-	// Traverse each entry in the directory
-	for _, name := range names {
-		filename := filepath.Join(path, name)
-		fileInfo, err := os.Lstat(filename)
-		//nolint: nestif // This is a common pattern in file walking code, so we keep it for clarity.
-		if err != nil {
-			if options.SkipPermissionErrors && isPermissionError(err) {
-				continue
-			}
-			if err := walkFn(filename, fileInfo, err); err != nil && !errors.Is(err, filepath.SkipDir) {
-				return err
-			}
-		} else {
-			err = symwalk(filename, fileInfo, walkFn, visited, options)
-			if err != nil {
-				if (!fileInfo.IsDir() && !IsSymlink(fileInfo)) || !errors.Is(err, filepath.SkipDir) {
-					return err
-				}
-			}
+	// Sort entries for deterministic order
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
+	})
+
+	// Process each entry
+	for _, entry := range entries {
+		filename := filepath.Join(path, entry.Name())
+		if err := processEntry(entry, filename, walkFn, visited, options); err != nil {
+			return err
 		}
 	}
+
+	return nil
+}
+
+// processEntry processes a directory entry and returns whether to continue processing.
+func processEntry(entry os.DirEntry, filename string, walkFn filepath.WalkFunc, visited map[string]bool, options *SymWalkOptions) error {
+	// Get FileInfo from DirEntry (avoids extra stat call for non-symlinks)
+	info, err := entry.Info()
+	if err != nil {
+		if options.SkipPermissionErrors && isPermissionError(err) {
+			return nil // Skip this entry
+		}
+		if err := walkFn(filename, nil, err); err != nil && !errors.Is(err, filepath.SkipDir) {
+			return err
+		}
+		return nil // Skip this entry
+	}
+
+	// For symlinks, we need to use Lstat to get the symlink info
+	//nolint: nestif // This is necessary to handle symlinks correctly
+	if entry.Type()&os.ModeSymlink != 0 {
+		info, err = os.Lstat(filename)
+		if err != nil {
+			if options.SkipPermissionErrors && isPermissionError(err) {
+				return nil // Skip this entry
+			}
+			if err := walkFn(filename, info, err); err != nil && !errors.Is(err, filepath.SkipDir) {
+				return err
+			}
+			return nil // Skip this entry
+		}
+	}
+
+	// Recursively process the entry
+	err = symwalk(filename, info, walkFn, visited, options)
+	if err != nil {
+		if (!info.IsDir() && !IsSymlink(info)) || !errors.Is(err, filepath.SkipDir) {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -212,4 +252,53 @@ func isPermissionError(err error) bool {
 // IsSymlink checks if a file is a symbolic link.
 func IsSymlink(fi os.FileInfo) bool {
 	return fi.Mode()&os.ModeSymlink != 0
+}
+
+// GetAllFilePaths walks the file tree rooted at root and returns a slice of absolute paths
+// for all files (not directories) found. It uses the same symbolic link handling and
+// permission error handling as SymWalk. By default, empty files (size 0) are skipped
+// through SymWalk's SkipEmptyFiles option.
+//
+// root: the starting path for traversal
+// options: configuration options, if nil, DefaultSymWalkOptions() is used
+// Returns: slice of absolute file paths and any error encountered.
+func GetAllFilePaths(root string, options *SymWalkOptions) ([]string, error) {
+	if options == nil {
+		options = DefaultSymWalkOptions()
+	}
+
+	var filePaths []string
+
+	// Define the walk function that collects file paths
+	walkFn := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Only collect regular files, not directories
+		if !info.IsDir() {
+			// Check if we've reached the maximum number of files
+			if options.MaxFiles > 0 && len(filePaths) >= options.MaxFiles {
+				log.Warnf("GetAllFilePaths: reached maximum file limit (%d), stopping collection at path: %s", options.MaxFiles, path)
+				return filepath.SkipDir // Stop traversal
+			}
+
+			// Convert to absolute path
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				return err
+			}
+			filePaths = append(filePaths, absPath)
+		}
+
+		return nil
+	}
+
+	// Walk the directory tree
+	err := SymWalk(root, walkFn, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return filePaths, nil
 }
