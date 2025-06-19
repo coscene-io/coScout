@@ -26,16 +26,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// CheckReadPath checks if a path is readable.
+// Uses Lstat for better performance and then Access to check actual readability.
 func CheckReadPath(path string) bool {
 	if path == "" {
 		return false
 	}
 
-	_, err := os.Stat(path)
+	// Use Lstat for better performance - it doesn't follow symlinks
+	// but unix.Access will still check the final target
+	_, err := os.Lstat(path)
 	if err != nil {
 		return false
 	}
 
+	// unix.Access follows symlinks automatically, so it checks the final target
 	err = unix.Access(path, unix.R_OK)
 	return err == nil
 }
@@ -88,8 +93,20 @@ func CalSha256AndSize(absPath string, sizeToRead int64) (string, int64, error) {
 	return hex.EncodeToString(hash.Sum(nil)), sizeToRead, nil
 }
 
+// GetFileSize returns the size of the file at the given path.
+// For symbolic links, it follows the link and returns the target file size.
 func GetFileSize(filepath string) (int64, error) {
 	fi, err := os.Stat(filepath)
+	if err != nil {
+		return 0, err
+	}
+	return fi.Size(), nil
+}
+
+// GetFileSizeNoFollow returns the size of the file at the given path.
+// For symbolic links, it returns the size of the link itself, not the target.
+func GetFileSizeNoFollow(filepath string) (int64, error) {
+	fi, err := os.Lstat(filepath)
 	if err != nil {
 		return 0, err
 	}

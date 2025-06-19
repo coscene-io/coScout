@@ -302,28 +302,34 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 		// Check should recursively walk directories
 		//nolint: nestif // complexity is acceptable for this function
 		if conf.RecursivelyWalkDirs {
-			err := filepath.WalkDir(dir, func(entryPath string, d os.DirEntry, err error) error {
-				if err != nil {
-					log.Errorf("Failed to process path %s: %v", entryPath, err)
-					return nil
-				}
+			filePaths, err := utils.GetAllFilePaths(dir, &utils.SymWalkOptions{
+				FollowSymlinks:       true,
+				SkipPermissionErrors: true,
+				SkipEmptyFiles:       true,
+				MaxFiles:             99999,
+			})
 
-				// Skip if the entry is a directory
-				if d.IsDir() {
-					return nil
-				}
+			if err != nil {
+				log.Errorf("Failed to get all file paths in directory %s, skipping: %v", dir, err)
+				continue
+			}
 
+			for _, entryPath := range filePaths {
 				// Check if the entry is readable
 				if !utils.CheckReadPath(entryPath) {
 					log.Warnf("Skipping file %s due to insufficient permissions", entryPath)
 					return nil
 				}
 
+				// Get the entry info
+				d, err := os.Stat(entryPath)
+				if err != nil {
+					log.Errorf("Failed to stat file %s, skipping: %v", entryPath, err)
+					continue
+				}
+
 				// Process the file
 				return f.processFile(dir, entryPath, d, newCollectDirs, newListenDirs, conf.SkipPeriodHours)
-			})
-			if err != nil {
-				log.Errorf("Failed to walk directory %s: %v", dir, err)
 			}
 		} else {
 			entries, err := os.ReadDir(dir)
@@ -343,8 +349,15 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 					continue
 				}
 
+				// Get file info
+				info, err := entry.Info()
+				if err != nil {
+					log.Errorf("Failed to get file info for %s, skipping: %v", absPath, err)
+					continue
+				}
+
 				// Process the file
-				if err := f.processFile(dir, absPath, entry, newCollectDirs, newListenDirs, conf.SkipPeriodHours); err != nil {
+				if err := f.processFile(dir, absPath, info, newCollectDirs, newListenDirs, conf.SkipPeriodHours); err != nil {
 					log.Errorf("Failed to process file %s: %v", entry.Name(), err)
 				}
 			}
@@ -369,18 +382,12 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 	return nil
 }
 
-func (f *fileStateHandler) processFile(baseFolder string, absPath string, entry os.DirEntry, collectingDirs mapset.Set[string], listeningDirs mapset.Set[string], skipPeriodHours int) error {
+func (f *fileStateHandler) processFile(baseFolder string, absPath string, info os.FileInfo, collectingDirs mapset.Set[string], listeningDirs mapset.Set[string], skipPeriodHours int) error {
 	fileState, hasFileState := f.getFileState(absPath)
 
 	// Skip already processed files
 	if hasFileState && !fileState.Unsupported && fileState.ProcessState == processStateProcessed {
 		return nil
-	}
-
-	info, err := entry.Info()
-	if err != nil {
-		log.Errorf("failed to get file info for %s: %v", absPath, err)
-		return err
 	}
 
 	handler := f.GetFileHandler(absPath)
@@ -396,7 +403,7 @@ func (f *fileStateHandler) processFile(baseFolder string, absPath string, entry 
 	}
 
 	// Check if file is too old
-	if !entry.IsDir() && info.ModTime().Before(time.Now().Add(-time.Duration(skipPeriodHours)*time.Hour)) {
+	if !info.IsDir() && info.ModTime().Before(time.Now().Add(-time.Duration(skipPeriodHours)*time.Hour)) {
 		f.setFileState(absPath, FileState{
 			Size:        info.Size(),
 			Unsupported: true,

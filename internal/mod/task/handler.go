@@ -234,20 +234,27 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 
-		err = filepath.Walk(folder, func(path string, info os.FileInfo, err error) error {
+		filePaths, err := utils.GetAllFilePaths(folder, &utils.SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: true,
+			SkipEmptyFiles:       true,
+			MaxFiles:             99999,
+		})
+		if err != nil {
+			log.Errorf("Failed to get all file paths in folder %s: %v", folder, err)
+			continue
+		}
+
+		for _, path := range filePaths {
 			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
-				return nil
+				continue
 			}
 
+			info, err := os.Stat(path)
 			if err != nil {
-				log.Errorf("Failed to walk through folder %s", folder)
-				//nolint: nilerr // skip file
-				return nil
-			}
-
-			if info.IsDir() {
-				return nil
+				log.Errorf("Failed to get file info for %s: %v", path, err)
+				continue
 			}
 
 			log.Infof("file %s, mod time: %s", path, info.ModTime().String())
@@ -268,7 +275,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 				stat, err := times.Stat(path)
 				if err != nil {
 					log.Errorf("Failed to get file times for %s: %v", path, err)
-					return nil
+					continue
 				}
 
 				if stat.HasBirthTime() {
@@ -289,13 +296,6 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 					}
 				}
 			}
-
-			return nil
-		})
-
-		if err != nil {
-			log.Errorf("Failed to walk through folder %s: %v", folder, err)
-			continue
 		}
 	}
 
@@ -308,34 +308,27 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 
-		info, err := os.Stat(file)
+		filePaths, err := utils.GetAllFilePaths(file, &utils.SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: true,
+			SkipEmptyFiles:       true,
+			MaxFiles:             99999,
+		})
 		if err != nil {
-			log.Errorf("Failed to get folder info: %v", err)
-			continue
-		}
-		if !info.IsDir() {
-			files[file] = model.FileInfo{
-				FileName: filepath.Base(file),
-				Size:     info.Size(),
-				Path:     file,
-			}
+			log.Errorf("Failed to walk through folder %s: %v", file, err)
 			continue
 		}
 
-		err = filepath.Walk(file, func(path string, info os.FileInfo, err error) error {
+		for _, path := range filePaths {
 			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
-				return nil
+				continue
 			}
 
+			info, err := os.Stat(path)
 			if err != nil {
-				log.Errorf("Failed to walk through folder %s", path)
-				//nolint: nilerr // skip file
-				return nil
-			}
-
-			if info.IsDir() {
-				return nil
+				log.Errorf("Failed to get file info for %s: %v", path, err)
+				continue
 			}
 
 			filename, err := filepath.Rel(file, path)
@@ -349,12 +342,6 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 				Size:     info.Size(),
 				Path:     path,
 			}
-			return nil
-		})
-
-		if err != nil {
-			log.Errorf("Failed to walk through folder %s: %v", file, err)
-			continue
 		}
 	}
 
