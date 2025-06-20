@@ -45,39 +45,61 @@ const (
 	numThreadToProcessFile = 2
 )
 
+const (
+	// listen file state handler path.
+	listenFileStatePath = "listenFile.state.json"
+
+	// collect file state path.
+	collectFileStatePath = "collectFile.state.json"
+)
+
 type CustomRuleHandler struct {
 	reqClient   api.RequestClient
 	confManager config.ConfManager
 	errChan     chan error
 	pubSub      *gochannel.GoChannel
 
-	fileStateHandler file_state_handler.FileStateHandler
-	listenChan       chan string
-	ruleItemChan     chan rule_engine.RuleItem
-	engine           Engine
+	listenFileStateHandler  file_state_handler.FileStateHandler
+	collectFileStateHandler file_state_handler.FileStateHandler
+	listenChan              chan string
+	ruleItemChan            chan rule_engine.RuleItem
+	engine                  Engine
 }
 
 func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomRuleHandler {
-	fileStateHandler, err := file_state_handler.New()
+	listenFileStateHandler, err := file_state_handler.New(listenFileStatePath)
+	if err != nil {
+		log.Errorf("create file state handler: %v", err)
+		errChan <- errors.Wrap(err, "create file state handler")
+		return nil
+	}
+
+	collectFileStateHandler, err := file_state_handler.New(collectFileStatePath)
 	if err != nil {
 		log.Errorf("create file state handler: %v", err)
 		errChan <- errors.Wrap(err, "create file state handler")
 	}
+
 	return &CustomRuleHandler{
-		reqClient:        reqClient,
-		confManager:      confManager,
-		errChan:          errChan,
-		fileStateHandler: fileStateHandler,
-		listenChan:       make(chan string, 1000),
-		ruleItemChan:     make(chan rule_engine.RuleItem, 1000),
-		engine:           Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
-		pubSub:           pubSub,
+		reqClient:               reqClient,
+		confManager:             confManager,
+		errChan:                 errChan,
+		listenFileStateHandler:  listenFileStateHandler,
+		collectFileStateHandler: collectFileStateHandler,
+		listenChan:              make(chan string, 1000),
+		ruleItemChan:            make(chan rule_engine.RuleItem, 1000),
+		engine:                  Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
+		pubSub:                  pubSub,
 	}
 }
 
 func (c *CustomRuleHandler) Run(ctx context.Context) {
-	if c.fileStateHandler == nil {
-		log.Errorf("file state handler is nil")
+	if c.listenFileStateHandler == nil {
+		log.Errorf("listen file state handler is nil")
+		return
+	}
+	if c.collectFileStateHandler == nil {
+		log.Errorf("collect file state handler is nil")
 		return
 	}
 
@@ -170,7 +192,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				t.Reset(config.RuleScanCollectInfosInterval)
 
-				c.scanCollectInfosAndHandle()
+				c.scanCollectInfosAndHandle(modConfig)
 			case <-ctx.Done():
 				log.Infof("collect info handler stopped")
 				return
@@ -218,25 +240,25 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 }
 
 func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
-	if len(modConfig.CollectDirs) == 0 {
+	if len(modConfig.ListenDirs) == 0 {
 		return
 	}
 
-	if err := c.fileStateHandler.UpdateDirs(*modConfig); err != nil {
+	if err := c.listenFileStateHandler.UpdateListenDirs(*modConfig); err != nil {
 		log.Errorf("file state handler update dirs: %v", err)
 		return
 	}
 
-	if err := c.fileStateHandler.UpdateFilesProcessState(); err != nil {
+	if err := c.listenFileStateHandler.UpdateFilesProcessState(); err != nil {
 		log.Errorf("file state handler update process state: %v", err)
 		return
 	}
 
-	for _, fileState := range c.fileStateHandler.Files(
+	for _, fileState := range c.listenFileStateHandler.Files(
 		file_state_handler.FilterIsListening(),
 		file_state_handler.FilterReadyToProcess(),
 	) {
-		err := c.fileStateHandler.MarkProcessedFile(fileState.Pathname)
+		err := c.listenFileStateHandler.MarkProcessedFile(fileState.Pathname)
 		if err != nil {
 			log.Errorf("mark processed file: %v", err)
 		}
@@ -281,7 +303,7 @@ func (c *CustomRuleHandler) processFileWithRule(
 	filename string,
 ) {
 	log.Infof("RuleEngine exec file: %v", filename)
-	handler := c.fileStateHandler.GetFileHandler(filename)
+	handler := c.listenFileStateHandler.GetFileHandler(filename)
 	if handler == nil {
 		// this should not happen
 		log.Errorf("get file handler failed for file: %v", filename)
@@ -292,12 +314,11 @@ func (c *CustomRuleHandler) processFileWithRule(
 }
 
 // scanCollectInfosAndHandle handles all collect info files within the collect info dir.
-func (c *CustomRuleHandler) scanCollectInfosAndHandle() {
+func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultModConfConfig) {
 	log.Infof("Starts to scan collect info dir")
 
 	// Search for files under the collect info dir and handles them
 	collectInfoDir := config.GetCollectInfoFolder()
-
 	entries, err := os.ReadDir(collectInfoDir)
 	if err != nil {
 		log.Errorf("read collect info dir: %v", err)
@@ -305,23 +326,40 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle() {
 		return
 	}
 
+	collectInfoIds := make([]string, 0)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 
 		collectInfoId := strings.TrimSuffix(entry.Name(), ".json")
+		collectInfoIds = append(collectInfoIds, collectInfoId)
+	}
 
-		collectInfo := &model.CollectInfo{}
-		if err := collectInfo.Load(collectInfoId); err != nil {
-			log.Errorf("load collect info: %v", err)
-			c.errChan <- errors.Wrap(err, "load collect info")
-			continue
+	if len(collectInfoIds) > 0 {
+		log.Infof("Found %d collect info files", len(collectInfoIds))
+
+		err := c.collectFileStateHandler.UpdateCollectDirs(*modConfig)
+		if err != nil {
+			log.Errorf("file state handler update collect dirs: %v", err)
+			c.errChan <- errors.Wrap(err, "file state handler update collect dirs")
+			return
 		}
 
-		log.Infof("Found collect info: %v", collectInfoId)
-		c.handleCollectInfo(*collectInfo)
+		for _, collectInfoId := range collectInfoIds {
+			collectInfo := &model.CollectInfo{}
+			if err := collectInfo.Load(collectInfoId); err != nil {
+				log.Errorf("load collect info: %v", err)
+				c.errChan <- errors.Wrap(err, "load collect info")
+				continue
+			}
+
+			log.Infof("Found collect info: %v", collectInfoId)
+			c.handleCollectInfo(*collectInfo)
+
+		}
 	}
+	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
 }
 
 // handleCollectInfo handles a single the collect info.
@@ -354,7 +392,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		}
 		return false
 	}
-	uploadFileStates := c.fileStateHandler.Files(
+	uploadFileStates := c.collectFileStateHandler.Files(
 		file_state_handler.FilterIsCollecting(),
 		file_state_handler.FilterTime(info.Cut.Start, info.Cut.End),
 		uploadWhiteListFilter,

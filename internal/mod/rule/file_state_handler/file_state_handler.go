@@ -32,15 +32,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	// relative file state handler path.
-	relFileStatePath = "file.state.json"
-)
-
 // FileStateHandler is the interface for the file state handler.
 type FileStateHandler interface {
-	// UpdateDirs updates the directories being monitored.
-	UpdateDirs(conf config.DefaultModConfConfig) error
+	// UpdateListenDirs updates the directories being monitored.
+	UpdateListenDirs(conf config.DefaultModConfConfig) error
+
+	// UpdateCollectDirs updates the directories being collected.
+	UpdateCollectDirs(conf config.DefaultModConfConfig) error
 
 	// Files returns filename and filestate pairs that match the given filters.
 	Files(filters ...FileFilter) []FileState
@@ -69,69 +67,75 @@ const (
 
 // FileState represents the state of a file in the system.
 type FileState struct {
-	Size         int64        `json:"size"`
-	StartTime    int64        `json:"start_time,omitempty"`
-	EndTime      int64        `json:"end_time,omitempty"`
-	Unsupported  bool         `json:"unsupported,omitempty"`
+	Size        int64 `json:"size"`
+	StartTime   int64 `json:"start_time,omitempty"`
+	EndTime     int64 `json:"end_time,omitempty"`
+	ModifyTime  int64 `json:"modify_time,omitempty"`
+	Unsupported bool  `json:"unsupported,omitempty"`
+
+	TooOld       bool         `json:"too_old,omitempty"`
+	IsCollecting bool         `json:"is_collecting,omitempty"`
 	IsDir        bool         `json:"is_dir,omitempty"`
 	IsListening  bool         `json:"is_listening,omitempty"`
-	IsCollecting bool         `json:"is_collecting,omitempty"`
 	ProcessState processState `json:"process_state,omitempty"`
-	TooOld       bool         `json:"too_old,omitempty"`
 	Pathname     string       `json:"-"` // Pathname is output only for the Files method
 }
 
 // SavedState represents the complete state to be saved to disk.
 type SavedState struct {
-	State      map[string]FileState `json:"state"`
-	SrcDirs    []string             `json:"src_dirs"`
-	ListenDirs []string             `json:"listen_dirs"`
+	State       map[string]FileState `json:"state"`
+	ListenDirs  []string             `json:"listen_dirs"`
+	CollectDirs []string             `json:"collect_dirs,omitempty"`
 }
 
 // fileStateHandler is used to keep track of the state of files in directories.
 type fileStateHandler struct {
 	state        map[string]FileState
 	updateLock   sync.Mutex
-	srcDirs      mapset.Set[string]
 	listenDirs   mapset.Set[string]
+	collectDirs  mapset.Set[string]
 	activeTopics mapset.Set[string]
 	statePath    string
 	handlers     []file_handlers.Interface
 }
 
 var (
-	//nolint: gochecknoglobals // singleton instance
-	instance *fileStateHandler
-	//nolint: gochecknoglobals // singleton once
-	once sync.Once
+	//nolint: gochecknoglobals // singleton instances map
+	instances = make(map[string]*fileStateHandler)
+	//nolint: gochecknoglobals // singleton mutex
+	instancesMutex sync.Mutex
 )
 
-// New returns the singleton instance of fileStateHandler.
-func New() (FileStateHandler, error) {
-	var err error
-	once.Do(func() {
-		instance = &fileStateHandler{
-			state:        make(map[string]FileState),
-			srcDirs:      mapset.NewSet[string](),
-			listenDirs:   mapset.NewSet[string](),
-			activeTopics: mapset.NewSet[string](),
-			statePath:    path.Join(config.GetUserBaseFolder(), relFileStatePath),
-		}
+// New returns the singleton instance of fileStateHandler for the given fileStatePath.
+// Each unique fileStatePath will have its own singleton instance.
+func New(fileStatePath string) (FileStateHandler, error) {
+	fullPath := path.Join(config.GetUserBaseFolder(), fileStatePath)
 
-		instance.registerHandlers()
+	instancesMutex.Lock()
+	defer instancesMutex.Unlock()
 
-		if loadErr := instance.loadState(); loadErr != nil {
-			err = errors.Errorf("failed to initialize file state handler: %v", loadErr)
-			instance = nil
-		}
-	})
-
-	if instance == nil {
-		if err == nil {
-			err = errors.Errorf("failed to create file state handler instance")
-		}
-		return nil, err
+	// Check if instance already exists for this path
+	if instance, exists := instances[fullPath]; exists {
+		return instance, nil
 	}
+
+	// Create new instance
+	instance := &fileStateHandler{
+		state:        make(map[string]FileState),
+		collectDirs:  mapset.NewSet[string](),
+		listenDirs:   mapset.NewSet[string](),
+		activeTopics: mapset.NewSet[string](),
+		statePath:    fullPath,
+	}
+
+	instance.registerHandlers()
+
+	if err := instance.loadState(); err != nil {
+		return nil, errors.Errorf("failed to initialize file state handler: %v", err)
+	}
+
+	// Store instance in map
+	instances[fullPath] = instance
 
 	return instance, nil
 }
@@ -175,14 +179,14 @@ func (f *fileStateHandler) loadState() error {
 	}
 
 	f.state = savedState.State
-	f.srcDirs = mapset.NewSet[string]()
 	f.listenDirs = mapset.NewSet[string]()
+	f.collectDirs = mapset.NewSet[string]()
 
-	for _, dir := range savedState.SrcDirs {
-		f.srcDirs.Add(dir)
-	}
 	for _, dir := range savedState.ListenDirs {
 		f.listenDirs.Add(dir)
+	}
+	for _, dir := range savedState.CollectDirs {
+		f.collectDirs.Add(dir)
 	}
 
 	return nil
@@ -191,9 +195,9 @@ func (f *fileStateHandler) loadState() error {
 // SaveState saves the current state to disk.
 func (f *fileStateHandler) saveState() error {
 	savedState := SavedState{
-		State:      f.state,
-		SrcDirs:    f.srcDirs.ToSlice(),
-		ListenDirs: f.listenDirs.ToSlice(),
+		State:       f.state,
+		ListenDirs:  f.listenDirs.ToSlice(),
+		CollectDirs: f.collectDirs.ToSlice(),
 	}
 
 	data, err := json.MarshalIndent(savedState, "", "  ")
@@ -264,7 +268,7 @@ func (f *fileStateHandler) updateDeletedFileState() error {
 	return nil
 }
 
-func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
+func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) error {
 	// Filter directories for read access and create sets
 	newListenDirs := mapset.NewSet[string]()
 	for _, dir := range conf.ListenDirs {
@@ -272,28 +276,114 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 			newListenDirs.Add(dir)
 		}
 	}
+	log.Infof("Start updating directories, listen_dirs: %v", newListenDirs)
 
+	log.Infof("Listening scan files modified in the last %d hours", conf.SkipPeriodHours)
+	// Iterate over new directories and update file states
+	for dir := range newListenDirs.Iter() {
+		if fileInfo, err := os.Stat(dir); err != nil || !fileInfo.IsDir() {
+			log.Warningf("%s is not a directory, skipping", dir)
+			continue
+		}
+
+		// Check should recursively walk directories
+		//nolint: nestif // complexity is acceptable for this function
+		if conf.RecursivelyWalkDirs {
+			filePaths, err := utils.GetAllFilePaths(dir, &utils.SymWalkOptions{
+				FollowSymlinks:       true,
+				SkipPermissionErrors: true,
+				SkipEmptyFiles:       true,
+				MaxFiles:             99999,
+			})
+
+			if err != nil {
+				log.Errorf("Failed to get all file paths in directory %s, skipping: %v", dir, err)
+				continue
+			}
+
+			for _, entryPath := range filePaths {
+				// Check if the entry is readable
+				if !utils.CheckReadPath(entryPath) {
+					log.Warnf("Skipping file %s due to insufficient permissions", entryPath)
+					continue
+				}
+
+				// Get the entry info
+				d, err := os.Stat(entryPath)
+				if err != nil {
+					log.Errorf("Failed to stat file %s, skipping: %v", entryPath, err)
+					continue
+				}
+
+				// Process the file
+				err = f.processListenFile(entryPath, d, conf.SkipPeriodHours)
+				if err != nil {
+					log.Errorf("Failed to process listen file %s: %v", entryPath, err)
+					continue
+				}
+			}
+		} else {
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				log.Errorf("Failed to read directory %s, skipping: %v", dir, err)
+				continue
+			}
+
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				// Get absolute path of the entry
+				absPath := filepath.Join(dir, entry.Name())
+				if !utils.CheckReadPath(absPath) {
+					log.Warnf("Skipping file %s due to insufficient permissions", absPath)
+					continue
+				}
+
+				// Get file info
+				info, err := entry.Info()
+				if err != nil {
+					log.Errorf("Failed to get file info for %s, skipping: %v", absPath, err)
+					continue
+				}
+
+				// Process the file
+				if err := f.processListenFile(absPath, info, conf.SkipPeriodHours); err != nil {
+					log.Errorf("Failed to process listen file %s: %v", entry.Name(), err)
+				}
+			}
+		}
+	}
+
+	// Update directory sets
+	f.listenDirs = newListenDirs
+
+	// Clean up deleted files
+	if err := f.updateDeletedFileState(); err != nil {
+		return errors.Errorf("failed to update deleted file state: %v", err)
+	}
+
+	// Save state to disk
+	if err := f.saveState(); err != nil {
+		return errors.Errorf("failed to save state: %v", err)
+	}
+
+	log.Infof("Finished updating listen directories")
+	return nil
+}
+
+func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) error {
+	// Filter directories for read access and create sets
 	newCollectDirs := mapset.NewSet[string]()
-	for _, dir := range conf.CollectDirs {
+	for _, dir := range conf.ListenDirs {
 		if utils.CheckReadPath(dir) {
 			newCollectDirs.Add(dir)
 		}
 	}
-
-	log.Infof("Start updating directories, listen_dirs: %v, collect_dirs: %v", newListenDirs, newCollectDirs)
-
-	// Find directories that are no longer being monitored
-	deleteDirs := f.srcDirs.Difference(newListenDirs.Union(newCollectDirs))
-
-	// Delete state of files in directories that are no longer scanned or collected
-	for filename := range f.state {
-		if deleteDirs.Contains(filepath.Dir(filename)) {
-			delete(f.state, filename)
-		}
-	}
+	log.Infof("Start updating directories, collector_dirs: %v", newCollectDirs)
 
 	// Iterate over new directories and update file states
-	for dir := range newListenDirs.Union(newCollectDirs).Iter() {
+	for dir := range newCollectDirs.Iter() {
 		if fileInfo, err := os.Stat(dir); err != nil || !fileInfo.IsDir() {
 			log.Warningf("%s is not a directory, skipping", dir)
 			continue
@@ -329,7 +419,11 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 				}
 
 				// Process the file
-				return f.processFile(dir, entryPath, d, newCollectDirs, newListenDirs, conf.SkipPeriodHours)
+				err = f.processCollectFile(entryPath, d)
+				if err != nil {
+					log.Errorf("Failed to process collect file %s: %v", entryPath, err)
+					continue
+				}
 			}
 		} else {
 			entries, err := os.ReadDir(dir)
@@ -357,7 +451,7 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 				}
 
 				// Process the file
-				if err := f.processFile(dir, absPath, info, newCollectDirs, newListenDirs, conf.SkipPeriodHours); err != nil {
+				if err := f.processCollectFile(absPath, info); err != nil {
 					log.Errorf("Failed to process file %s: %v", entry.Name(), err)
 				}
 			}
@@ -365,8 +459,7 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 	}
 
 	// Update directory sets
-	f.srcDirs = newListenDirs.Union(newCollectDirs)
-	f.listenDirs = newListenDirs
+	f.collectDirs = newCollectDirs
 
 	// Clean up deleted files
 	if err := f.updateDeletedFileState(); err != nil {
@@ -378,11 +471,11 @@ func (f *fileStateHandler) UpdateDirs(conf config.DefaultModConfConfig) error {
 		return errors.Errorf("failed to save state: %v", err)
 	}
 
-	log.Infof("Finished updating directories")
+	log.Infof("Finished updating collect directories")
 	return nil
 }
 
-func (f *fileStateHandler) processFile(baseFolder string, absPath string, info os.FileInfo, collectingDirs mapset.Set[string], listeningDirs mapset.Set[string], skipPeriodHours int) error {
+func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, skipPeriodHours int) error {
 	fileState, hasFileState := f.getFileState(absPath)
 
 	// Skip already processed files
@@ -412,42 +505,65 @@ func (f *fileStateHandler) processFile(baseFolder string, absPath string, info o
 		return nil
 	}
 
-	isListening := listeningDirs.Contains(baseFolder)
-	isCollecting := collectingDirs.Contains(baseFolder)
-	isPrevListening := f.listenDirs.Contains(baseFolder)
+	// Update state
+	newState := fileState
+	if !hasFileState {
+		newState = FileState{
+			Size:       info.Size(),
+			ModifyTime: info.ModTime().Unix(),
+		}
+	}
 
-	// Check if file needs to skip process
-	curFileSize, err := handler.GetFileSize(absPath)
-	if err != nil {
-		log.Errorf("Error getting file size for %s: %v", absPath, err)
-		return errors.Errorf("error getting file size for %s: %v", absPath, err)
+	newState.IsListening = true
+	f.setFileState(absPath, newState)
+	return nil
+}
+
+func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) error {
+	fileState, hasFileState := f.getFileState(absPath)
+
+	// Skip file if file is not modified
+	if hasFileState &&
+		!fileState.Unsupported &&
+		fileState.ProcessState == processStateProcessed &&
+		fileState.ModifyTime == info.ModTime().Unix() {
+		return nil
+	}
+
+	handler := f.GetFileHandler(absPath)
+	if handler == nil {
+		f.setFileState(absPath, FileState{
+			Size:        info.Size(),
+			ModifyTime:  info.ModTime().Unix(),
+			Unsupported: true,
+		})
+		return nil
 	}
 
 	// Update state
 	newState := fileState
-	if !hasFileState || fileState.Size != curFileSize {
+	if !hasFileState || fileState.ModifyTime != info.ModTime().Unix() {
 		startTime, endTime, err := handler.GetStartTimeEndTime(absPath)
 		if err != nil {
-			log.Errorf("Error getting start and end time for %s: %v", absPath, err)
+			log.Errorf("Error getting start and end time for %s: %v, skip collect", absPath, err)
+
 			f.setFileState(absPath, FileState{
-				Size:        curFileSize,
+				Size:        info.Size(),
+				ModifyTime:  info.ModTime().Unix(),
 				Unsupported: true,
 			})
 			return nil
 		}
 		newState = FileState{
-			Size:      curFileSize,
-			StartTime: startTime.Unix(),
-			EndTime:   endTime.Unix(),
+			Size:       info.Size(),
+			StartTime:  startTime.Unix(),
+			EndTime:    endTime.Unix(),
+			ModifyTime: info.ModTime().Unix(),
 		}
 	}
 
-	newState.IsListening = isListening
-	newState.IsCollecting = isCollecting
-	// change the process state to processed if the file is not being listened to all the time
-	if !isListening || !isPrevListening {
-		newState.ProcessState = processStateProcessed
-	}
+	newState.IsCollecting = true
+	newState.ProcessState = processStateProcessed
 
 	f.setFileState(absPath, newState)
 	return nil
