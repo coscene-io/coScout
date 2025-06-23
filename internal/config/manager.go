@@ -20,11 +20,11 @@ import (
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
-	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/rawbytes"
+	"github.com/knadh/koanf/v2"
 	log "github.com/sirupsen/logrus"
 )
 
