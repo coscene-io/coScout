@@ -49,6 +49,7 @@ func (c *CustomHttpHandler) Run(ctx context.Context) {
 
 	router := mux.NewRouter()
 	router.HandleFunc("/ruleEngine/messages", server.RulesHandler(c.pubSub)).Methods("POST")
+	router.HandleFunc("/ruleEngine/activeTopics", server.ActiveTopicsHandler(ctx, c.pubSub)).Methods("GET")
 	router.HandleFunc("/config/setLogLevel", server.LogConfigHandler()).Methods("POST")
 
 	srv := &http.Server{

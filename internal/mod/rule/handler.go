@@ -118,6 +118,16 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 				c.engine.UpdateRules(apiRules, appConfig.Topics)
 				log.Infof("handling topics: %v", c.engine.ActiveTopics())
 
+				topicBytes, err := json.Marshal(c.engine.ActiveTopics())
+				if err == nil {
+					msg := gcmessage.NewMessage(watermill.NewUUID(), topicBytes)
+					if err := c.pubSub.Publish(constant.TopicConfigTopicsMsg, msg); err != nil {
+						log.Errorf("Failed to publish message: %v", err)
+					}
+				} else {
+					log.Errorf("Failed to marshal active topics: %v", err)
+				}
+
 				select {
 				case modFirstUpdated <- struct{}{}:
 				default:

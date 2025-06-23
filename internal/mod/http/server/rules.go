@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -24,12 +25,17 @@ import (
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
+	mapset "github.com/deckarep/golang-set/v2"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
 
 type RulesRequest struct {
 	Messages []rule_engine.RuleItem `json:"messages"`
+}
+
+type ActiveTopicsResponse struct {
+	Topics []string `json:"topics"`
 }
 
 func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +96,59 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 			return
 		}
 		// Respond
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(bytes)
+		if err != nil {
+			return
+		}
+	}
+}
+
+func ActiveTopicsHandler(ctx context.Context, pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *http.Request) {
+	activeTopics := mapset.NewSet[string]()
+	go func() {
+		msg, err := pubSub.Subscribe(ctx, constant.TopicConfigTopicsMsg)
+		if err != nil {
+			log.Errorf("Failed to subscribe to topic %s: %v", constant.TopicConfigTopicsMsg, err)
+			return
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				log.Infof("Stopping active topics subscription")
+				return
+			case m := <-msg:
+				if m == nil {
+					log.Warnf("Received nil message from topic %s", constant.TopicConfigTopicsMsg)
+					continue
+				}
+
+				m.Ack()
+				var topics []string
+				if err := json.Unmarshal(m.Payload, &topics); err != nil {
+					log.Errorf("Failed to unmarshal topics from message: %v", err)
+					continue
+				}
+				log.Infof("Received active topics: %v", topics)
+				activeTopics = mapset.NewSet(topics...)
+			}
+		}
+	}()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		res := ActiveTopicsResponse{
+			Topics: activeTopics.ToSlice(),
+		}
+		bytes, err := json.Marshal(res)
+		if err != nil {
+			log.Errorf("Failed to marshal response: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Respond
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, err = w.Write(bytes)
 		if err != nil {
