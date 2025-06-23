@@ -49,6 +49,12 @@ func (h *ros1Handler) CheckFilePath(filePath string) bool {
 	return !info.IsDir() && strings.HasSuffix(filePath, ".bag")
 }
 
+func (h *ros1Handler) IsFinished(filePath string) bool {
+	// bag files are finished when they are closed
+	// since we read them in a streaming manner, we assume they are finished
+	return true
+}
+
 func (h *ros1Handler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Time, error) {
 	ros1FileReader, err := os.Open(filePath)
 	if err != nil {

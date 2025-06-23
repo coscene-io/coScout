@@ -316,11 +316,7 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 				}
 
 				// Process the file
-				err = f.processListenFile(entryPath, d, conf.SkipPeriodHours)
-				if err != nil {
-					log.Errorf("Failed to process listen file %s: %v", entryPath, err)
-					continue
-				}
+				f.processListenFile(entryPath, d, conf.SkipPeriodHours)
 			}
 		} else {
 			entries, err := os.ReadDir(dir)
@@ -348,9 +344,7 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 				}
 
 				// Process the file
-				if err := f.processListenFile(absPath, info, conf.SkipPeriodHours); err != nil {
-					log.Errorf("Failed to process listen file %s: %v", entry.Name(), err)
-				}
+				f.processListenFile(absPath, info, conf.SkipPeriodHours)
 			}
 		}
 	}
@@ -419,11 +413,7 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 				}
 
 				// Process the file
-				err = f.processCollectFile(entryPath, d)
-				if err != nil {
-					log.Errorf("Failed to process collect file %s: %v", entryPath, err)
-					continue
-				}
+				f.processCollectFile(entryPath, d)
 			}
 		} else {
 			entries, err := os.ReadDir(dir)
@@ -451,9 +441,7 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 				}
 
 				// Process the file
-				if err := f.processCollectFile(absPath, info); err != nil {
-					log.Errorf("Failed to process file %s: %v", entry.Name(), err)
-				}
+				f.processCollectFile(absPath, info)
 			}
 		}
 	}
@@ -475,12 +463,12 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 	return nil
 }
 
-func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, skipPeriodHours int) error {
+func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, skipPeriodHours int) {
 	fileState, hasFileState := f.getFileState(absPath)
 
 	// Skip already processed files
 	if hasFileState && !fileState.Unsupported && fileState.ProcessState == processStateProcessed {
-		return nil
+		return
 	}
 
 	handler := f.GetFileHandler(absPath)
@@ -492,7 +480,7 @@ func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, s
 				Unsupported: true,
 			})
 		}
-		return nil
+		return
 	}
 
 	// Check if file is too old
@@ -502,24 +490,29 @@ func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, s
 			Unsupported: true,
 			TooOld:      true,
 		})
-		return nil
+		return
 	}
 
-	// Update state
-	newState := fileState
-	if !hasFileState {
-		newState = FileState{
-			Size:       info.Size(),
-			ModifyTime: info.ModTime().Unix(),
+	if handler.IsFinished(absPath) {
+		// Update state
+		newState := fileState
+		if !hasFileState {
+			newState = FileState{}
 		}
-	}
 
-	newState.IsListening = true
-	f.setFileState(absPath, newState)
-	return nil
+		newState.Size = info.Size()
+		newState.ModifyTime = info.ModTime().Unix()
+		newState.IsListening = true
+		newState.Unsupported = false
+		newState.TooOld = false
+		f.setFileState(absPath, newState)
+		return
+	} else {
+		log.Infof("Listening file %s is not finished, will be processed later", absPath)
+	}
 }
 
-func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) error {
+func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) {
 	fileState, hasFileState := f.getFileState(absPath)
 
 	// Skip file if file is not modified
@@ -527,7 +520,7 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 		!fileState.Unsupported &&
 		fileState.ProcessState == processStateProcessed &&
 		fileState.ModifyTime == info.ModTime().Unix() {
-		return nil
+		return
 	}
 
 	handler := f.GetFileHandler(absPath)
@@ -537,7 +530,7 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 			ModifyTime:  info.ModTime().Unix(),
 			Unsupported: true,
 		})
-		return nil
+		return
 	}
 
 	// Update state
@@ -552,7 +545,7 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 				ModifyTime:  info.ModTime().Unix(),
 				Unsupported: true,
 			})
-			return nil
+			return
 		}
 		newState = FileState{
 			Size:       info.Size(),
@@ -566,7 +559,6 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 	newState.ProcessState = processStateProcessed
 
 	f.setFileState(absPath, newState)
-	return nil
 }
 
 func (f *fileStateHandler) UpdateFilesProcessState() error {

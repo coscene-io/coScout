@@ -57,6 +57,34 @@ func (h *mcapHandler) CheckFilePath(filePath string) bool {
 	return !info.IsDir() && strings.HasSuffix(filePath, ".mcap")
 }
 
+func (h *mcapHandler) IsFinished(filePath string) bool {
+	mcapFileReader, err := os.Open(filePath)
+	if err != nil {
+		log.Warnf("open mcap file [%s] failed: %v", filePath, err)
+		return false
+	}
+	defer mcapFileReader.Close()
+
+	reader, err := mcap.NewReader(mcapFileReader)
+	if err != nil {
+		log.Warnf("failed to create mcap reader for mcap file %s: %v", filePath, err)
+		return false
+	}
+	defer reader.Close()
+
+	info, err := reader.Info()
+	if err != nil {
+		log.Warnf("failed to get info for mcap file %s: %v", filePath, err)
+		return false
+	}
+	// If the message end time is zero, it indicates that the file is not completely written
+	if info.Statistics.MessageEndTime == 0 {
+		log.Warnf("mcap file %s is not completely written", filePath)
+		return false
+	}
+	return true
+}
+
 func (h *mcapHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Time, error) {
 	mcapFileReader, err := os.Open(filePath)
 	if err != nil {
@@ -68,9 +96,18 @@ func (h *mcapHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Ti
 	if err != nil {
 		return nil, nil, errors.Errorf("failed to create mcap reader for mcap file %s: %v", filePath, err)
 	}
+	defer reader.Close()
 
 	info, err := reader.Info()
 	if err != nil {
+		start, end, err := getStartTimeEndTimeForUncompletedMcap(filePath)
+		if err != nil {
+			log.Warnf("failed to get info for mcap file %s: %v, trying to get start and end time for uncompleted mcap file", filePath, err)
+			return nil, nil, errors.Errorf("failed to get info for mcap file %s: %v", filePath, err)
+		}
+		if start != nil && end != nil {
+			return start, end, nil
+		}
 		return nil, nil, errors.Errorf("failed to get info for mcap file %s: %v", filePath, err)
 	}
 
@@ -81,6 +118,51 @@ func (h *mcapHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Ti
 	//nolint: gosec // ignore uint64 to int64 conversion
 	end := time.Unix(int64(endNano/1e9), int64(endNano%1e9))
 
+	return &start, &end, nil
+}
+
+func getStartTimeEndTimeForUncompletedMcap(filePath string) (*time.Time, *time.Time, error) {
+	mcapFileReader, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, errors.Errorf("open mcap file [%s] failed: %v", filePath, err)
+	}
+	defer mcapFileReader.Close()
+
+	reader, err := mcap.NewReader(mcapFileReader)
+	if err != nil {
+		return nil, nil, errors.Errorf("failed to create mcap reader for mcap file %s: %v", filePath, err)
+	}
+	defer reader.Close()
+
+	iter, err := reader.Messages(mcap.UsingIndex(false))
+	if err != nil {
+		return nil, nil, errors.Errorf("failed to create message iterator: %v", err)
+	}
+
+	var startNano, endNano uint64
+	for {
+		_, _, message, err := iter.NextInto(nil)
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				log.Infof("finished reading messages for uncompleted mcap file")
+				break
+			}
+			return nil, nil, errors.Errorf("error reading message: %v", err)
+		}
+
+		if startNano == uint64(0) || message.LogTime < startNano {
+			startNano = message.LogTime
+		}
+		if endNano == uint64(0) || message.LogTime > endNano {
+			endNano = message.LogTime
+		}
+	}
+
+	//nolint: gosec // ignore uint64 to int64 conversion
+	start := time.Unix(int64(startNano/1e9), int64(startNano%1e9))
+	//nolint: gosec // ignore uint64 to int64 conversion
+	end := time.Unix(int64(endNano/1e9), int64(endNano%1e9))
 	return &start, &end, nil
 }
 

@@ -356,7 +356,6 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 
 			log.Infof("Found collect info: %v", collectInfoId)
 			c.handleCollectInfo(*collectInfo)
-
 		}
 	}
 	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
