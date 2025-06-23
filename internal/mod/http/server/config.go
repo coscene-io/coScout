@@ -49,6 +49,7 @@ func LogConfigHandler() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Respond
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, err = w.Write(bytes)
 		if err != nil {
