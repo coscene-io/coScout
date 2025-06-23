@@ -33,6 +33,9 @@ type Interface interface {
 	// GetFileSize returns the file size.
 	GetFileSize(filePath string) (int64, error)
 
+	// IsFinished checks if the file is completely written and no more updates are expected.
+	IsFinished(filePath string) bool
+
 	// SendRuleItems sends rule items to the rule engine.
 	SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem)
 }

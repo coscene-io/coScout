@@ -30,6 +30,12 @@ type logHandler struct {
 	defaultGetFileSize
 }
 
+func (h *logHandler) IsFinished(filePath string) bool {
+	// log files are typically not "finished" in the sense that they can be appended to.
+	// However, we can assume that if the file exists and is not empty, it is "finished" for our purposes.
+	return true
+}
+
 func NewLogHandler() Interface {
 	return &logHandler{}
 }
