@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
-	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -302,8 +302,8 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		}
 	}
 
-	if fileInfo.FileName == "" {
-		fileInfo.FileName = path.Base(fileInfo.Path)
+	if fileInfo.FileName == "" || fileInfo.FileName == "." {
+		fileInfo.FileName = filepath.Base(fileInfo.Path)
 	}
 	saveCacheFileInfo(storage, fileInfo)
 
