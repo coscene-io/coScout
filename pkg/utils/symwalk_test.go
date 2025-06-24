@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -1167,5 +1168,175 @@ func BenchmarkGetAllFilePathsOptimized(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// Test self-referencing symlinks handling.
+func TestSymWalk_SelfReferencingSymlink(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a self-referencing symlink: a -> a
+	selfLinkPath := filepath.Join(tmpDir, "self_link")
+	if err := os.Symlink("self_link", selfLinkPath); err != nil {
+		t.Skip("Symlink creation not supported on this system")
+	}
+
+	// Create another variant: link points to itself with absolute path
+	absLinkPath := filepath.Join(tmpDir, "abs_self_link")
+	if err := os.Symlink(absLinkPath, absLinkPath); err != nil {
+		// If creation fails, try to create it anyway
+		t.Logf("Note: Could not create absolute self-referencing symlink: %v", err)
+	}
+
+	// Create a regular file for comparison
+	regularFile := filepath.Join(tmpDir, "regular.txt")
+	if err := os.WriteFile(regularFile, []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test with default options (follow symlinks)
+	t.Run("FollowSymlinks enabled", func(t *testing.T) {
+		t.Parallel()
+		var visitedPaths []string
+		var errors []error
+
+		err := SymWalk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				errors = append(errors, err)
+				return nil // Continue walking
+			}
+			visitedPaths = append(visitedPaths, path)
+			return nil
+		}, DefaultSymWalkOptions())
+
+		if err != nil {
+			t.Fatalf("SymWalk failed: %v", err)
+		}
+
+		// Should not have any "too many links" errors
+		for _, e := range errors {
+			if e != nil && strings.Contains(e.Error(), "too many links") {
+				t.Errorf("Got 'too many links' error: %v", e)
+			}
+		}
+
+		// Should have visited the directory and regular file
+		foundRegular := false
+		foundDir := false
+		for _, path := range visitedPaths {
+			if path == tmpDir {
+				foundDir = true
+			}
+			if path == regularFile {
+				foundRegular = true
+			}
+		}
+
+		if !foundDir {
+			t.Error("Should have visited the directory")
+		}
+		if !foundRegular {
+			t.Error("Should have visited the regular file")
+		}
+	})
+
+	// Test without following symlinks
+	t.Run("FollowSymlinks disabled", func(t *testing.T) {
+		t.Parallel()
+		var visitedPaths []string
+
+		options := &SymWalkOptions{
+			FollowSymlinks:       false,
+			SkipPermissionErrors: true,
+		}
+
+		err := SymWalk(tmpDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil //nolint:nilerr // Continue walking despite errors in this test
+			}
+			visitedPaths = append(visitedPaths, path)
+			return nil
+		}, options)
+
+		if err != nil {
+			t.Fatalf("SymWalk failed: %v", err)
+		}
+
+		// Should visit the symlinks as regular files
+		foundSelfLink := false
+		for _, path := range visitedPaths {
+			if path == selfLinkPath {
+				foundSelfLink = true
+			}
+		}
+
+		if !foundSelfLink {
+			t.Error("Should have visited the self-referencing symlink when not following links")
+		}
+	})
+}
+
+// Test complex circular symlink chains.
+func TestSymWalk_CircularSymlinkChain(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a circular chain: a -> b -> c -> a
+	linkA := filepath.Join(tmpDir, "link_a")
+	linkB := filepath.Join(tmpDir, "link_b")
+	linkC := filepath.Join(tmpDir, "link_c")
+
+	if err := os.Symlink("link_b", linkA); err != nil {
+		t.Skip("Symlink creation not supported on this system")
+	}
+	if err := os.Symlink("link_c", linkB); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("link_a", linkC); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a regular file
+	regularFile := filepath.Join(tmpDir, "regular.txt")
+	if err := os.WriteFile(regularFile, []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var visitedPaths []string
+	var errors []error
+
+	err := SymWalk(tmpDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			errors = append(errors, err)
+			return nil // Continue walking
+		}
+		visitedPaths = append(visitedPaths, path)
+		return nil
+	}, DefaultSymWalkOptions())
+
+	if err != nil {
+		t.Fatalf("SymWalk failed: %v", err)
+	}
+
+	// Should not have any "too many links" errors
+	for _, e := range errors {
+		if e != nil && strings.Contains(e.Error(), "too many links") {
+			t.Errorf("Got 'too many links' error: %v", e)
+		}
+	}
+
+	// Should have visited the directory and regular file
+	foundRegular := false
+	for _, path := range visitedPaths {
+		if path == regularFile {
+			foundRegular = true
+		}
+	}
+
+	if !foundRegular {
+		t.Error("Should have visited the regular file despite circular symlinks")
 	}
 }

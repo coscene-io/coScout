@@ -51,7 +51,7 @@ func NewCommand() *cobra.Command {
 			log.SetFormatter(&log.TextFormatter{
 				FullTimestamp: true,
 				CallerPrettyfier: func(frame *runtime.Frame) (function string, file string) {
-					fileName := path.Base(frame.File)
+					fileName := filepath.Base(frame.File)
 					return strconv.Itoa(frame.Line), fileName
 				},
 			})

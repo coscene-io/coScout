@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
@@ -90,9 +91,59 @@ func SymWalk(root string, walkFn filepath.WalkFunc, options *SymWalkOptions) err
 
 // handleSymlink processes symbolic links.
 func handleSymlink(path string, info os.FileInfo, walkFn filepath.WalkFunc, visited map[string]bool, options *SymWalkOptions) error {
+	// First, read the symlink target without resolving it
+	linkTarget, err := os.Readlink(path)
+	if err != nil {
+		if options.SkipPermissionErrors && isPermissionError(err) {
+			return nil
+		}
+		return walkFn(path, info, err)
+	}
+
+	// Get absolute path of the symlink itself
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return walkFn(path, info, err)
+	}
+
+	// Check if symlink points to itself (directly)
+	absLinkTarget := linkTarget
+	if !filepath.IsAbs(linkTarget) {
+		// If target is relative, make it absolute based on symlink's directory
+		absLinkTarget = filepath.Join(filepath.Dir(absPath), linkTarget)
+	}
+
+	// Clean the paths for comparison
+	cleanAbsPath := filepath.Clean(absPath)
+	cleanAbsLinkTarget := filepath.Clean(absLinkTarget)
+
+	if cleanAbsPath == cleanAbsLinkTarget {
+		log.Warnf("Skipping self-referencing symlink: %s", path)
+		return nil // Skip self-referencing symlinks
+	}
+
 	// Resolve symlink to real path
 	resolved, err := filepath.EvalSymlinks(path)
+	//nolint: nestif // This is necessary to handle symlinks correctly
 	if err != nil {
+		// Check if it's a "too many links" error
+		// Different OS may return different error types, so we check both the error type and the error message
+		var pathErr *os.PathError
+		if errors.As(err, &pathErr) {
+			var errno syscall.Errno
+			if errors.As(pathErr.Err, &errno) && errors.Is(errno, syscall.ELOOP) {
+				log.Debugf("Skipping symlink with circular reference: %s", path)
+				return nil // Skip circular symlinks
+			}
+		}
+
+		// Also check the error message as a fallback (for systems that don't use PathError)
+		errStr := err.Error()
+		if strings.Contains(errStr, "too many links") || strings.Contains(errStr, "too many levels") {
+			log.Warnf("Skipping symlink with circular reference: %s", path)
+			return nil // Skip circular symlinks
+		}
+
 		if options.SkipPermissionErrors && isPermissionError(err) {
 			return nil
 		}

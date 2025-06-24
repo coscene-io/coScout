@@ -307,6 +307,20 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 
+		info, err := os.Stat(file)
+		if err != nil {
+			log.Errorf("Failed to get folder info: %v", err)
+			continue
+		}
+		if !info.IsDir() {
+			files[file] = model.FileInfo{
+				FileName: filepath.Base(file),
+				Size:     info.Size(),
+				Path:     file,
+			}
+			continue
+		}
+
 		filePaths, err := utils.GetAllFilePaths(file, &utils.SymWalkOptions{
 			FollowSymlinks:       true,
 			SkipPermissionErrors: true,
