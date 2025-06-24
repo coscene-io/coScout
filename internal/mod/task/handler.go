@@ -205,9 +205,8 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	taskFolders := taskDetail.GetScanFolders()
 	additionalFiles := taskDetail.GetAdditionalFiles()
 
-	if len(taskFolders) == 0 {
-		return
-	}
+	log.Infof("UploadTask %s, start time: %s, end time: %s, folders: %v, additional files: %v",
+		task.GetName(), startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
 
 	files := make(map[string]model.FileInfo)
 	noPermissionFolders := make([]string, 0)
