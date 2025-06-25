@@ -233,6 +233,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 
+		parentFolder := filepath.Dir(folder)
 		filePaths, err := utils.GetAllFilePaths(folder, &utils.SymWalkOptions{
 			FollowSymlinks:       true,
 			SkipPermissionErrors: true,
@@ -259,7 +260,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			log.Infof("file %s, mod time: %s", path, info.ModTime().String())
 			//nolint: nestif // check file modification time
 			if info.ModTime().After(startTime.AsTime()) && info.ModTime().Before(endTime.AsTime()) {
-				filename, err := filepath.Rel(folder, path)
+				filename, err := filepath.Rel(parentFolder, path)
 				if err != nil {
 					log.Errorf("Failed to get relative path: %v", err)
 					filename = filepath.Base(path)
@@ -281,7 +282,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 					log.Infof("File %s has birth time: %s", path, stat.BirthTime().String())
 
 					if stat.BirthTime().After(startTime.AsTime()) && stat.BirthTime().Before(endTime.AsTime()) {
-						filename, err := filepath.Rel(folder, path)
+						filename, err := filepath.Rel(parentFolder, path)
 						if err != nil {
 							log.Errorf("Failed to get relative path: %v", err)
 							filename = filepath.Base(path)
@@ -321,6 +322,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 
+		parentFolder := filepath.Dir(file)
 		filePaths, err := utils.GetAllFilePaths(file, &utils.SymWalkOptions{
 			FollowSymlinks:       true,
 			SkipPermissionErrors: true,
@@ -344,7 +346,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 				continue
 			}
 
-			filename, err := filepath.Rel(file, path)
+			filename, err := filepath.Rel(parentFolder, path)
 			if err != nil {
 				log.Errorf("Failed to get relative path: %v", err)
 				filename = filepath.Base(path)
