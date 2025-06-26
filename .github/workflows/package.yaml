@@ -2,6 +2,15 @@ name: Compile the offline installation package
 
 # Controls when the workflow will run
 on:
+  # Trigger when release workflow completes successfully
+  workflow_run:
+    workflows: ["Publish Public coScout"]
+    types:
+      - completed
+    branches:
+      - main
+      - master
+      
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
     inputs:
@@ -14,8 +23,49 @@ on:
         default: latest
 
 jobs:
+  # Check if the workflow should run based on the release workflow result
+  check-release-status:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      cos_version: ${{ steps.check.outputs.cos_version }}
+    steps:
+      - name: Checkout repository
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+          
+      - name: Check release status and determine version
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "cos_version=${{ inputs.cosVersion }}" >> "$GITHUB_OUTPUT"
+          else
+            # For workflow_run, check if it was a release or prerelease
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            
+            # Get the version using git describe (same as release workflow)
+            VERSION=$(git describe --always --tags --abbrev=8 --dirty)
+            echo "Detected version: $VERSION"
+            
+            # Check if it's a release version (v1.2.3) or beta (same regex as release workflow)
+            if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
+              echo "This is a release version"
+              echo "cos_version=latest" >> "$GITHUB_OUTPUT"
+            else
+              echo "This is a beta/prerelease version"
+              echo "cos_version=beta" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
   package-zip-file:
     runs-on: ubuntu-latest
+    needs: check-release-status
+    if: ${{ needs.check-release-status.outputs.should_run == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -26,7 +76,7 @@ jobs:
       - name: Build Tar gz file
         run: |
           chmod +x script/package.sh
-          script/package.sh --cos_version=${{ inputs.cosVersion }}
+          script/package.sh --cos_version=${{ needs.check-release-status.outputs.cos_version }}
 
       - name: Upload Tar gz file
         uses: tvrcgo/oss-action@master
@@ -36,17 +86,17 @@ jobs:
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
-            /home/runner/cos_binaries.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries.tar.gz
-            /home/runner/cos_binaries_arm64.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm64.tar.gz
-            /home/runner/cos_binaries_arm.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm.tar.gz
-            /home/runner/cos_binaries_amd64.tar.gz:/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_amd64.tar.gz
+            /home/runner/cos_binaries.tar.gz:/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries.tar.gz
+            /home/runner/cos_binaries_arm64.tar.gz:/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries_arm64.tar.gz
+            /home/runner/cos_binaries_arm.tar.gz:/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries_arm.tar.gz
+            /home/runner/cos_binaries_amd64.tar.gz:/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries_amd64.tar.gz
 
       - name: Upload to S3
         run: |
-          aws s3 cp /home/runner/cos_binaries.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries.tar.gz
-          aws s3 cp /home/runner/cos_binaries_arm64.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm64.tar.gz
-          aws s3 cp /home/runner/cos_binaries_arm.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_arm.tar.gz
-          aws s3 cp /home/runner/cos_binaries_amd64.tar.gz s3://coscene-download/coscout/v2/tar/${{ inputs.cosVersion }}/cos_binaries_amd64.tar.gz
+          aws s3 cp /home/runner/cos_binaries.tar.gz s3://coscene-download/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries.tar.gz
+          aws s3 cp /home/runner/cos_binaries_arm64.tar.gz s3://coscene-download/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries_arm64.tar.gz
+          aws s3 cp /home/runner/cos_binaries_arm.tar.gz s3://coscene-download/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries_arm.tar.gz
+          aws s3 cp /home/runner/cos_binaries_amd64.tar.gz s3://coscene-download/coscout/v2/tar/${{ needs.check-release-status.outputs.cos_version }}/cos_binaries_amd64.tar.gz
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ARTIFACTS_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_ARTIFACTS_ACCESS_SECRET }}
