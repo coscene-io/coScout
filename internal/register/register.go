@@ -78,33 +78,34 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusRespon
 				}
 			}()
 
+			modRegister, err := NewModRegister(r.config.Register)
+			if err != nil {
+				log.Errorf("failed to create mod register: %v", err)
+				channel <- model.DeviceStatusResponse{
+					Authorized: false,
+					Exist:      false,
+				}
+				return
+			}
+
+			localDevice := modRegister.GetDevice()
+			if localDevice == nil {
+				log.Warnf("failed to get device from config")
+
+				channel <- model.DeviceStatusResponse{
+					Authorized: false,
+					Exist:      false,
+				}
+				return
+			}
+
 			log.Debug("Starting device status check")
 			device := core.GetDeviceInfo(&r.storage)
 			// If device is not registered, register it
+			//nolint: nestif // This is a common pattern for checking and registering devices
 			if device == nil || device.GetName() == "" {
-				modRegister, err := NewModRegister(r.config.Register)
-				if err != nil {
-					log.Errorf("failed to create mod register: %v", err)
-					channel <- model.DeviceStatusResponse{
-						Authorized: false,
-						Exist:      false,
-					}
-					return
-				}
-
-				getDevice := modRegister.GetDevice()
-				if getDevice == nil {
-					log.Warnf("failed to get device from config")
-
-					channel <- model.DeviceStatusResponse{
-						Authorized: false,
-						Exist:      false,
-					}
-
-					return
-				}
-
-				isSucceed, localDevice := r.registerDevice(getDevice)
+				log.Infof("Cached device not found, registering new device...")
+				isSucceed, registerDevice := r.registerDevice(localDevice)
 				if !isSucceed {
 					channel <- model.DeviceStatusResponse{
 						Authorized: false,
@@ -113,7 +114,27 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusRespon
 
 					return
 				}
-				device = localDevice
+				device = registerDevice
+			} else {
+				log.Infof("Cached device found: %s, check same with local device", device.GetSerialNumber())
+				if device.GetSerialNumber() != localDevice.GetSerialNumber() {
+					log.Warnf("Local device serial number %s does not match cached device serial number %s, re-registering device",
+						localDevice.GetSerialNumber(), device.GetSerialNumber())
+
+					r.cleanDeviceInfo()
+					channel <- model.DeviceStatusResponse{
+						Authorized: false,
+						Exist:      true,
+					}
+
+					return
+				} else {
+					device.SetTags(localDevice.GetTags())
+					err := r.updateDeviceInfo(device)
+					if err != nil {
+						log.Warnf("unable to update device info: %v", err)
+					}
+				}
 			}
 
 			log.Infof("Current device serial number: %s", device.GetSerialNumber())
@@ -295,4 +316,44 @@ func (r *Register) setDeviceInfo(device *openDpsV1alpha1Resource.Device, exchang
 	}
 
 	return r.storage.Put([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExchangeCodeKey), []byte(exchangeCode))
+}
+
+func (r *Register) updateDeviceInfo(device *openDpsV1alpha1Resource.Device) error {
+	if device == nil {
+		return errors.New("device is nil")
+	}
+
+	bytes, err := protojson.Marshal(device)
+	if err != nil {
+		return err
+	}
+
+	err = r.storage.Put([]byte(constant.DeviceMetadataBucket), []byte(constant.DeviceInfoKey), bytes)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Register) cleanDeviceInfo() {
+	err := r.storage.Delete([]byte(constant.DeviceMetadataBucket), []byte(constant.DeviceInfoKey))
+	if err != nil {
+		log.Warnf("unable to delete device info: %v", err)
+	}
+
+	err = r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthKey))
+	if err != nil {
+		log.Warnf("unable to delete device auth token: %v", err)
+	}
+
+	err = r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExchangeCodeKey))
+	if err != nil {
+		log.Warnf("unable to delete device auth exchange code: %v", err)
+	}
+
+	err = r.storage.Delete([]byte(constant.DeviceAuthBucket), []byte(constant.DeviceAuthExpireKey))
+	if err != nil {
+		log.Warnf("unable to delete device auth token expireTime: %v", err)
+	}
 }
