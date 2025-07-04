@@ -408,6 +408,15 @@ if [ -e /usr/local/bin/colink ]; then
   /usr/local/bin/colink -V
 fi
 
+# remove old config before install
+if [[ $REMOVE_CONFIG -eq 1 ]]; then
+  echo "remove exists colink config file."
+  [ -f "/etc/virmesh.key" ] && sudo rm -f /etc/virmesh.key
+  [ -f "/etc/virmesh.pub" ] && sudo rm -f /etc/virmesh.pub
+  [ -f "/etc/colink.key" ] && sudo rm -f /etc/colink.key
+  [ -f "/etc/colink.pub" ] && sudo rm -f /etc/colink.pub
+fi
+
 # check coLink endpoint or mesh arch
 if [[ -z $COLINK_ENDPOINT ]] || [[ -z $COLINK_ARCH ]]; then
   echo "coLink endpoint and mesh arch are empty, skip coLink installation."
