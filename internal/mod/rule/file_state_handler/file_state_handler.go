@@ -40,7 +40,7 @@ type FileStateHandler interface {
 	// UpdateCollectDirs updates the directories being collected.
 	UpdateCollectDirs(conf config.DefaultModConfConfig) error
 
-	// Files returns filename and filestate pairs that match the given filters.
+	// Files returns filename and file state pairs that match the given filters.
 	Files(filters ...FileFilter) []FileState
 
 	// UpdateFilesProcessState updates the state of files that are ready to process.
