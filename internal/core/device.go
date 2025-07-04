@@ -15,9 +15,14 @@
 package core
 
 import (
+	"os"
+	"strings"
+
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
+	"github.com/coscene-io/coscout"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/coscene-io/coscout/pkg/utils"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -34,4 +39,38 @@ func GetDeviceInfo(storage *storage.Storage) *openDpsV1alpha1Resource.Device {
 	}
 
 	return &device
+}
+
+func GetCustomTags() map[string]string {
+	tags := make(map[string]string)
+
+	cosVersion := coscout.GetVersion()
+	if cosVersion != "" {
+		tags["cos_version"] = cosVersion
+	}
+
+	// check coLink
+	keyPath := "/etc/colink.pub"
+	if utils.CheckReadPath(keyPath) {
+		data, err := os.ReadFile(keyPath)
+		if err == nil {
+			s := string(data)
+			s = strings.TrimPrefix(s, "colink")
+			s = strings.TrimSpace(s)
+			tags["colink_pubkey"] = s
+		}
+	}
+
+	// check virmesh
+	keyPath = "/etc/virmesh.pub"
+	if utils.CheckReadPath(keyPath) {
+		data, err := os.ReadFile(keyPath)
+		if err == nil {
+			s := string(data)
+			s = strings.TrimPrefix(s, "virmesh")
+			s = strings.TrimSpace(s)
+			tags["virmesh_pubkey"] = s
+		}
+	}
+	return tags
 }

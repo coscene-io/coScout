@@ -196,6 +196,26 @@ func (r *RequestClient) GetDevice(name string) (*openDpsV1alpha1Resource.Device,
 	return apiRes.Msg, nil
 }
 
+func (r *RequestClient) AddDeviceTags(deviceName string, tags map[string]string) (*emptypb.Empty, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := openDpsV1alpha1Service.AddDeviceTagRequest{
+		Device: deviceName,
+		Tags:   tags,
+	}
+	apiReq := connect.NewRequest(&req)
+	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
+
+	apiRes, err := r.deviceCli.AddDeviceTag(ctx, apiReq)
+	if err != nil {
+		log.Errorf("unable to add device tags: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.Wrap(err, "unable to add device tags"))
+	}
+
+	return apiRes.Msg, nil
+}
+
 func (r *RequestClient) SendHeartbeat(deviceName string, cosVersion string, networks *openDpsV1alpha1Service.NetworkUsage, extraInfo map[string]string) (*emptypb.Empty, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

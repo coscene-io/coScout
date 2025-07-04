@@ -21,8 +21,8 @@ import (
 	"strings"
 
 	openDpsV1alpha1Resource "buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
-	"github.com/coscene-io/coscout"
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -80,7 +80,7 @@ func (f *FileModRegister) GetDevice() *openDpsV1alpha1Resource.Device {
 			DisplayName:  deviceID,
 			SerialNumber: deviceID,
 			Description:  deviceID,
-			Tags:         getCustomTags(),
+			Tags:         core.GetCustomTags(),
 		}
 	}
 
@@ -100,7 +100,7 @@ func (f *FileModRegister) GetDevice() *openDpsV1alpha1Resource.Device {
 		DisplayName:  deviceID,
 		SerialNumber: deviceID,
 		Description:  deviceID,
-		Tags:         getCustomTags(),
+		Tags:         core.GetCustomTags(),
 	}
 }
 
@@ -137,38 +137,4 @@ func getDeviceFromText(snFile string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(data)), nil
-}
-
-func getCustomTags() map[string]string {
-	tags := make(map[string]string)
-
-	cosVersion := coscout.GetVersion()
-	if cosVersion != "" {
-		tags["cos_version"] = cosVersion
-	}
-
-	// check coLink
-	keyPath := "/etc/colink.pub"
-	if utils.CheckReadPath(keyPath) {
-		data, err := os.ReadFile(keyPath)
-		if err == nil {
-			s := string(data)
-			s = strings.TrimPrefix(s, "colink")
-			s = strings.TrimSpace(s)
-			tags["colink_pubkey"] = s
-		}
-	}
-
-	// check virmesh
-	keyPath = "/etc/virmesh.pub"
-	if utils.CheckReadPath(keyPath) {
-		data, err := os.ReadFile(keyPath)
-		if err == nil {
-			s := string(data)
-			s = strings.TrimPrefix(s, "virmesh")
-			s = strings.TrimSpace(s)
-			tags["virmesh_pubkey"] = s
-		}
-	}
-	return tags
 }
