@@ -369,7 +369,7 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) error {
 	// Filter directories for read access and create sets
 	newCollectDirs := mapset.NewSet[string]()
-	for _, dir := range conf.ListenDirs {
+	for _, dir := range conf.CollectDirs {
 		if utils.CheckReadPath(dir) {
 			newCollectDirs.Add(dir)
 		}
