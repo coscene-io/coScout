@@ -68,7 +68,7 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 		default:
 			deviceInfo := GetDeviceInfo(storage)
 			if deviceInfo == nil || deviceInfo.GetName() == "" {
-				log.Warnf("device info is not set, skipping heartbeat")
+				log.Warn("device info is not available, skipping heartbeat")
 
 				time.Sleep(config.HeartbeatInterval)
 				continue
@@ -101,14 +101,16 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 				networkUsage.ReduceReceived(receivedBytes)
 			}
 
-			colinkPubkey, ok := deviceInfo.GetTags()["colink_pubkey"]
-			if ok && colinkPubkey != "" {
-				//nolint: contextcheck //context is checked in the parent goroutine
-				_, err = reqClient.AddDeviceTags(deviceInfo.GetName(), map[string]string{
+			deviceTags := GetCustomTags()
+			colinkPubkey, ok := deviceTags["colink_pubkey"]
+			if ok && len(colinkPubkey) > 0 {
+				tags := map[string]string{
 					"colink_pubkey": colinkPubkey,
-				})
+				}
+				//nolint: contextcheck //context is checked in the parent goroutine
+				_, err = reqClient.AddDeviceTags(deviceInfo.GetName(), tags)
 				if err != nil {
-					log.Errorf("failed to update colink pubkey: %v", err)
+					log.Errorf("failed to update device tags: %v", err)
 				}
 			}
 
