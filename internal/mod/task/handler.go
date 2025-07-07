@@ -118,6 +118,7 @@ func (c *CustomTaskHandler) run(_ context.Context) {
 
 func (c *CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resource.Task) {
 	if len(tasks) == 0 {
+		log.Infof("No cancelling tasks found")
 		return
 	}
 
