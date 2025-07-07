@@ -291,14 +291,14 @@ func (r *RequestClient) GetConfigMapWithCache(name string) (*openDpsV1alpha1Reso
 	return apiRes.Msg, nil
 }
 
-func (r *RequestClient) ListDeviceTasks(deviceName string, state *openDpsV1alpha1Enum.TaskStateEnum_TaskState) ([]*openDpsV1alpha1Resource.Task, error) {
+func (r *RequestClient) ListDeviceTasks(deviceName string, state *openDpsV1alpha1Enum.TaskStateEnum_TaskState, category string) ([]*openDpsV1alpha1Resource.Task, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	req := openDpsV1alpha1Service.ListDeviceTasksRequest{
 		Parent:   deviceName,
 		PageSize: 10,
-		Filter:   fmt.Sprintf("state=%s AND category=UPLOAD", state.String()),
+		Filter:   fmt.Sprintf("state=%s AND category=%s", state.String(), category),
 	}
 	apiReq := connect.NewRequest(&req)
 	apiReq.Header().Set(constant.AuthHeaderKey, r.getAuthToken())
