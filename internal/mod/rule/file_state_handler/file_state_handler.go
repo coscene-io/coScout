@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -278,6 +279,21 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 	}
 	log.Infof("Start updating directories, listen_dirs: %v", newListenDirs)
 
+	// Find directories that are no longer being monitored
+	deleteDirs := f.listenDirs.Difference(newListenDirs)
+
+	// Delete state of files in directories that are no longer scanned
+	for filename := range f.state {
+		for dir := range deleteDirs.Iter() {
+			if strings.HasPrefix(filename, dir) {
+				if err := f.delFileState(filename); err != nil {
+					return errors.Errorf("failed to delete file state for %s: %v", filename, err)
+				}
+				log.Infof("Deleted file state for %s in directory %s", filename, dir)
+			}
+		}
+	}
+
 	log.Infof("Listening scan files modified in the last %d hours", conf.SkipPeriodHours)
 	// Iterate over new directories and update file states
 	for dir := range newListenDirs.Iter() {
@@ -375,6 +391,21 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 		}
 	}
 	log.Infof("Start updating directories, collector_dirs: %v", newCollectDirs)
+
+	// Find directories that are no longer being monitored
+	deleteDirs := f.collectDirs.Difference(newCollectDirs)
+
+	// Delete state of files in directories that are no longer collected
+	for filename := range f.state {
+		for dir := range deleteDirs.Iter() {
+			if strings.HasPrefix(filename, dir) {
+				if err := f.delFileState(filename); err != nil {
+					return errors.Errorf("failed to delete file state for %s: %v", filename, err)
+				}
+				log.Infof("Deleted file state for %s in directory %s", filename, dir)
+			}
+		}
+	}
 
 	// Iterate over new directories and update file states
 	for dir := range newCollectDirs.Iter() {
