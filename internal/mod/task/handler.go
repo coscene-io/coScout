@@ -84,17 +84,27 @@ func (c *CustomTaskHandler) run(_ context.Context) {
 	}
 
 	//nolint: contextcheck // context is checked in the parent goroutine
-	cancellingTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_CANCELLING.Enum())
+	cancellingUploadTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_CANCELLING.Enum(), enums.TaskCategoryEnum_UPLOAD.String())
 	if err != nil {
-		log.Errorf("Failed to list device cancelling tasks: %v", err)
+		log.Errorf("Failed to list device cancelling upload tasks: %v", err)
 		c.errChan <- err
 		return
 	}
 	//nolint: contextcheck // context is checked in the parent goroutine
-	c.handleCancellingTasks(cancellingTasks)
+	c.handleCancellingTasks(cancellingUploadTasks)
 
 	//nolint: contextcheck // context is checked in the parent goroutine
-	pendingTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_PENDING.Enum())
+	cancellingDiagnosisTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_CANCELLING.Enum(), enums.TaskCategoryEnum_DIAGNOSIS.String())
+	if err != nil {
+		log.Errorf("Failed to list device cancelling diagnosis tasks: %v", err)
+		c.errChan <- err
+		return
+	}
+	//nolint: contextcheck // context is checked in the parent goroutine
+	c.handleCancellingTasks(cancellingDiagnosisTasks)
+
+	//nolint: contextcheck // context is checked in the parent goroutine
+	pendingTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_PENDING.Enum(), enums.TaskCategoryEnum_UPLOAD.String())
 	if err != nil {
 		log.Errorf("Failed to list device tasks: %v", err)
 		c.errChan <- err
@@ -132,11 +142,23 @@ func (c *CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resour
 			continue
 		}
 
-		if cache.UploadTask == nil {
-			continue
+		taskName := ""
+		if cache.UploadTask != nil {
+			uploadTaskName, ok := cache.UploadTask["name"].(string)
+			if ok && uploadTaskName != "" {
+				taskName = uploadTaskName
+			}
 		}
-		taskName, ok := cache.UploadTask["name"].(string)
-		if !ok || taskName == "" {
+
+		if cache.DiagnosisTask != nil {
+			diagnosisTaskName, ok := cache.DiagnosisTask["name"].(string)
+			if ok && diagnosisTaskName != "" {
+				taskName = diagnosisTaskName
+			}
+		}
+
+		if taskName == "" {
+			log.Warnf("No task name found in record cache %s, skipping", rc)
 			continue
 		}
 
