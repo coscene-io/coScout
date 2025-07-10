@@ -64,3 +64,70 @@ func TestGetStringOrDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestIsValidDeviceID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		deviceID string
+		expected bool
+	}{
+		// Valid device IDs
+		{"valid alphanumeric", "device123", true},
+		{"valid with dash", "device-123", true},
+		{"valid with underscore", "device_123", true},
+		{"valid with dot", "device.123", true},
+		{"valid mixed", "device-123_456.789", true},
+		{"valid uppercase", "DEVICE123", true},
+		{"valid mixed case", "Device123", true},
+		{"valid single char", "a", true},
+		{"valid numbers only", "123456", true},
+		{"valid letters only", "device", true},
+
+		// Valid with new symbols
+		{"valid with exclamation", "device!123", true},
+		{"valid with at", "device@123", true},
+		{"valid with hash", "device#123", true},
+		{"valid with percent", "device%123", true},
+		{"valid with caret", "device^123", true},
+		{"valid with ampersand", "device&123", true},
+		{"valid with asterisk", "device*123", true},
+		{"valid with parentheses", "device(123)", true},
+		{"valid with plus", "device+123", true},
+		{"valid with equals", "device=123", true},
+		{"valid with brackets", "device[123]", true},
+		{"valid with braces", "device{123}", true},
+		{"valid with colon", "device:123", true},
+		{"valid with semicolon", "device;123", true},
+		{"valid with comma", "device,123", true},
+		{"valid with question mark", "device?123", true},
+		{"valid with tilde", "device~123", true},
+		{"valid complex symbols", "device!@#$%^&*()+={}", true},
+
+		// Invalid device IDs
+		{"empty string", "", false},
+		{"whitespace only", "   ", false},
+		{"with space", "device 123", false},
+		{"with slash", "device/123", false},
+		{"with backslash", "device\\123", false},
+		{"with quote", "device'123", false},
+		{"with double quote", "device\"123", false},
+		{"with pipe", "device|123", false},
+		{"with backtick", "device`123", false},
+		{"with dollar", "device$123", true},
+		{"with less than", "device<123", false},
+		{"with greater than", "device>123", false},
+		{"too long", "a123456789012345678901234567890123456789012345678901234567890123456789", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := IsValidDeviceID(tt.deviceID)
+			if result != tt.expected {
+				t.Errorf("IsValidDeviceID(%q) = %v, expected %v", tt.deviceID, result, tt.expected)
+			}
+		})
+	}
+}
