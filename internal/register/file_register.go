@@ -122,12 +122,17 @@ func getDeviceFromStructuredFile(snFile, snField string) (string, error) {
 	}
 
 	deviceID, ok := result[snField]
-	if !ok {
-		return "", errors.Wrap(err, "field not found or not a string")
+	if !ok || deviceID == nil {
+		return "", errors.Errorf("field '%s' not found or empty in file %s", snField, snFile)
 	}
 
 	deviceIDStr := fmt.Sprintf("%v", deviceID)
-	return strings.TrimSpace(deviceIDStr), nil
+	deviceIDStr = strings.TrimSpace(deviceIDStr)
+	if deviceIDStr == "" {
+		return "", errors.Errorf("field '%s' contains empty value in file %s", snField, snFile)
+	}
+
+	return deviceIDStr, nil
 }
 
 func getDeviceFromText(snFile string) (string, error) {
