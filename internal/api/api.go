@@ -64,6 +64,7 @@ type RequestClient struct {
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, networkChan chan *model.NetworkUsage, registerChan chan model.DeviceStatusResponse) *RequestClient {
 	httpClient := &http.Client{
 		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
 			TLSClientConfig: &tls.Config{
 				//nolint: gosec// make work in some old machines.
 				InsecureSkipVerify: apiConfig.Insecure,
