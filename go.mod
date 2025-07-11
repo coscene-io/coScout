@@ -20,7 +20,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
-	github.com/knadh/koanf/v2 v2.2.1
+	github.com/knadh/koanf/v2 v2.2.2
 	github.com/minio/minio-go/v7 v7.0.94
 	github.com/oriser/regroup v0.0.0-20240925165441-f6bb0e08289e
 	github.com/pkg/errors v0.9.1
@@ -45,7 +45,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.3.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect

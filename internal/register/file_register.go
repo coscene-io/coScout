@@ -76,6 +76,12 @@ func (f *FileModRegister) GetDevice() *openDpsV1alpha1Resource.Device {
 			return nil
 		}
 
+		// deviceId only support alphanumeric characters, numbers and symbols
+		if !utils.IsValidDeviceID(deviceID) {
+			log.Errorf("device id %s is not valid, only alphanumeric characters, numbers and symbols are allowed", deviceID)
+			return nil
+		}
+
 		return &openDpsV1alpha1Resource.Device{
 			DisplayName:  deviceID,
 			SerialNumber: deviceID,
@@ -93,6 +99,12 @@ func (f *FileModRegister) GetDevice() *openDpsV1alpha1Resource.Device {
 
 	if deviceID == "" {
 		log.Errorf("get empty device id from text file: %s", f.conf.SnFile)
+		return nil
+	}
+
+	// deviceId only support alphanumeric characters, numbers and symbols
+	if !utils.IsValidDeviceID(deviceID) {
+		log.Errorf("device id %s is not valid, only alphanumeric characters, numbers and symbols are allowed", deviceID)
 		return nil
 	}
 
