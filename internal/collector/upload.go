@@ -334,6 +334,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 	}
 
 	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
 			//nolint: gosec// InsecureSkipVerify is used to skip certificate verification
 			InsecureSkipVerify: appConfig.Api.Insecure,
