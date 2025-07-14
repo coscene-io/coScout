@@ -12,7 +12,7 @@ require (
 	github.com/djherbis/times v1.6.0
 	github.com/foxglove/go-rosbag v0.0.7
 	github.com/foxglove/mcap/go/mcap v1.7.3
-	github.com/google/cel-go v0.25.0
+	github.com/google/cel-go v0.26.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/itchyny/timefmt-go v0.1.6
@@ -39,7 +39,7 @@ require (
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.6-20240508200655-46a4cf4ba109.1 // indirect
 	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.6-20230414000709-087bc8072ce4.1 // indirect
-	cel.dev/expr v0.23.1 // indirect
+	cel.dev/expr v0.24.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
