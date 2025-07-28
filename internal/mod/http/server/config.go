@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/coscene-io/coscout/internal/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -55,5 +56,30 @@ func LogConfigHandler() func(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+	}
+}
+
+func CurrentConfigHandler(confManager config.ConfManager) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		appConfig := confManager.LoadWithRemote()
+
+		bytes, err := json.Marshal(appConfig)
+		if err != nil {
+			log.Errorf("Failed to marshal response: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Respond
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(bytes)
+		if err != nil {
+			log.Errorf("Failed to write response: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		log.Debugf("Current config: %s", string(bytes))
+		log.Infof("Current config served successfully")
 	}
 }

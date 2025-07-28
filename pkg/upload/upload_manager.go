@@ -177,6 +177,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	if err != nil {
 		log.Debugf("Get uploaded size by: %s warn: %v", uploadedSizeKey, err)
 	}
+	//nolint: nestif // readability
 	if uploadedSizeBytes != nil {
 		uploadedSize, err = strconv.ParseInt(string(uploadedSizeBytes), 10, 64)
 		if err != nil {
@@ -267,6 +268,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 	// Check if all parts are already uploaded
 	partsToUpload := totalPartsCount - len(partNumbers)
+	//nolint: nestif // readability
 	if partsToUpload <= 0 {
 		if totalPartsCount == len(partNumbers) && uploadedSize == fileSize {
 			// All parts are uploaded and size matches - complete the upload
