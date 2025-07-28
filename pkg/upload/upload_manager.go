@@ -165,9 +165,49 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	c := minio.Core{Client: u.client}
 
 	// ----------------- Start fetching previous upload info from db -----------------
-	// Fetch upload id. If not found, initiate a new multipart upload.
+	// Fetch uploaded size
 	var uploadId string
+	var uploadedSize int64
+
 	uploadIdKey := fmt.Sprintf(uploadIdKeyTemplate, filePath)
+	uploadedSizeKey := fmt.Sprintf(uploadedSizeKeyTemplate, filePath)
+	partsKey := fmt.Sprintf(partsKeyTemplate, filePath)
+
+	uploadedSizeBytes, err := (*u.storage).Get([]byte(u.cacheBucket), []byte(uploadedSizeKey))
+	if err != nil {
+		log.Debugf("Get uploaded size by: %s warn: %v", uploadedSizeKey, err)
+	}
+	if uploadedSizeBytes != nil {
+		uploadedSize, err = strconv.ParseInt(string(uploadedSizeBytes), 10, 64)
+		if err != nil {
+			uploadedSize = 0
+		}
+		// Validate cached uploaded size doesn't exceed file size
+		if uploadedSize > fileSize {
+			log.Warnf("Cached uploaded size %d exceeds file size %d, resetting to 0", uploadedSize, fileSize)
+			uploadedSize = 0
+
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
+			if err != nil {
+				log.Errorf("Delete uploaded size failed: %v", err)
+			}
+
+			// Reset uploadId and parts as well
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
+			if err != nil {
+				log.Errorf("Delete upload id failed: %v", err)
+			}
+
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
+			if err != nil {
+				log.Errorf("Delete parts failed: %v", err)
+			}
+		}
+	} else {
+		uploadedSize = 0
+	}
+
+	// Fetch upload id. If not found, initiate a new multipart upload.
 	uploadIdBytes, err := (*u.storage).Get([]byte(u.cacheBucket), []byte(uploadIdKey))
 	if err != nil {
 		log.Debugf("Get upload id by: %s warn: %v", uploadIdKey, err)
@@ -183,28 +223,11 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	}
 	log.Debugf("Get upload id: %s by: %s", uploadId, uploadIdKey)
 
-	// Fetch uploaded size
-	var uploadedSize int64
-	uploadedSizeKey := fmt.Sprintf(uploadedSizeKeyTemplate, filePath)
-	uploadedSizeBytes, err := (*u.storage).Get([]byte(u.cacheBucket), []byte(uploadedSizeKey))
-	if err != nil {
-		log.Debugf("Get uploaded size by: %s warn: %v", uploadedSizeKey, err)
-	}
-	if uploadedSizeBytes != nil {
-		uploadedSize, err = strconv.ParseInt(string(uploadedSizeBytes), 10, 64)
-		if err != nil {
-			uploadedSize = 0
-		}
-	} else {
-		uploadedSize = 0
-	}
-
 	u.uploadProgressChan <- FileUploadProgress{Name: filePath, Uploaded: uploadedSize, TotalSize: -1}
 	log.Debugf("Get uploaded size: %d by: %s", uploadedSize, uploadedSizeKey)
 
 	// Fetch uploaded parts
 	var parts []minio.CompletePart
-	partsKey := fmt.Sprintf(partsKeyTemplate, filePath)
 	partsBytes, err := (*u.storage).Get([]byte(u.cacheBucket), []byte(partsKey))
 	if err != nil {
 		log.Debugf("Get uploaded parts by: %s warn: %v", partsKey, err)
@@ -242,10 +265,66 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 		return errors.Wrap(err, "Optimal part info failed")
 	}
 
+	// Check if all parts are already uploaded
+	partsToUpload := totalPartsCount - len(partNumbers)
+	if partsToUpload <= 0 {
+		if totalPartsCount == len(partNumbers) && uploadedSize == fileSize {
+			// All parts are uploaded and size matches - complete the upload
+			log.Infof("File: %s, all parts already uploaded, completing multipart upload", filePath)
+
+			// Sort all completed parts.
+			slices.SortFunc(parts, func(i, j minio.CompletePart) int {
+				return i.PartNumber - j.PartNumber
+			})
+
+			_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
+			if err != nil {
+				log.Errorf("Complete multipart upload failed: %v", err)
+				return errors.Wrapf(err, "Complete multipart upload failed")
+			}
+
+			// Clean up cache entries
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
+			if err != nil {
+				log.Errorf("Delete upload id failed: %v", err)
+			}
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
+			if err != nil {
+				log.Errorf("Delete parts failed: %v", err)
+			}
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
+			if err != nil {
+				log.Errorf("Delete uploaded size failed: %v", err)
+			}
+
+			return nil
+		} else {
+			// Parts count or size mismatch - need to re-upload
+			log.Warnf("File: %s, parts/size mismatch (total parts: %d, uploaded parts: %d, uploaded size: %d, file size: %d), clearing cache",
+				filePath, totalPartsCount, len(partNumbers), uploadedSize, fileSize)
+
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
+			if err != nil {
+				log.Errorf("Delete uploaded size failed: %v", err)
+			}
+
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
+			if err != nil {
+				log.Errorf("Delete upload id failed: %v", err)
+			}
+
+			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
+			if err != nil {
+				log.Errorf("Delete parts failed: %v", err)
+			}
+			return errors.New("File parts/size mismatch, need to re-upload all parts")
+		}
+	}
+
 	// Declare a channel that sends the next part number to be uploaded.
 	uploadPartsCh := make(chan int)
 	// Declare a channel that sends back the response of a part upload.
-	uploadedPartsCh := make(chan uploadedPartRes, totalPartsCount-len(partNumbers))
+	uploadedPartsCh := make(chan uploadedPartRes, partsToUpload)
 	// Used for readability, lastPartNumber is always totalPartsCount.
 	lastPartNumber := totalPartsCount
 
@@ -362,7 +441,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 				}
 				return uploadRes.Error
 			}
-			// Update the uploadedSize.
+			// Update the uploadedSize with the current part size
 			uploadedSize += uploadRes.Part.Size
 			parts = append(parts, minio.CompletePart{
 				ETag:           uploadRes.Part.ETag,
