@@ -35,6 +35,9 @@ type AppConfig struct {
 	// HttpServer HttpServerConfig `yaml:"http_server"`
 	HttpServer HttpServerConfig `koanf:"http_server" yaml:"http_server" json:"http_server"`
 
+	// PluginConfig other coscene plugin config, such as coEncoder..., which is not cos's config
+	PluginConfig interface{} `koanf:"plugin_config" yaml:"plugin_config" json:"plugin_config"`
+
 	// import other config
 	Import []string `koanf:"__import__" yaml:"__import__" json:"__import__"`
 }

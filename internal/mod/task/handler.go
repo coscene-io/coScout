@@ -344,7 +344,10 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 
-		parentFolder := filepath.Dir(file)
+		// Clean the file path to handle trailing slashes correctly
+		cleanFile := filepath.Clean(file)
+		parentFolder := filepath.Dir(cleanFile)
+
 		filePaths, err := utils.GetAllFilePaths(file, &utils.SymWalkOptions{
 			FollowSymlinks:       true,
 			SkipPermissionErrors: true,
