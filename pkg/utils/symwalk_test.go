@@ -414,10 +414,12 @@ func ExampleSymWalk_findFiles() {
 		fmt.Printf("- %s\n", file)
 	}
 	// Output:
-	// Found 9 Go files
+	// Found 11 Go files
 	// - conf.go
 	// - file.go
 	// - file_test.go
+	// - net.go
+	// - net_test.go
 	// - symwalk.go
 	// - symwalk_test.go
 	// - timestamp.go
@@ -757,10 +759,12 @@ func ExampleGetAllFilePaths_customOptions() {
 		fmt.Printf("- %s\n", filepath.Base(path))
 	}
 	// Output:
-	// Found 9 Go files:
+	// Found 11 Go files:
 	// - conf.go
 	// - file.go
 	// - file_test.go
+	// - net.go
+	// - net_test.go
 	// - symwalk.go
 	// - symwalk_test.go
 	// - timestamp.go
