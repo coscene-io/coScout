@@ -38,6 +38,9 @@ type AppConfig struct {
 	// PluginConfig other coscene plugin config, such as coEncoder..., which is not cos's config
 	PluginConfig interface{} `koanf:"plugin_config" yaml:"plugin_config" json:"plugin_config"`
 
+	// Upload
+	Upload UploadConfig `koanf:"upload" yaml:"upload" json:"upload"`
+
 	// import other config
 	Import []string `koanf:"__import__" yaml:"__import__" json:"__import__"`
 }
@@ -84,4 +87,14 @@ type DefaultModConfConfig struct {
 
 type HttpServerConfig struct {
 	Port int `koanf:"port" yaml:"port" json:"port"`
+}
+
+type UploadConfig struct {
+	NetworkRule NetworkRule `koanf:"network_rule" yaml:"network_rule" json:"network_rule"`
+}
+
+type NetworkRule struct {
+	Enabled           bool     `koanf:"enabled" yaml:"enabled" json:"enabled"`
+	AllowedInterfaces []string `koanf:"allowed_interfaces" yaml:"allowed_interfaces" json:"allowed_interfaces"`
+	Server            string   `koanf:"server" yaml:"server" json:"server"`
 }

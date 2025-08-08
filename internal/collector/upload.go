@@ -90,6 +90,20 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 					return
 				}
 
+				appConfig := confManager.LoadWithRemote()
+				if appConfig != nil {
+					enabled := appConfig.Upload.NetworkRule.Enabled
+					allowedInterfaces := appConfig.Upload.NetworkRule.AllowedInterfaces
+					server := appConfig.Upload.NetworkRule.Server
+					if enabled && len(allowedInterfaces) > 0 {
+						isBlack := utils.CheckNetworkBlackList(server, allowedInterfaces)
+						if isBlack {
+							log.Warnf("Network interface is blacklisted, skipping upload for record %s", recordCache.GetRecordCachePath())
+							return
+						}
+					}
+				}
+
 				log.Infof("start to upload record %s", recordCache.GetRecordCachePath())
 				err := uploadFiles(reqClient, confManager, recordCache)
 				if err != nil {
@@ -156,6 +170,18 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		if lo.Contains(recordCache.UploadedFilePaths, filePath) {
 			log.Infof("file %s has been uploaded, skip", filePath)
 			continue
+		}
+
+		if appConfig != nil {
+			enabled := appConfig.Upload.NetworkRule.Enabled
+			allowedInterfaces := appConfig.Upload.NetworkRule.AllowedInterfaces
+			server := appConfig.Upload.NetworkRule.Server
+			if enabled && len(allowedInterfaces) > 0 {
+				isBlack := utils.CheckNetworkBlackList(server, allowedInterfaces)
+				if isBlack {
+					return errors.New("network interface is blacklisted, skipping upload")
+				}
+			}
 		}
 
 		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo); err != nil {
