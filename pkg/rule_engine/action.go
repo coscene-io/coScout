@@ -70,6 +70,12 @@ func NewAction(
 				return nil, errors.Errorf("failed to compile argument %s: %v", k, err)
 			}
 			kwargs[k] = evaluator
+		case []string:
+			evaluator, err := compileArrayExpr(env, val)
+			if err != nil {
+				return nil, errors.Errorf("failed to compile array argument %s: %v", k, err)
+			}
+			kwargs[k] = evaluator
 		case map[string]interface{}:
 			evaluator, err := compileDictExpr(env, val)
 			if err != nil {
@@ -199,6 +205,85 @@ func compileDictExpr(env *cel.Env, dict map[string]interface{}) (expressionEvalu
 			}
 			result[k] = value
 		}
+		return result, nil
+	}, nil
+}
+
+// compileArrayExpr compiles expressions in a string array.
+// Each array element can contain embedded CEL expressions like "{scope.files}".
+func compileArrayExpr(env *cel.Env, arr []string) (expressionEvaluator, error) {
+	compiledEvaluators := make([]expressionEvaluator, len(arr))
+
+	for i, element := range arr {
+		pattern := regexp.MustCompile(`\{\s*(.*?)\s*}`)
+		matches := pattern.FindAllStringSubmatch(element, -1)
+
+		switch {
+		case len(matches) == 0:
+			// If no expressions found, return the constant string
+			compiledEvaluators[i] = func(map[string]interface{}) (interface{}, error) {
+				return element, nil
+			}
+		case len(matches) == 1 && matches[0][0] == element:
+			// Special case: element is pure expression like "{scope.files}"
+			// Try to evaluate it as an array expression first
+			ast, issues := env.Compile(matches[0][1])
+			if issues != nil && issues.Err() != nil {
+				return nil, errors.Errorf("failed to compile array expression '%s': %v", matches[0][1], issues.Err())
+			}
+			program, err := env.Program(ast)
+			if err != nil {
+				return nil, errors.Errorf("failed to create program for array expression '%s': %v", matches[0][1], err)
+			}
+
+			compiledEvaluators[i] = func(activation map[string]interface{}) (interface{}, error) {
+				val, _, err := program.Eval(activation)
+				if err != nil {
+					return nil, errors.Errorf("failed to evaluate array expression '%s': %v", matches[0][1], err)
+				}
+				return val.Value(), nil
+			}
+		default:
+			// Element contains mixed content with expressions, treat as string
+			evaluator, err := compileEmbeddedExpr(env, element)
+			if err != nil {
+				return nil, errors.Errorf("failed to compile embedded expression in array element: %v", err)
+			}
+			compiledEvaluators[i] = evaluator
+		}
+	}
+
+	return func(activation map[string]interface{}) (interface{}, error) {
+		result := make([]string, 0)
+
+		for _, evaluator := range compiledEvaluators {
+			value, err := evaluator(activation)
+			if err != nil {
+				return nil, err
+			}
+
+			switch v := value.(type) {
+			case []interface{}:
+				// If the expression evaluates to an array, append all elements
+				for _, item := range v {
+					result = append(result, fmt.Sprintf("%v", item))
+				}
+			case []string:
+				// If it's already a string array, append directly
+				result = append(result, v...)
+			case string:
+				// Single string value
+				if v != "" {
+					result = append(result, v)
+				}
+			default:
+				// Convert other types to string
+				if str := fmt.Sprintf("%v", v); str != "" {
+					result = append(result, str)
+				}
+			}
+		}
+
 		return result, nil
 	}, nil
 }
