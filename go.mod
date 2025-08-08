@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250613072610-46122efff246.1
-	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.6-20250613072610-46122efff246.1
+	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.7-20250807094533-d412639fa2c0.1
 	connectrpc.com/connect v1.18.1
 	github.com/ThreeDotsLabs/watermill v1.4.7
 	github.com/bmatcuk/doublestar/v4 v4.9.1
@@ -38,8 +38,8 @@ require (
 )
 
 require (
-	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.6-20240508200655-46a4cf4ba109.1 // indirect
-	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.6-20230414000709-087bc8072ce4.1 // indirect
+	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.7-20240508200655-46a4cf4ba109.1 // indirect
+	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.7-20230414000709-087bc8072ce4.1 // indirect
 	cel.dev/expr v0.24.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
