@@ -29,7 +29,7 @@ require (
 	github.com/sosodev/duration v1.3.1
 	github.com/spf13/cobra v1.9.1
 	go.etcd.io/bbolt v1.4.2
-	golang.org/x/sys v0.34.0
+	golang.org/x/sys v0.35.0
 	golang.org/x/time v0.12.0
 	google.golang.org/protobuf v1.36.7
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
