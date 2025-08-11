@@ -197,7 +197,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 				log.Errorf("failed to reload record cache: %v", err)
 				return err
 			}
-			recordCache.UploadedFilePaths = append(recordCache.UploadedFilePaths, filePath)
+			recordCache.UploadedFilePaths = lo.Uniq(append(recordCache.UploadedFilePaths, filePath))
 			err = recordCache.Save()
 			if err != nil {
 				log.Errorf("failed to save record cache: %v", err)
@@ -209,7 +209,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			uploadTaskName, ok := recordCache.UploadTask["name"].(string)
 			if ok && len(uploadTaskName) > 0 {
 				tags := make(map[string]string)
-				tags["uploadedFiles"] = strconv.Itoa(len(recordCache.UploadedFilePaths))
+				tags["uploadedFiles"] = strconv.Itoa(len(lo.Uniq(recordCache.UploadedFilePaths)))
 
 				_, err := reqClient.AddTaskTags(uploadTaskName, tags)
 				if err != nil {
@@ -223,7 +223,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			diagnosisTaskName, ok := recordCache.DiagnosisTask["name"].(string)
 			if ok && len(diagnosisTaskName) > 0 {
 				tags := make(map[string]string)
-				tags["uploadedFiles"] = strconv.Itoa(len(recordCache.UploadedFilePaths))
+				tags["uploadedFiles"] = strconv.Itoa(len(lo.Uniq(recordCache.UploadedFilePaths)))
 
 				_, err := reqClient.AddTaskTags(diagnosisTaskName, tags)
 				if err != nil {
