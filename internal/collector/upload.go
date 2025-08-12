@@ -104,6 +104,12 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 					}
 				}
 
+				manualDisabled := checkDisabledUpload(confManager)
+				if manualDisabled {
+					log.Warnf("Upload is manual disabled, skipping upload for record %s", recordCache.GetRecordCachePath())
+					return
+				}
+
 				log.Infof("start to upload record %s", recordCache.GetRecordCachePath())
 				err := uploadFiles(reqClient, confManager, recordCache)
 				if err != nil {
@@ -182,6 +188,11 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 					return errors.New("network interface is blacklisted, skipping upload")
 				}
 			}
+		}
+
+		disabledUpload := checkDisabledUpload(confManager)
+		if disabledUpload {
+			return errors.New("upload is manually disabled, skipping upload")
 		}
 
 		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo); err != nil {
@@ -472,4 +483,35 @@ func cleanCacheFileInfo(storage *storage.Storage) error {
 		}
 	}
 	return nil
+}
+
+func checkDisabledUpload(confManager *config.ConfManager) bool {
+	if confManager == nil {
+		log.Error("config manager is nil")
+		return true
+	}
+
+	s := confManager.GetStorage()
+	if s == nil {
+		log.Error("storage is not initialized")
+		return true
+	}
+
+	v, err := (*s).Get([]byte(constant.ConfigInfoBucket), []byte(constant.UploadStatusConfigKey))
+	if err != nil {
+		log.Errorf("failed to get upload status: %v", err)
+		return true
+	}
+
+	if len(v) == 0 {
+		return false
+	}
+
+	disabled, err := strconv.ParseBool(string(v))
+	if err != nil {
+		log.Errorf("failed to parse upload status: %v", err)
+		return true
+	}
+
+	return disabled
 }

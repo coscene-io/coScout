@@ -56,4 +56,8 @@ const (
 	TopicRuleMsg         = "topic.rules.msg"
 	TopicCollectMsg      = "topic.collect.msg"
 	TopicConfigTopicsMsg = "topic.config.topics.msg"
+
+	// ConfigInfoBucket Config info bucket.
+	ConfigInfoBucket      = "config_info_bucket"
+	UploadStatusConfigKey = "upload_status_config"
 )
