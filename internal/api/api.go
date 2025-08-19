@@ -70,8 +70,9 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 				InsecureSkipVerify: apiConfig.Insecure,
 			},
 			ForceAttemptHTTP2: true,
-			IdleConnTimeout:   90 * time.Second,
-			MaxIdleConns:      5,
+			IdleConnTimeout:   10 * time.Second,
+			MaxIdleConns:      3,
+			DisableKeepAlives: true,
 		},
 		Timeout: 30 * time.Second,
 	}

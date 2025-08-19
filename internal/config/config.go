@@ -94,7 +94,7 @@ type UploadConfig struct {
 }
 
 type NetworkRule struct {
-	Enabled           bool     `koanf:"enabled" yaml:"enabled" json:"enabled"`
-	AllowedInterfaces []string `koanf:"allowed_interfaces" yaml:"allowed_interfaces" json:"allowed_interfaces"`
-	Server            string   `koanf:"server" yaml:"server" json:"server"`
+	Enabled         bool     `koanf:"enabled" yaml:"enabled" json:"enabled"`
+	BlackInterfaces []string `koanf:"black_interfaces" yaml:"black_interfaces" json:"black_interfaces"`
+	Server          string   `koanf:"server" yaml:"server" json:"server"`
 }
