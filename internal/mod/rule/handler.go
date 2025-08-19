@@ -379,7 +379,13 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		return
 	}
 
-	if info.Cut == nil || time.Unix(info.Cut.End, 0).After(time.Now()) {
+	if info.Cut == nil {
+		log.Errorf("Collect info cut is nil: %v", info.Id)
+		info.Clean()
+		return
+	}
+
+	if time.Unix(info.Cut.End, 0).After(time.Now()) {
 		log.Infof("Collect info is not reached: %v", info.Id)
 		return
 	}
