@@ -31,6 +31,7 @@ import (
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/constant"
@@ -64,6 +65,11 @@ type CustomRuleHandler struct {
 	listenChan              chan string
 	ruleItemChan            chan rule_engine.RuleItem
 	engine                  Engine
+	
+	// Master-slave components (optional)
+	slaveRegistry *master.SlaveRegistry
+	masterClient  *master.Client
+	masterConfig  *config.MasterConfig
 }
 
 func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomRuleHandler {
@@ -394,7 +400,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 	recordTitle, _ := info.Record["title"].(string)
 
-	// Get files
+	// Get local files
 	uploadWhiteListFilter := func(filename string, _ file_state_handler.FileState) bool {
 		if len(info.Cut.WhiteList) == 0 {
 			return true
@@ -412,6 +418,47 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		file_state_handler.FilterTime(info.Cut.Start, info.Cut.End),
 		uploadWhiteListFilter,
 	)
+
+	// Get slave files if master-slave is enabled
+	var slaveFiles []master.SlaveFileInfo
+	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
+		defer cancel()
+
+		taskReq := &master.TaskRequest{
+			TaskID:          info.Id,
+			StartTime:       time.Unix(info.Cut.Start, 0),
+			EndTime:         time.Unix(info.Cut.End, 0),
+			ScanFolders:     []string{}, // rule mode depends on collect_dirs configuration
+			AdditionalFiles: info.Cut.ExtraFiles,
+		}
+
+		responses := c.masterClient.RequestAllSlaveFiles(ctx, c.slaveRegistry, taskReq)
+		for slaveID, response := range responses {
+			if response != nil && response.Success {
+				log.Infof("Slave %s returned %d files for rule collection", slaveID, len(response.Files))
+				
+				// Apply whitelist filter to slave files
+				for _, file := range response.Files {
+					matched := false
+					if len(info.Cut.WhiteList) == 0 {
+						matched = true
+					} else {
+						for _, pattern := range info.Cut.WhiteList {
+							if match, err := doublestar.PathMatch(pattern, file.FileName); err == nil && match {
+								matched = true
+								break
+							}
+						}
+					}
+					if matched {
+						slaveFiles = append(slaveFiles, file)
+					}
+				}
+			}
+		}
+		log.Infof("Total slave files collected for rule: %d", len(slaveFiles))
+	}
 
 	for _, extraFileRaw := range info.Cut.ExtraFiles {
 		extraFileAbs, err := filepath.Abs(extraFileRaw)
@@ -438,7 +485,23 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		})
 	}
 
-	log.Infof("finish collecting for files start: %v, end: %v", info.Cut.Start, info.Cut.End)
+	// Merge local and slave files
+	localFiles := computeFileInfos(uploadFileStates)
+	allFiles := make(map[string]model.FileInfo)
+	
+	// Add local files
+	for path, fileInfo := range localFiles {
+		allFiles[path] = fileInfo
+	}
+	
+	// Add slave files
+	for _, slaveFileInfo := range slaveFiles {
+		remotePath := slaveFileInfo.GetRemotePath()
+		allFiles[remotePath] = slaveFileInfo.FileInfo
+	}
+
+	log.Infof("finish collecting for files start: %v, end: %v, total files: %d (local: %d, slave: %d)", 
+		info.Cut.Start, info.Cut.End, len(allFiles), len(localFiles), len(slaveFiles))
 
 	rc := model.RecordCache{
 		ProjectName:   info.ProjectName,
@@ -446,7 +509,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		Labels:        info.Labels,
 		Timestamp:     time.Now().UnixMilli(),
 		DiagnosisTask: info.DiagnosisTask,
-		OriginalFiles: computeFileInfos(uploadFileStates),
+		OriginalFiles: allFiles,
 	}
 
 	for _, moment := range info.Moments {
@@ -579,4 +642,21 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 		log.Errorf("failed to walk through dir %s: %v", fileState.Pathname, err)
 	}
 	return files
+}
+
+// EnhanceRuleHandlerWithMasterSlave adds master-slave support to rule handler
+func (c *CustomRuleHandler) EnhanceRuleHandlerWithMasterSlave(
+	registry *master.SlaveRegistry,
+	masterConfig *config.MasterConfig,
+) {
+	if registry == nil || masterConfig == nil {
+		log.Warn("Master-slave components not provided, rule handler will work in normal mode")
+		return
+	}
+
+	c.slaveRegistry = registry
+	c.masterClient = master.NewClient(masterConfig)
+	c.masterConfig = masterConfig
+	
+	log.Info("Rule handler enhanced with master-slave support")
 }

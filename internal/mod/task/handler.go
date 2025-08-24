@@ -32,6 +32,7 @@ import (
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/utils"
@@ -44,6 +45,11 @@ type CustomTaskHandler struct {
 	confManager config.ConfManager
 	errChan     chan error
 	pubSub      *gochannel.GoChannel
+	
+	// Master-slave components (optional)
+	slaveRegistry *master.SlaveRegistry
+	masterClient  *master.Client
+	masterConfig  *config.MasterConfig
 }
 
 func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomTaskHandler {
@@ -231,7 +237,8 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	log.Infof("UploadTask %s, start time: %s, end time: %s, folders: %v, additional files: %v",
 		task.GetName(), startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
 
-	files := make(map[string]model.FileInfo)
+	// Scan local files
+	localFiles := make(map[string]model.FileInfo)
 	noPermissionFolders := make([]string, 0)
 	for _, folder := range taskFolders {
 		canRead := utils.CheckReadPath(folder)
@@ -248,7 +255,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 		if !info.IsDir() {
-			files[folder] = model.FileInfo{
+			localFiles[folder] = model.FileInfo{
 				FileName: filepath.Base(folder),
 				Size:     info.Size(),
 				Path:     folder,
@@ -288,7 +295,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 					filename = filepath.Base(path)
 				}
 
-				files[path] = model.FileInfo{
+				localFiles[path] = model.FileInfo{
 					FileName: filename,
 					Size:     info.Size(),
 					Path:     path,
@@ -310,7 +317,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 							filename = filepath.Base(path)
 						}
 
-						files[path] = model.FileInfo{
+						localFiles[path] = model.FileInfo{
 							FileName: filename,
 							Size:     info.Size(),
 							Path:     path,
@@ -336,7 +343,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			continue
 		}
 		if !info.IsDir() {
-			files[file] = model.FileInfo{
+			localFiles[file] = model.FileInfo{
 				FileName: filepath.Base(file),
 				Size:     info.Size(),
 				Path:     file,
@@ -377,7 +384,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 				filename = filepath.Base(path)
 			}
 
-			files[path] = model.FileInfo{
+			localFiles[path] = model.FileInfo{
 				FileName: filename,
 				Size:     info.Size(),
 				Path:     path,
@@ -385,7 +392,48 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		}
 	}
 
-	if len(files) == 0 {
+	// Get slave files if master-slave is enabled
+	var slaveFiles []master.SlaveFileInfo
+	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
+		defer cancel()
+
+		taskReq := &master.TaskRequest{
+			TaskID:          task.GetName(),
+			StartTime:       startTime.AsTime(),
+			EndTime:         endTime.AsTime(),
+			ScanFolders:     taskFolders,
+			AdditionalFiles: additionalFiles,
+		}
+
+		responses := c.masterClient.RequestAllSlaveFiles(ctx, c.slaveRegistry, taskReq)
+		for slaveID, response := range responses {
+			if response != nil && response.Success {
+				log.Infof("Slave %s returned %d files for task %s", slaveID, len(response.Files), task.GetName())
+				slaveFiles = append(slaveFiles, response.Files...)
+			}
+		}
+		log.Infof("Total slave files collected for task: %d", len(slaveFiles))
+	}
+
+	// Merge local and slave files
+	allFiles := make(map[string]model.FileInfo)
+	
+	// Add local files
+	for path, fileInfo := range localFiles {
+		allFiles[path] = fileInfo
+	}
+	
+	// Add slave files
+	for _, slaveFileInfo := range slaveFiles {
+		remotePath := slaveFileInfo.GetRemotePath()
+		allFiles[remotePath] = slaveFileInfo.FileInfo
+	}
+
+	log.Infof("Upload task scan completed - local files: %d, slave files: %d, total: %d", 
+		len(localFiles), len(slaveFiles), len(allFiles))
+
+	if len(allFiles) == 0 {
 		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum())
 		if err != nil {
 			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
@@ -413,7 +461,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			"title":       task.GetTitle(),
 			"description": task.GetDescription(),
 		},
-		OriginalFiles: files,
+		OriginalFiles: allFiles,
 	}
 	err := rc.Save()
 	if err != nil {
@@ -423,7 +471,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 
 	log.Infof("Record cache saved for task %s", task.GetName())
 	tags := make(map[string]string)
-	tags["totalFiles"] = strconv.Itoa(len(files))
+	tags["totalFiles"] = strconv.Itoa(len(allFiles))
 	if len(noPermissionFolders) > 0 {
 		tags["noPermissionFiles"] = strings.Join(noPermissionFolders, ",")
 	}
@@ -438,4 +486,21 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	if err != nil {
 		log.Errorf("Failed to publish collect message: %v", err)
 	}
+}
+
+// EnhanceTaskHandlerWithMasterSlave adds master-slave support to task handler
+func (c *CustomTaskHandler) EnhanceTaskHandlerWithMasterSlave(
+	registry *master.SlaveRegistry,
+	masterConfig *config.MasterConfig,
+) {
+	if registry == nil || masterConfig == nil {
+		log.Warn("Master-slave components not provided, task handler will work in normal mode")
+		return
+	}
+
+	c.slaveRegistry = registry
+	c.masterClient = master.NewClient(masterConfig)
+	c.masterConfig = masterConfig
+	
+	log.Info("Task handler enhanced with master-slave support")
 }
