@@ -73,8 +73,9 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 			IdleConnTimeout:   10 * time.Second,
 			MaxIdleConns:      3,
 			DisableKeepAlives: true,
+			MaxConnsPerHost:   10,
 		},
-		Timeout: 30 * time.Second,
+		Timeout: 15 * time.Second,
 	}
 	interceptors := connect.WithInterceptors(
 		interceptor.NetworkUsageInterceptor(networkChan),
