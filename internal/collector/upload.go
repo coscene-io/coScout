@@ -146,6 +146,10 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 	toUploadFiles := make([]model.FileInfo, 0)
 	for filePath, fileInfo := range recordCache.OriginalFiles {
+		if lo.Contains(recordCache.UploadedFilePaths, filePath) {
+			continue
+		}
+
 		if fileInfo.Path == "" {
 			fileInfo.Path = filePath
 		}
