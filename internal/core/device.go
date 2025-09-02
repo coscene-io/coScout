@@ -15,6 +15,7 @@
 package core
 
 import (
+	"net"
 	"os"
 	"strings"
 
@@ -73,4 +74,30 @@ func GetCustomTags() map[string]string {
 		}
 	}
 	return tags
+}
+
+func GetDeviceIps() []string {
+	ips := make([]string, 0)
+
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ips
+	}
+
+	for _, inter := range interfaces {
+		name := strings.TrimSpace(inter.Name)
+		addrs, err := inter.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+				if ipNet.IP.To4() != nil {
+					ips = append(ips, name+":"+ipNet.IP.String())
+				}
+			}
+		}
+	}
+	return ips
 }

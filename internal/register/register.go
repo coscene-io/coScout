@@ -169,6 +169,7 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusRespon
 			}
 
 			// If device is approved, exchange auth token
+			//nolint: nestif // need to be nested
 			if state == openDpsV1alpha1Enum.DeviceAuthorizeStateEnum_APPROVED {
 				// Check device auth token
 				valid := r.checkAuthToken()
@@ -178,6 +179,10 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusRespon
 						Exist:      true,
 					}
 
+					err := r.checkMismatchSerialNumber()
+					if err != nil {
+						log.Errorf("failed to check mismatch serial number: %v", err)
+					}
 					return
 				}
 
@@ -197,6 +202,39 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusRespon
 			log.Debug("Completed device status check")
 		}()
 	}
+}
+
+func (r *Register) checkMismatchSerialNumber() error {
+	remoteDevice := core.GetDeviceInfo(&r.storage)
+	if remoteDevice == nil {
+		return errors.New("local device not found")
+	}
+
+	modRegister, err := NewModRegister(r.config.Register)
+	if err != nil {
+		return errors.Wrap(err, "failed to create mod register")
+	}
+
+	localDevice := modRegister.GetDevice()
+	if localDevice == nil {
+		return errors.New("remote device not found")
+	}
+
+	tags := make(map[string]string)
+
+	if localDevice.GetSerialNumber() != remoteDevice.GetSerialNumber() {
+		log.Warnf("device serial number mismatch, local: %s, remote: %s", localDevice.GetSerialNumber(), remoteDevice.GetSerialNumber())
+		tags["mismatch_serial_number"] = "true"
+	} else {
+		tags["mismatch_serial_number"] = "false"
+	}
+
+	_, err = r.reqClient.AddDeviceTags(remoteDevice.GetName(), tags)
+	if err != nil {
+		return errors.Wrap(err, "failed to add device tags")
+	}
+
+	return nil
 }
 
 func (r *Register) registerDevice(device *openDpsV1alpha1Resource.Device) (isSucceed bool, d *openDpsV1alpha1Resource.Device) {
