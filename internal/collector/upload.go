@@ -313,34 +313,26 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		return errors.New("file path is empty")
 	}
 
-	cachedFileInfo := getCacheFileInfo(storage, fileInfo.Path)
-	if fileInfo.Size <= 0 {
-		if cachedFileInfo.Size > 0 {
-			fileInfo.Size = cachedFileInfo.Size
-		} else {
-			fileSize, err := utils.GetFileSize(fileInfo.Path)
-			if err != nil {
-				log.Errorf("failed to get file size: %v", err)
-				return err
-			}
-			fileInfo.Size = fileSize
-		}
+	fileInfo, cleanUploadCache, err := getFileInfoFromCacheOrFile(storage, fileInfo)
+	if err != nil {
+		log.Errorf("failed to get file info from cache or file: %v", err)
+		return err
+	}
+	if cleanUploadCache {
+		log.Infof("clean upload cache for file %s", fileInfo.Path)
+		deleteCacheFileInfo(storage, fileInfo.Path)
 	}
 
 	if !appConfig.Collector.SkipCheckSameFile && fileInfo.Sha256 == "" {
-		if cachedFileInfo.Sha256 != "" {
-			fileInfo.Sha256 = cachedFileInfo.Sha256
-		} else {
-			log.Infof("file %s sha256 is empty, calculate it", fileInfo.Path)
-			sha256, _, err := utils.CalSha256AndSize(fileInfo.Path, fileInfo.Size)
-			if err != nil {
-				log.Errorf("failed to calculate sha256: %v", err)
-				return err
-			}
-
-			log.Infof("file %s sha256 is %s", fileInfo.Path, sha256)
-			fileInfo.Sha256 = sha256
+		log.Infof("file %s sha256 is empty, calculate it", fileInfo.Path)
+		sha256, _, err := utils.CalSha256AndSize(fileInfo.Path, fileInfo.Size)
+		if err != nil {
+			log.Errorf("failed to calculate sha256: %v", err)
+			return err
 		}
+
+		log.Infof("file %s sha256 is %s", fileInfo.Path, sha256)
+		fileInfo.Sha256 = sha256
 	}
 
 	if fileInfo.FileName == "" || fileInfo.FileName == "." {
@@ -410,7 +402,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 
 	log.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
 	tags := map[string]string{}
-	err = um.FPutObject(fileInfo.Path, constant.UploadBucket, fileResourceName.String(), fileInfo.Size, tags)
+	err = um.FPutObject(fileInfo.Path, constant.UploadBucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
 	if err != nil {
 		log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 		return err
@@ -419,7 +411,74 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 	return nil
 }
 
+// just use file size assertion to determine whether file changed, may not be accurate enough.
+func getFileInfoFromCacheOrFile(storage *storage.Storage, prevFileInfo *model.FileInfo) (*model.FileInfo, bool, error) {
+	cachedFileInfo := getCacheFileInfo(storage, prevFileInfo.Path)
+	currentSize, err := utils.GetFileSize(prevFileInfo.Path)
+	if err != nil {
+		log.Errorf("failed to get file size: %v", err)
+		return nil, false, err
+	}
+	expectedSize := prevFileInfo.Size
+
+	// if expected size is 0 or less, it means we don't know the expected size
+	if expectedSize <= 0 {
+		if cachedFileInfo.Size > 0 && cachedFileInfo.Size <= currentSize {
+			return &model.FileInfo{
+				FileName: prevFileInfo.FileName,
+				Path:     prevFileInfo.Path,
+				Size:     cachedFileInfo.Size,
+				Sha256:   cachedFileInfo.Sha256,
+			}, false, nil
+		}
+
+		return &model.FileInfo{
+			FileName: prevFileInfo.FileName,
+			Path:     prevFileInfo.Path,
+			Size:     currentSize,
+			Sha256:   "",
+		}, true, nil
+	}
+
+	// expected size > 0, need to compare with current size
+	if currentSize < expectedSize {
+		// current size < expected size, maybe file be written from 0, need to recalculate sha256
+		return &model.FileInfo{
+			FileName: prevFileInfo.FileName,
+			Path:     prevFileInfo.Path,
+			Size:     currentSize,
+			Sha256:   "",
+		}, true, nil
+	}
+
+	if expectedSize == cachedFileInfo.Size {
+		return &model.FileInfo{
+			FileName: prevFileInfo.FileName,
+			Path:     prevFileInfo.Path,
+			Size:     cachedFileInfo.Size,
+			Sha256:   cachedFileInfo.Sha256,
+		}, false, nil
+	}
+
+	// current size >= expected size && expected size != cached size, file maybe appended, need to recalculate sha256
+	return &model.FileInfo{
+		FileName: prevFileInfo.FileName,
+		Path:     prevFileInfo.Path,
+		Size:     expectedSize,
+		Sha256:   "",
+	}, true, nil
+}
+
 func getCacheFileInfo(storage *storage.Storage, file string) *model.FileInfo {
+	if storage == nil {
+		log.Warn("storage is nil, skip getting cache file info")
+		return &model.FileInfo{Size: -1}
+	}
+	if file == "" {
+		log.Warn("file is empty, skip getting cache file info")
+		return &model.FileInfo{Size: -1}
+	}
+
 	info := model.FileInfo{Size: -1}
 	value, err := (*storage).Get([]byte(constant.FileInfoBucket), []byte(file))
 	if err != nil {
@@ -452,9 +511,32 @@ func saveCacheFileInfo(storage *storage.Storage, info *model.FileInfo) {
 		log.Errorf("failed to marshal file info: %v", err)
 		return
 	}
+	if storage == nil {
+		log.Warn("storage is nil, skip saving cache file info")
+		return
+	}
+	if info.Path == "" {
+		log.Warn("file path is empty, skip saving cache file info")
+		return
+	}
 
 	if err := (*storage).Put([]byte(constant.FileInfoBucket), []byte(info.Path), bytes); err != nil {
 		log.Errorf("failed to save file info: %v", err)
+	}
+}
+
+func deleteCacheFileInfo(storage *storage.Storage, file string) {
+	if storage == nil {
+		log.Warn("storage is nil, skip deleting cache file info")
+		return
+	}
+	if file == "" {
+		log.Warn("file is empty, skip deleting cache file info")
+		return
+	}
+
+	if err := (*storage).Delete([]byte(constant.FileInfoBucket), []byte(file)); err != nil {
+		log.Errorf("failed to delete cache file info for %s: %v", file, err)
 	}
 }
 
