@@ -6,7 +6,7 @@ require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250613072610-46122efff246.1
 	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.6-20250613072610-46122efff246.1
 	connectrpc.com/connect v1.18.1
-	github.com/ThreeDotsLabs/watermill v1.5.0
+	github.com/ThreeDotsLabs/watermill v1.5.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/djherbis/times v1.6.0
@@ -27,7 +27,7 @@ require (
 	github.com/samber/lo v1.51.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/sosodev/duration v1.3.1
-	github.com/spf13/cobra v1.9.1
+	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/sys v0.35.0
@@ -64,7 +64,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.10.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
-	github.com/spf13/pflag v1.0.6 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.3 // indirect
