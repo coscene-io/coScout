@@ -74,18 +74,20 @@ func FindAllRecordCaches() []string {
 }
 
 func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
-	uploadChan := make(chan *model.RecordCache, 10)
+	uploadChan := make(chan string, 5)
 	triggerChan := make(chan struct{}, 1)
 
 	go Upload(ctx, reqClient, confManager, uploadChan, errorChan)
-	ticker := time.NewTicker(config.CollectionInterval)
-	defer ticker.Stop()
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
 
-	go func(t *time.Ticker) {
 		defer log.Warn("Collector ticker stopped")
 		for {
 			select {
-			case <-t.C:
+			case <-ticker.C:
+				ticker.Reset(config.CollectionInterval)
+
 				select {
 				case triggerChan <- struct{}{}:
 					log.Infof("Collector ticker triggered upload")
@@ -96,7 +98,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 				return
 			}
 		}
-	}(ticker)
+	}()
 
 	go func() {
 		defer log.Warn("Collector goroutine stopped")
@@ -125,8 +127,6 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 							log.Warnf("Error channel is full, dropping error: %v", err)
 						}
 					}
-
-					time.Sleep(1 * time.Second)
 				}()
 			}
 		}
@@ -171,7 +171,7 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 	}
 }
 
-func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {
+func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {
 	log.Infof("Start collecting record caches")
 
 	deviceInfo := core.GetDeviceInfo(storage)
@@ -225,7 +225,7 @@ func handleRecordCaches(uploadChan chan *model.RecordCache, reqClient *api.Reque
 
 		if rcName, ok := rc.Record["name"].(string); ok && rcName != "" {
 			select {
-			case uploadChan <- &rc:
+			case uploadChan <- rc.GetRecordCachePath():
 				log.Infof("Record cache %s is ready to upload", rcName)
 			default:
 				log.Infof("Upload channel is full, skip uploading record cache %s", rcName)
