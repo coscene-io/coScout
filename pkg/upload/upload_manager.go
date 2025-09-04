@@ -85,7 +85,6 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 	var err error
 	numThreads := uint(2)
 
-	u.client.TraceOn(log.StandardLogger().WriterLevel(log.DebugLevel))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 

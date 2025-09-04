@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -41,8 +42,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan *model.RecordCache, errorChan chan error) {
+func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error) {
 	log.Infof("Start upload goroutine")
+	queue := upload.NewDedupQueue(8)
 
 	go func() {
 		// Clean up cache file info periodically
@@ -65,61 +67,128 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 		}
 	}()
 
-	for {
-		select {
-		case recordCache := <-uploadChan:
-			//nolint: contextcheck // context is checked in the parent goroutine
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Errorf("upload goroutine panic recovered: %v", r)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				select {
+				case <-ctx.Done():
+					log.Info("upload queue goroutine done")
+					return
+				default:
+				}
+
+				//nolint: contextcheck // context is checked in the parent goroutine
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Errorf("upload goroutine panic recovered: %v", r)
+							select {
+							case errorChan <- errors.Errorf("upload goroutine panic: %v", r):
+							default:
+								log.Warnf("error channel is full, skip: %v", r)
+							}
+						}
+					}()
+
+					if queue == nil {
+						log.Errorf("upload queue is nil, skip")
+						return
+					}
+
+					if queue.IsEmpty() {
+						log.Infof("upload queue is empty, skip")
+						return
+					}
+
+					log.Infof("upload queue size: %d", queue.Size())
+					rcPath, isPop := queue.Pop()
+					if !isPop || rcPath == "" {
+						log.Infof("upload queue is empty or invalid pop")
+						return
+					}
+
+					if !utils.CheckReadPath(rcPath) {
+						log.Warnf("record cache %s not exist", rcPath)
+						return
+					}
+
+					data, err := os.ReadFile(rcPath)
+					if err != nil {
+						log.Errorf("read record cache failed: %v", err)
+						return
+					}
+
+					rc := model.RecordCache{}
+					if err := json.Unmarshal(data, &rc); err != nil {
+						log.Errorf("unmarshal record cache failed: %v", err)
+						return
+					}
+
+					if rc.Uploaded || rc.Skipped {
+						log.Infof("Record cache %s has been uploaded or skipped, skip it", rcPath)
+						return
+					}
+
+					appConfig := confManager.LoadWithRemote()
+					if appConfig != nil {
+						enabled := appConfig.Upload.NetworkRule.Enabled
+						blackInterfaces := appConfig.Upload.NetworkRule.BlackInterfaces
+						server := appConfig.Upload.NetworkRule.Server
+						if enabled && len(blackInterfaces) > 0 {
+							isBlack := utils.CheckNetworkBlackList(server, blackInterfaces)
+							if isBlack {
+								log.Warnf("Network interface is blacklisted, skipping upload for record %s", rc.GetRecordCachePath())
+								return
+							}
+						}
+					}
+
+					manualDisabled := checkDisabledUpload(confManager)
+					if manualDisabled {
+						log.Warnf("Upload is manual disabled, skipping upload for record %s", rcPath)
+						return
+					}
+
+					log.Infof("start to upload record %s", rcPath)
+					err = uploadFiles(reqClient, confManager, &rc)
+					if err != nil {
 						select {
-						case errorChan <- errors.Errorf("upload goroutine panic: %v", r):
+						case errorChan <- err:
 						default:
-							log.Warnf("error channel is full, skip: %v", r)
+							log.Warnf("Error channel is full, dropping error: %v", err)
 						}
 					}
 				}()
+			case <-ctx.Done():
+				log.Info("upload queue goroutine done")
+				return
+			}
+		}
+	}()
 
-				if recordCache == nil {
-					log.Warn("record cache is nil, skip")
-					return
-				}
-				if !utils.CheckReadPath(recordCache.GetRecordCachePath()) {
-					log.Warnf("record cache %s not exist", recordCache.GetRecordCachePath())
-					return
-				}
+	for {
+		select {
+		case recordCache := <-uploadChan:
+			if recordCache == "" {
+				log.Warn("received empty record cache path, skip")
+				continue
+			}
 
-				appConfig := confManager.LoadWithRemote()
-				if appConfig != nil {
-					enabled := appConfig.Upload.NetworkRule.Enabled
-					blackInterfaces := appConfig.Upload.NetworkRule.BlackInterfaces
-					server := appConfig.Upload.NetworkRule.Server
-					if enabled && len(blackInterfaces) > 0 {
-						isBlack := utils.CheckNetworkBlackList(server, blackInterfaces)
-						if isBlack {
-							log.Warnf("Network interface is blacklisted, skipping upload for record %s", recordCache.GetRecordCachePath())
-							return
-						}
-					}
-				}
+			if queue == nil {
+				log.Error("upload queue is nil, skip")
+				continue
+			}
 
-				manualDisabled := checkDisabledUpload(confManager)
-				if manualDisabled {
-					log.Warnf("Upload is manual disabled, skipping upload for record %s", recordCache.GetRecordCachePath())
-					return
-				}
+			if queue.IsFull() {
+				log.Warn("upload queue is full, skip")
+				continue
+			}
 
-				log.Infof("start to upload record %s", recordCache.GetRecordCachePath())
-				err := uploadFiles(reqClient, confManager, recordCache)
-				if err != nil {
-					select {
-					case errorChan <- err:
-					default:
-						log.Warnf("Error channel is full, dropping error: %v", err)
-					}
-				}
-			}()
+			queue.Push(recordCache)
 		case <-ctx.Done():
 			log.Info("upload goroutine done")
 			return
