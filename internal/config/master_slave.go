@@ -15,13 +15,13 @@
 package config
 
 import (
-	"path"
 	"time"
 )
 
-// SlaveConfig slave configuration
+// SlaveConfig slave configuration.
 type SlaveConfig struct {
 	ID                string        `yaml:"id"`                 // Unique slave ID (auto-generated)
+	IP                string        `yaml:"ip"`                 // IP address of the slave, required
 	Port              int           `yaml:"port"`               // Listening port
 	MasterAddr        string        `yaml:"master_addr"`        // Master address, format: ip:port
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"` // Heartbeat interval
@@ -30,9 +30,10 @@ type SlaveConfig struct {
 	FilePrefix        string        `yaml:"file_prefix"`        // File folder prefix
 }
 
-// DefaultSlaveConfig returns default slave configuration
+// DefaultSlaveConfig returns default slave configuration.
 func DefaultSlaveConfig() *SlaveConfig {
 	return &SlaveConfig{
+		IP:                "", // This must be set by the user
 		Port:              22525,
 		HeartbeatInterval: 3 * time.Second,
 		RequestTimeout:    5 * time.Second,
@@ -41,27 +42,22 @@ func DefaultSlaveConfig() *SlaveConfig {
 	}
 }
 
-// MasterConfig master configuration
+// MasterConfig master configuration.
 type MasterConfig struct {
 	Port              int           `yaml:"port"`                // Master listening port
 	SlaveTimeout      time.Duration `yaml:"slave_timeout"`       // Slave timeout duration
 	MaxSlaves         int           `yaml:"max_slaves"`          // Maximum number of slaves (0 = unlimited)
 	FileTransferChunk int           `yaml:"file_transfer_chunk"` // File transfer chunk size
-	CacheDir          string        `yaml:"cache_dir"`           // Cache directory
 	RequestTimeout    time.Duration `yaml:"request_timeout"`     // Request timeout duration
 }
 
-// DefaultMasterConfig returns default master configuration
+// DefaultMasterConfig returns default master configuration.
 func DefaultMasterConfig() *MasterConfig {
-	// Use user base folder for cache directory
-	cacheDir := path.Join(GetUserBaseFolder(), "master-slave-cache")
-
 	return &MasterConfig{
 		Port:              22525,
 		SlaveTimeout:      5 * time.Second,
 		MaxSlaves:         0,                // 0 means unlimited
 		FileTransferChunk: 10 * 1024 * 1024, // 10MB
-		CacheDir:          cacheDir,
 		RequestTimeout:    5 * time.Second,
 	}
 }

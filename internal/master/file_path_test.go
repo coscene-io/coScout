@@ -20,6 +20,7 @@ import (
 )
 
 func TestSlaveFilePathHandling(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		slaveID       string
@@ -52,6 +53,7 @@ func TestSlaveFilePathHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// Test formatting
 			formatted := FormatSlaveFilePath(tt.slaveID, tt.remotePath)
 			if formatted != tt.expectedPath {
@@ -87,6 +89,7 @@ func TestSlaveFilePathHandling(t *testing.T) {
 }
 
 func TestSlaveIDValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		slaveID string
@@ -136,6 +139,7 @@ func TestSlaveIDValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := IsValidSlaveID(tt.slaveID)
 			if result != tt.valid {
 				t.Errorf("IsValidSlaveID(%v) = %v, want %v", tt.slaveID, result, tt.valid)
@@ -145,17 +149,19 @@ func TestSlaveIDValidation(t *testing.T) {
 }
 
 func TestInvalidSlaveFilePaths(t *testing.T) {
+	t.Parallel()
 	invalidPaths := []string{
 		"regular/local/path.log",
 		"file://local/path.log",
 		"slave://",
 		"slave://invalidid",
-		"slave://a1b2c3d4e5f60789",  // missing path
-		"slave:///absolute/path",     // missing slave ID
+		"slave://a1b2c3d4e5f60789", // missing path
+		"slave:///absolute/path",   // missing slave ID
 	}
 
 	for _, path := range invalidPaths {
 		t.Run("Invalid path: "+path, func(t *testing.T) {
+			t.Parallel()
 			if IsSlaveFile(path) && path != "slave://a1b2c3d4e5f60789" {
 				// Only slave:// prefix should be detected, but parsing should fail
 				_, _, err := ParseSlaveFilePath(path)
@@ -173,6 +179,7 @@ func TestInvalidSlaveFilePaths(t *testing.T) {
 }
 
 func TestSlaveFilePathExamples(t *testing.T) {
+	t.Parallel()
 	// Test realistic examples
 	examples := []struct {
 		description string
@@ -203,9 +210,10 @@ func TestSlaveFilePathExamples(t *testing.T) {
 
 	for _, example := range examples {
 		t.Run(example.description, func(t *testing.T) {
+			t.Parallel()
 			// Format the path
 			slavePath := FormatSlaveFilePath(example.slaveID, example.remotePath)
-			
+
 			// Verify it's a valid slave path
 			if !IsSlaveFile(slavePath) {
 				t.Errorf("Formatted path %v should be recognized as slave file", slavePath)

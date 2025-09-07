@@ -65,7 +65,7 @@ type CustomRuleHandler struct {
 	listenChan              chan string
 	ruleItemChan            chan rule_engine.RuleItem
 	engine                  Engine
-	
+
 	// Master-slave components (optional)
 	slaveRegistry *master.SlaveRegistry
 	masterClient  *master.Client
@@ -208,6 +208,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				t.Reset(config.RuleScanCollectInfosInterval)
 
+				//nolint: contextcheck// context is checked in the parent goroutine
 				c.scanCollectInfosAndHandle(modConfig)
 			case <-ctx.Done():
 				log.Infof("collect info handler stopped")
@@ -421,6 +422,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 	// Get slave files if master-slave is enabled
 	var slaveFiles []master.SlaveFileInfo
+	//nolint: nestif // check master-slave components
 	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
 		defer cancel()
@@ -437,7 +439,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 		for slaveID, response := range responses {
 			if response != nil && response.Success {
 				log.Infof("Slave %s returned %d files for rule collection", slaveID, len(response.Files))
-				
+
 				// Apply whitelist filter to slave files
 				for _, file := range response.Files {
 					matched := false
@@ -488,19 +490,19 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 	// Merge local and slave files
 	localFiles := computeFileInfos(uploadFileStates)
 	allFiles := make(map[string]model.FileInfo)
-	
+
 	// Add local files
 	for path, fileInfo := range localFiles {
 		allFiles[path] = fileInfo
 	}
-	
+
 	// Add slave files
 	for _, slaveFileInfo := range slaveFiles {
 		remotePath := slaveFileInfo.GetRemotePath()
 		allFiles[remotePath] = slaveFileInfo.FileInfo
 	}
 
-	log.Infof("finish collecting for files start: %v, end: %v, total files: %d (local: %d, slave: %d)", 
+	log.Infof("finish collecting for files start: %v, end: %v, total files: %d (local: %d, slave: %d)",
 		info.Cut.Start, info.Cut.End, len(allFiles), len(localFiles), len(slaveFiles))
 
 	rc := model.RecordCache{
@@ -645,7 +647,7 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 	return files
 }
 
-// EnhanceRuleHandlerWithMasterSlave adds master-slave support to rule handler
+// EnhanceRuleHandlerWithMasterSlave adds master-slave support to rule handler.
 func (c *CustomRuleHandler) EnhanceRuleHandlerWithMasterSlave(
 	registry *master.SlaveRegistry,
 	masterConfig *config.MasterConfig,
@@ -658,6 +660,6 @@ func (c *CustomRuleHandler) EnhanceRuleHandlerWithMasterSlave(
 	c.slaveRegistry = registry
 	c.masterClient = master.NewClient(masterConfig)
 	c.masterConfig = masterConfig
-	
+
 	log.Info("Rule handler enhanced with master-slave support")
 }

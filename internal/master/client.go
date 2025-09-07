@@ -23,16 +23,23 @@ import (
 	"net/http"
 
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
-// Client master to slave client
+// Static errors for better error handling.
+var (
+	ErrSlaveRequestFailed = errors.New("slave request failed")
+	ErrSlaveHealthFailed  = errors.New("slave health check failed")
+)
+
+// Client master to slave client.
 type Client struct {
 	httpClient *http.Client
 	config     *config.MasterConfig
 }
 
-// NewClient creates a new master client
+// NewClient creates a new master client.
 func NewClient(masterConfig *config.MasterConfig) *Client {
 	return &Client{
 		httpClient: &http.Client{
@@ -42,9 +49,9 @@ func NewClient(masterConfig *config.MasterConfig) *Client {
 	}
 }
 
-// RequestSlaveFiles requests slave to scan files
+// RequestSlaveFiles requests slave to scan files.
 func (c *Client) RequestSlaveFiles(ctx context.Context, slave *SlaveInfo, req *TaskRequest) (*TaskResponse, error) {
-	url := fmt.Sprintf("%s/api/v1/files/scan", slave.GetAddr())
+	url := slave.GetAddr() + "/api/v1/files/scan"
 
 	reqBody, err := json.Marshal(req)
 	if err != nil {
@@ -66,7 +73,7 @@ func (c *Client) RequestSlaveFiles(ctx context.Context, slave *SlaveInfo, req *T
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("slave %s returned status %d: %s", slave.ID, resp.StatusCode, string(body))
+		return nil, errors.Wrapf(ErrSlaveRequestFailed, "slave %s returned status %d: %s", slave.ID, resp.StatusCode, string(body))
 	}
 
 	var taskResp TaskResponse
@@ -82,14 +89,14 @@ func (c *Client) RequestSlaveFiles(ctx context.Context, slave *SlaveInfo, req *T
 	return &taskResp, nil
 }
 
-// DownloadSlaveFile downloads file from slave
+// DownloadSlaveFile downloads file from slave.
 func (c *Client) DownloadSlaveFile(ctx context.Context, slave *SlaveInfo, filePath string) (io.ReadCloser, error) {
 	return c.DownloadSlaveFileWithSize(ctx, slave, filePath, 0)
 }
 
-// DownloadSlaveFileWithSize downloads file from slave with specific size limit
+// DownloadSlaveFileWithSize downloads file from slave with specific size limit.
 func (c *Client) DownloadSlaveFileWithSize(ctx context.Context, slave *SlaveInfo, filePath string, maxSize int64) (io.ReadCloser, error) {
-	url := fmt.Sprintf("%s/api/v1/files/download", slave.GetAddr())
+	url := slave.GetAddr() + "/api/v1/files/download"
 
 	req := FileTransferRequest{
 		FilePath: filePath,
@@ -116,15 +123,15 @@ func (c *Client) DownloadSlaveFileWithSize(ctx context.Context, slave *SlaveInfo
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("slave %s returned status %d: %s", slave.ID, resp.StatusCode, string(body))
+		return nil, errors.Wrapf(ErrSlaveRequestFailed, "slave %s returned status %d: %s", slave.ID, resp.StatusCode, string(body))
 	}
 
 	return resp.Body, nil
 }
 
-// PingSlaveHealth checks slave health status
+// PingSlaveHealth checks slave health status.
 func (c *Client) PingSlaveHealth(ctx context.Context, slave *SlaveInfo) error {
-	url := fmt.Sprintf("%s/api/v1/health", slave.GetAddr())
+	url := slave.GetAddr() + "/api/v1/health"
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -138,13 +145,13 @@ func (c *Client) PingSlaveHealth(ctx context.Context, slave *SlaveInfo) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("slave %s health check failed with status %d", slave.ID, resp.StatusCode)
+		return errors.Wrapf(ErrSlaveHealthFailed, "slave %s status %d", slave.ID, resp.StatusCode)
 	}
 
 	return nil
 }
 
-// RequestAllSlaveFiles concurrently requests file info from all online slaves
+// RequestAllSlaveFiles concurrently requests file info from all online slaves.
 func (c *Client) RequestAllSlaveFiles(ctx context.Context, registry *SlaveRegistry, req *TaskRequest) map[string]*TaskResponse {
 	slaves := registry.GetOnlineSlaves()
 	if len(slaves) == 0 {
@@ -178,7 +185,7 @@ func (c *Client) RequestAllSlaveFiles(ctx context.Context, registry *SlaveRegist
 
 	// Collect results
 	results := make(map[string]*TaskResponse)
-	for i := 0; i < len(slaves); i++ {
+	for range slaves {
 		select {
 		case res := <-resultChan:
 			if res.err != nil {

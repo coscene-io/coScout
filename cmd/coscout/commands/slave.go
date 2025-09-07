@@ -32,6 +32,7 @@ func NewSlaveCommand() *cobra.Command {
 		masterAddr string
 		slaveID    string
 		filePrefix string
+		ip         string
 	)
 
 	cmd := &cobra.Command{
@@ -46,11 +47,19 @@ The slave node will:
 		Run: func(cmd *cobra.Command, args []string) {
 			// Create slave configuration
 			slaveConfig := config.DefaultSlaveConfig()
+
+			slaveConfig.IP = ip
 			slaveConfig.Port = port
 			slaveConfig.MasterAddr = masterAddr
 			slaveConfig.FilePrefix = filePrefix
 			if slaveID != "" {
 				slaveConfig.ID = slaveID
+			}
+			if slaveConfig.IP == "" {
+				log.Fatal("Please set the IP address in the configuration file or environment variable")
+			}
+			if slaveConfig.FilePrefix == "" {
+				slaveConfig.FilePrefix = slaveConfig.IP
 			}
 
 			// Validate required parameters
@@ -65,7 +74,7 @@ The slave node will:
 			defer cancel()
 
 			// Create slave server
-			server := slave.NewServer(slaveConfig)
+			server := slave.NewServer(slaveConfig.Port, slaveConfig.FilePrefix)
 
 			// Create slave client
 			client := slave.NewClient(slaveConfig)
@@ -111,5 +120,6 @@ The slave node will:
 	cmd.Flags().StringVarP(&masterAddr, "master-addr", "m", "", "Master address (required, format: ip:port)")
 	cmd.Flags().StringVar(&slaveID, "slave-id", "", "Slave ID (auto-generated if not provided)")
 	cmd.Flags().StringVar(&filePrefix, "file-prefix", "", "File folder prefix for uploaded files (e.g., 'device1' creates 'device1/filename.log')")
+	cmd.Flags().StringVar(&ip, "ip", "", "IP address of this slave (required)")
 	return cmd
 }

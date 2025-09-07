@@ -28,7 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Server master server
+// Server master server.
 type Server struct {
 	registry *SlaveRegistry
 	config   *config.MasterConfig
@@ -36,7 +36,7 @@ type Server struct {
 	port     int
 }
 
-// NewServer creates a new master server
+// NewServer creates a new master server.
 func NewServer(port int, masterConfig *config.MasterConfig) *Server {
 	registry := NewSlaveRegistry()
 
@@ -66,7 +66,7 @@ func NewServer(port int, masterConfig *config.MasterConfig) *Server {
 	return s
 }
 
-// Start starts the server
+// Start starts the server.
 func (s *Server) Start(ctx context.Context) error {
 	// Start cleanup goroutine
 	go s.cleanupRoutine(ctx)
@@ -82,21 +82,21 @@ func (s *Server) Start(ctx context.Context) error {
 	<-ctx.Done()
 	log.Info("Master server shutting down...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	return s.server.Shutdown(shutdownCtx)
 }
 
-// GetRegistry returns the slave registry
+// GetRegistry returns the slave registry.
 func (s *Server) GetRegistry() *SlaveRegistry {
 	return s.registry
 }
 
-// Handle slave registration
+// Handle slave registration.
 func (s *Server) handleSlaveRegister(w http.ResponseWriter, r *http.Request) {
 	log.Infof("Received slave registration request from %s", r.RemoteAddr)
-	
+
 	if r.Method != http.MethodPost {
 		log.Warnf("Invalid method for slave registration: %s", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -109,8 +109,8 @@ func (s *Server) handleSlaveRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
-	log.Infof("Registration request: SlaveID=%s, Port=%d, Version=%s, FilePrefix=%s", 
+
+	log.Infof("Registration request: SlaveID=%s, Port=%d, Version=%s, FilePrefix=%s",
 		req.SlaveID, req.Port, req.Version, req.FilePrefix)
 
 	// If IP is empty, get from request
@@ -159,7 +159,7 @@ func (s *Server) handleSlaveRegister(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, resp)
 }
 
-// Handle slave heartbeat
+// Handle slave heartbeat.
 func (s *Server) handleSlaveHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -188,7 +188,7 @@ func (s *Server) handleSlaveHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, resp)
 }
 
-// Handle slave unregistration
+// Handle slave unregistration.
 func (s *Server) handleSlaveUnregister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -212,7 +212,7 @@ func (s *Server) handleSlaveUnregister(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, resp)
 }
 
-// Handle get slave list
+// Handle get slave list.
 func (s *Server) handleListSlaves(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -229,7 +229,7 @@ func (s *Server) handleListSlaves(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, resp)
 }
 
-// Cleanup goroutine, periodically check timed-out slaves
+// Cleanup goroutine, periodically check timed-out slaves.
 func (s *Server) cleanupRoutine(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -247,7 +247,7 @@ func (s *Server) cleanupRoutine(ctx context.Context) {
 	}
 }
 
-// Get client IP
+// Get client IP.
 func (s *Server) getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header
 	xff := r.Header.Get("X-Forwarded-For")
@@ -271,7 +271,7 @@ func (s *Server) getClientIP(r *http.Request) string {
 	return ip
 }
 
-// Write JSON response
+// Write JSON response.
 func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
@@ -280,7 +280,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 	}
 }
 
-// Handle health check
+// Handle health check.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
