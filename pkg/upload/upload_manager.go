@@ -76,7 +76,7 @@ func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucke
 
 // FPutObject uploads a file to a bucket with a key and sha256.
 // If the file size is larger than minPartSize, it will use multipart upload.
-func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize int64, userTags map[string]string) error {
+func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize int64, userTags map[string]string, cleanCache bool) error {
 	log.Infof("Start uploading file: %s, size: %d", absPath, filesize)
 	defer func() {
 		log.Infof("Finished uploading file: %s", absPath)
@@ -85,9 +85,27 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 	var err error
 	numThreads := uint(2)
 
-	u.client.TraceOn(log.StandardLogger().WriterLevel(log.DebugLevel))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+
+	if cleanCache {
+		uploadIdKey := fmt.Sprintf(uploadIdKeyTemplate, absPath)
+		uploadedSizeKey := fmt.Sprintf(uploadedSizeKeyTemplate, absPath)
+		partsKey := fmt.Sprintf(partsKeyTemplate, absPath)
+
+		err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
+		if err != nil {
+			log.Errorf("Delete upload id failed: %v", err)
+		}
+		err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
+		if err != nil {
+			log.Errorf("Delete parts failed: %v", err)
+		}
+		err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
+		if err != nil {
+			log.Errorf("Delete uploaded size failed: %v", err)
+		}
+	}
 
 	if filesize > int64(minPartSize) {
 		partSize := filesize / int64(maxPartNumber)

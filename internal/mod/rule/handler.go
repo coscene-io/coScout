@@ -578,30 +578,30 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 	files := make(map[string]model.FileInfo)
 	for _, fileState := range fileStates {
 		if !fileState.IsDir {
-			baseName := filepath.Base(fileState.Pathname)
-			switch {
-			case strings.HasSuffix(baseName, ".bag"):
-				files[fileState.Pathname] = model.FileInfo{
-					Path:     fileState.Pathname,
-					Size:     fileState.Size,
-					FileName: path.Join("bag", baseName),
-				}
-				continue
-			case strings.HasSuffix(baseName, ".log"):
-				files[fileState.Pathname] = model.FileInfo{
-					Path:     fileState.Pathname,
-					Size:     fileState.Size,
-					FileName: path.Join("log", baseName),
-				}
-				continue
-			default:
-				files[fileState.Pathname] = model.FileInfo{
-					Path:     fileState.Pathname,
-					Size:     fileState.Size,
-					FileName: path.Join("files", baseName),
-				}
+			realPath, info, err := utils.GetRealFileInfo(fileState.Pathname)
+			if err != nil {
+				log.Errorf("failed to stat file %s: %v", realPath, err)
 				continue
 			}
+
+			fileName := filepath.Base(realPath)
+			switch {
+			case strings.HasSuffix(fileName, ".bag"):
+				fileName = path.Join("bag", fileName)
+			case strings.HasSuffix(fileName, ".log"):
+				fileName = path.Join("log", fileName)
+			case strings.HasSuffix(fileName, ".mcap"):
+				fileName = path.Join("mcap", fileName)
+			default:
+				fileName = path.Join("files", fileName)
+			}
+
+			files[realPath] = model.FileInfo{
+				FileName: fileName,
+				Size:     info.Size(),
+				Path:     realPath,
+			}
+			continue
 		}
 
 		baseDir := filepath.Dir(fileState.Pathname)
@@ -617,9 +617,9 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 		}
 
 		for _, filePath := range filePaths {
-			info, err := os.Stat(filePath)
+			realPath, info, err := utils.GetRealFileInfo(filePath)
 			if err != nil {
-				log.Errorf("failed to stat file %s: %v", filePath, err)
+				log.Errorf("failed to stat file %s: %v", realPath, err)
 				continue
 			}
 
@@ -627,20 +627,21 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 				continue
 			}
 
-			filename, err := filepath.Rel(baseDir, filePath)
+			filename, err := filepath.Rel(baseDir, realPath)
 			if err != nil {
 				log.Errorf("failed to get relative path: %v", err)
-				filename = filepath.Base(filePath)
+				filename = filepath.Base(realPath)
 			}
 
-			files[filePath] = model.FileInfo{
+			files[realPath] = model.FileInfo{
 				FileName: filename,
 				Size:     info.Size(),
-				Path:     filePath,
+				Path:     realPath,
 			}
 		}
 		log.Errorf("failed to walk through dir %s: %v", fileState.Pathname, err)
 	}
+
 	return files
 }
 

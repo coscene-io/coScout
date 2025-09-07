@@ -112,3 +112,46 @@ func GetFileSizeNoFollow(filepath string) (int64, error) {
 	}
 	return fi.Size(), nil
 }
+
+func isSymlinkPath(filepath string) bool {
+	if filepath == "" {
+		return false
+	}
+
+	info, err := os.Lstat(filepath)
+	if err != nil {
+		log.Errorf("lstat filepath: %s,  error: %v", filepath, err)
+		return false
+	}
+
+	return info.Mode()&os.ModeSymlink != 0
+}
+
+func getRealPath(path string) (string, error) {
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", errors.Wrapf(err, "eval symlinks for path: %s", path)
+	}
+	return realPath, nil
+}
+
+func GetRealFileInfo(path string) (string, os.FileInfo, error) {
+	if path == "" {
+		return "", nil, errors.New("empty path")
+	}
+
+	isSymlink := isSymlinkPath(path)
+	if isSymlink {
+		realPath, err := getRealPath(path)
+		if err != nil {
+			return "", nil, errors.Wrapf(err, "get real path for symlink: %s", path)
+		}
+		path = realPath
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", nil, errors.Wrapf(err, "stat real path: %s", path)
+	}
+	return path, info, nil
+}

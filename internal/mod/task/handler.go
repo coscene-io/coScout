@@ -45,7 +45,7 @@ type CustomTaskHandler struct {
 	confManager config.ConfManager
 	errChan     chan error
 	pubSub      *gochannel.GoChannel
-	
+
 	// Master-slave components (optional)
 	slaveRegistry *master.SlaveRegistry
 	masterClient  *master.Client
@@ -237,203 +237,8 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	log.Infof("UploadTask %s, start time: %s, end time: %s, folders: %v, additional files: %v",
 		task.GetName(), startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
 
-	// Scan local files
-	localFiles := make(map[string]model.FileInfo)
-	noPermissionFolders := make([]string, 0)
-	for _, folder := range taskFolders {
-		canRead := utils.CheckReadPath(folder)
-		if !canRead {
-			log.Warnf("Path %s is not readable, skip!", folder)
-
-			noPermissionFolders = append(noPermissionFolders, folder)
-			continue
-		}
-
-		info, err := os.Stat(folder)
-		if err != nil {
-			log.Errorf("Failed to get folder info: %v", err)
-			continue
-		}
-		if !info.IsDir() {
-			localFiles[folder] = model.FileInfo{
-				FileName: filepath.Base(folder),
-				Size:     info.Size(),
-				Path:     folder,
-			}
-			continue
-		}
-
-		filePaths, err := utils.GetAllFilePaths(folder, &utils.SymWalkOptions{
-			FollowSymlinks:       true,
-			SkipPermissionErrors: true,
-			SkipEmptyFiles:       true,
-			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.Errorf("Failed to get all file paths in folder %s: %v", folder, err)
-			continue
-		}
-
-		for _, path := range filePaths {
-			if !utils.CheckReadPath(path) {
-				log.Warnf("Path %s is not readable, skip!", path)
-				continue
-			}
-
-			info, err := os.Stat(path)
-			if err != nil {
-				log.Errorf("Failed to get file info for %s: %v", path, err)
-				continue
-			}
-
-			log.Infof("file %s, mod time: %s", path, info.ModTime().String())
-			//nolint: nestif // check file modification time
-			if info.ModTime().After(startTime.AsTime()) && info.ModTime().Before(endTime.AsTime()) {
-				filename, err := filepath.Rel(folder, path)
-				if err != nil {
-					log.Errorf("Failed to get relative path: %v", err)
-					filename = filepath.Base(path)
-				}
-
-				localFiles[path] = model.FileInfo{
-					FileName: filename,
-					Size:     info.Size(),
-					Path:     path,
-				}
-			} else {
-				stat, err := times.Stat(path)
-				if err != nil {
-					log.Errorf("Failed to get file times for %s: %v", path, err)
-					continue
-				}
-
-				if stat.HasBirthTime() {
-					log.Infof("File %s has birth time: %s", path, stat.BirthTime().String())
-
-					if stat.BirthTime().After(startTime.AsTime()) && stat.BirthTime().Before(endTime.AsTime()) {
-						filename, err := filepath.Rel(folder, path)
-						if err != nil {
-							log.Errorf("Failed to get relative path: %v", err)
-							filename = filepath.Base(path)
-						}
-
-						localFiles[path] = model.FileInfo{
-							FileName: filename,
-							Size:     info.Size(),
-							Path:     path,
-						}
-					}
-				}
-			}
-		}
-	}
-
-	for _, file := range additionalFiles {
-		canRead := utils.CheckReadPath(file)
-		if !canRead {
-			log.Warnf("Path %s is not readable, skip!", file)
-
-			noPermissionFolders = append(noPermissionFolders, file)
-			continue
-		}
-
-		info, err := os.Stat(file)
-		if err != nil {
-			log.Errorf("Failed to get folder info: %v", err)
-			continue
-		}
-		if !info.IsDir() {
-			localFiles[file] = model.FileInfo{
-				FileName: filepath.Base(file),
-				Size:     info.Size(),
-				Path:     file,
-			}
-			continue
-		}
-
-		// Clean the file path to handle trailing slashes correctly
-		cleanFile := filepath.Clean(file)
-		parentFolder := filepath.Dir(cleanFile)
-
-		filePaths, err := utils.GetAllFilePaths(file, &utils.SymWalkOptions{
-			FollowSymlinks:       true,
-			SkipPermissionErrors: true,
-			SkipEmptyFiles:       true,
-			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.Errorf("Failed to walk through folder %s: %v", file, err)
-			continue
-		}
-
-		for _, path := range filePaths {
-			if !utils.CheckReadPath(path) {
-				log.Warnf("Path %s is not readable, skip!", path)
-				continue
-			}
-
-			info, err := os.Stat(path)
-			if err != nil {
-				log.Errorf("Failed to get file info for %s: %v", path, err)
-				continue
-			}
-
-			filename, err := filepath.Rel(parentFolder, path)
-			if err != nil {
-				log.Errorf("Failed to get relative path: %v", err)
-				filename = filepath.Base(path)
-			}
-
-			localFiles[path] = model.FileInfo{
-				FileName: filename,
-				Size:     info.Size(),
-				Path:     path,
-			}
-		}
-	}
-
-	// Get slave files if master-slave is enabled
-	var slaveFiles []master.SlaveFileInfo
-	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
-		defer cancel()
-
-		taskReq := &master.TaskRequest{
-			TaskID:          task.GetName(),
-			StartTime:       startTime.AsTime(),
-			EndTime:         endTime.AsTime(),
-			ScanFolders:     taskFolders,
-			AdditionalFiles: additionalFiles,
-		}
-
-		responses := c.masterClient.RequestAllSlaveFiles(ctx, c.slaveRegistry, taskReq)
-		for slaveID, response := range responses {
-			if response != nil && response.Success {
-				log.Infof("Slave %s returned %d files for task %s", slaveID, len(response.Files), task.GetName())
-				slaveFiles = append(slaveFiles, response.Files...)
-			}
-		}
-		log.Infof("Total slave files collected for task: %d", len(slaveFiles))
-	}
-
-	// Merge local and slave files
-	allFiles := make(map[string]model.FileInfo)
-	
-	// Add local files
-	for path, fileInfo := range localFiles {
-		allFiles[path] = fileInfo
-	}
-	
-	// Add slave files
-	for _, slaveFileInfo := range slaveFiles {
-		remotePath := slaveFileInfo.GetRemotePath()
-		allFiles[remotePath] = slaveFileInfo.FileInfo
-	}
-
-	log.Infof("Upload task scan completed - local files: %d, slave files: %d, total: %d", 
-		len(localFiles), len(slaveFiles), len(allFiles))
-
-	if len(allFiles) == 0 {
+	files, noPermissionFolders := computeUploadFiles(taskFolders, additionalFiles, startTime.AsTime(), endTime.AsTime())
+	if len(files) == 0 {
 		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum())
 		if err != nil {
 			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
@@ -461,7 +266,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			"title":       task.GetTitle(),
 			"description": task.GetDescription(),
 		},
-		OriginalFiles: allFiles,
+		OriginalFiles: files,
 	}
 	err := rc.Save()
 	if err != nil {
@@ -471,7 +276,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 
 	log.Infof("Record cache saved for task %s", task.GetName())
 	tags := make(map[string]string)
-	tags["totalFiles"] = strconv.Itoa(len(allFiles))
+	tags["totalFiles"] = strconv.Itoa(len(files))
 	if len(noPermissionFolders) > 0 {
 		tags["noPermissionFiles"] = strings.Join(noPermissionFolders, ",")
 	}
@@ -501,6 +306,187 @@ func (c *CustomTaskHandler) EnhanceTaskHandlerWithMasterSlave(
 	c.slaveRegistry = registry
 	c.masterClient = master.NewClient(masterConfig)
 	c.masterConfig = masterConfig
-	
+
 	log.Info("Task handler enhanced with master-slave support")
+}
+
+func computeUploadFiles(scanFolders []string, additionalFiles []string, startTime time.Time, endTime time.Time) (map[string]model.FileInfo, []string) {
+	files := make(map[string]model.FileInfo)
+	noPermissionFolders := make([]string, 0)
+
+	for _, folder := range scanFolders {
+		if !utils.CheckReadPath(folder) {
+			log.Warnf("Path %s is not readable, skip!", folder)
+
+			noPermissionFolders = append(noPermissionFolders, folder)
+			continue
+		}
+
+		realPath, info, err := utils.GetRealFileInfo(folder)
+		if err != nil {
+			log.Errorf("Failed to get folder info: %v", err)
+			continue
+		}
+
+		if !utils.CheckReadPath(realPath) {
+			log.Warnf("Path %s is not readable, skip!", realPath)
+
+			noPermissionFolders = append(noPermissionFolders, realPath)
+			continue
+		}
+
+		if !info.IsDir() {
+			files[realPath] = model.FileInfo{
+				FileName: filepath.Base(realPath),
+				Size:     info.Size(),
+				Path:     realPath,
+			}
+			continue
+		}
+
+		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: true,
+			SkipEmptyFiles:       true,
+			MaxFiles:             99999,
+		})
+		if err != nil {
+			log.Errorf("Failed to get all file paths in folder %s: %v", folder, err)
+			continue
+		}
+
+		for _, path := range filePaths {
+			if !utils.CheckReadPath(path) {
+				log.Warnf("Path %s is not readable, skip!", path)
+				continue
+			}
+
+			realPath, info, err := utils.GetRealFileInfo(path)
+			if err != nil {
+				log.Errorf("Failed to get file info for %s: %v", path, err)
+				continue
+			}
+
+			if !utils.CheckReadPath(realPath) {
+				log.Warnf("Path %s is not readable, skip!", realPath)
+				continue
+			}
+
+			log.Infof("file %s, mod time: %s", realPath, info.ModTime().String())
+			//nolint: nestif // check file modification time
+			if info.ModTime().After(startTime) && info.ModTime().Before(endTime) {
+				filename, err := filepath.Rel(folder, realPath)
+				if err != nil {
+					log.Errorf("Failed to get relative path: %v", err)
+					filename = filepath.Base(realPath)
+				}
+
+				files[realPath] = model.FileInfo{
+					FileName: filename,
+					Size:     info.Size(),
+					Path:     realPath,
+				}
+			} else {
+				stat, err := times.Stat(realPath)
+				if err != nil {
+					log.Errorf("Failed to get file times for %s: %v", realPath, err)
+					continue
+				}
+
+				if stat.HasBirthTime() {
+					log.Infof("File %s has birth time: %s", realPath, stat.BirthTime().String())
+					if stat.BirthTime().After(startTime) && stat.BirthTime().Before(endTime) {
+						filename, err := filepath.Rel(folder, realPath)
+						if err != nil {
+							log.Errorf("Failed to get relative path: %v", err)
+							filename = filepath.Base(realPath)
+						}
+
+						files[realPath] = model.FileInfo{
+							FileName: filename,
+							Size:     info.Size(),
+							Path:     realPath,
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, file := range additionalFiles {
+		if !utils.CheckReadPath(file) {
+			log.Warnf("Path %s is not readable, skip!", file)
+
+			noPermissionFolders = append(noPermissionFolders, file)
+			continue
+		}
+
+		realPath, info, err := utils.GetRealFileInfo(file)
+		if err != nil {
+			log.Errorf("Failed to get folder info: %v", err)
+			continue
+		}
+
+		if !utils.CheckReadPath(realPath) {
+			log.Warnf("Path %s is not readable, skip!", realPath)
+
+			noPermissionFolders = append(noPermissionFolders, realPath)
+			continue
+		}
+
+		if !info.IsDir() {
+			files[realPath] = model.FileInfo{
+				FileName: filepath.Base(realPath),
+				Size:     info.Size(),
+				Path:     realPath,
+			}
+			continue
+		}
+
+		// Clean the file path to handle trailing slashes correctly
+		cleanFile := filepath.Clean(realPath)
+		parentFolder := filepath.Dir(cleanFile)
+		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: true,
+			SkipEmptyFiles:       true,
+			MaxFiles:             99999,
+		})
+		if err != nil {
+			log.Errorf("Failed to walk through folder %s: %v", realPath, err)
+			continue
+		}
+
+		for _, path := range filePaths {
+			if !utils.CheckReadPath(path) {
+				log.Warnf("Path %s is not readable, skip!", path)
+				continue
+			}
+
+			realPath, info, err := utils.GetRealFileInfo(path)
+			if err != nil {
+				log.Errorf("Failed to get file info for %s: %v", path, err)
+				continue
+			}
+
+			if !utils.CheckReadPath(realPath) {
+				log.Warnf("Path %s is not readable, skip!", realPath)
+				continue
+			}
+
+			filename, err := filepath.Rel(parentFolder, realPath)
+			if err != nil {
+				log.Errorf("Failed to get relative path: %v", err)
+				filename = filepath.Base(realPath)
+			}
+
+			files[realPath] = model.FileInfo{
+				FileName: filename,
+				Size:     info.Size(),
+				Path:     realPath,
+			}
+		}
+	}
+
+	return files, noPermissionFolders
 }

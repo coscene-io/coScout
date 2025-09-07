@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -41,8 +42,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan *model.RecordCache, errorChan chan error) {
+func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error) {
 	log.Infof("Start upload goroutine")
+	queue := upload.NewDedupQueue(8)
 
 	go func() {
 		// Clean up cache file info periodically
@@ -65,61 +67,128 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 		}
 	}()
 
-	for {
-		select {
-		case recordCache := <-uploadChan:
-			//nolint: contextcheck // context is checked in the parent goroutine
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Errorf("upload goroutine panic recovered: %v", r)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				select {
+				case <-ctx.Done():
+					log.Info("upload queue goroutine done")
+					return
+				default:
+				}
+
+				//nolint: contextcheck // context is checked in the parent goroutine
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Errorf("upload goroutine panic recovered: %v", r)
+							select {
+							case errorChan <- errors.Errorf("upload goroutine panic: %v", r):
+							default:
+								log.Warnf("error channel is full, skip: %v", r)
+							}
+						}
+					}()
+
+					if queue == nil {
+						log.Errorf("upload queue is nil, skip")
+						return
+					}
+
+					if queue.IsEmpty() {
+						log.Infof("upload queue is empty, skip")
+						return
+					}
+
+					log.Infof("upload queue size: %d", queue.Size())
+					rcPath, isPop := queue.Pop()
+					if !isPop || rcPath == "" {
+						log.Infof("upload queue is empty or invalid pop")
+						return
+					}
+
+					if !utils.CheckReadPath(rcPath) {
+						log.Warnf("record cache %s not exist", rcPath)
+						return
+					}
+
+					data, err := os.ReadFile(rcPath)
+					if err != nil {
+						log.Errorf("read record cache failed: %v", err)
+						return
+					}
+
+					rc := model.RecordCache{}
+					if err := json.Unmarshal(data, &rc); err != nil {
+						log.Errorf("unmarshal record cache failed: %v", err)
+						return
+					}
+
+					if rc.Uploaded || rc.Skipped {
+						log.Infof("Record cache %s has been uploaded or skipped, skip it", rcPath)
+						return
+					}
+
+					appConfig := confManager.LoadWithRemote()
+					if appConfig != nil {
+						enabled := appConfig.Upload.NetworkRule.Enabled
+						blackInterfaces := appConfig.Upload.NetworkRule.BlackInterfaces
+						server := appConfig.Upload.NetworkRule.Server
+						if enabled && len(blackInterfaces) > 0 {
+							isBlack := utils.CheckNetworkBlackList(server, blackInterfaces)
+							if isBlack {
+								log.Warnf("Network interface is blacklisted, skipping upload for record %s", rc.GetRecordCachePath())
+								return
+							}
+						}
+					}
+
+					manualDisabled := checkDisabledUpload(confManager)
+					if manualDisabled {
+						log.Warnf("Upload is manual disabled, skipping upload for record %s", rcPath)
+						return
+					}
+
+					log.Infof("start to upload record %s", rcPath)
+					err = uploadFiles(reqClient, confManager, &rc)
+					if err != nil {
 						select {
-						case errorChan <- errors.Errorf("upload goroutine panic: %v", r):
+						case errorChan <- err:
 						default:
-							log.Warnf("error channel is full, skip: %v", r)
+							log.Warnf("Error channel is full, dropping error: %v", err)
 						}
 					}
 				}()
+			case <-ctx.Done():
+				log.Info("upload queue goroutine done")
+				return
+			}
+		}
+	}()
 
-				if recordCache == nil {
-					log.Warn("record cache is nil, skip")
-					return
-				}
-				if !utils.CheckReadPath(recordCache.GetRecordCachePath()) {
-					log.Warnf("record cache %s not exist", recordCache.GetRecordCachePath())
-					return
-				}
+	for {
+		select {
+		case recordCache := <-uploadChan:
+			if recordCache == "" {
+				log.Warn("received empty record cache path, skip")
+				continue
+			}
 
-				appConfig := confManager.LoadWithRemote()
-				if appConfig != nil {
-					enabled := appConfig.Upload.NetworkRule.Enabled
-					blackInterfaces := appConfig.Upload.NetworkRule.BlackInterfaces
-					server := appConfig.Upload.NetworkRule.Server
-					if enabled && len(blackInterfaces) > 0 {
-						isBlack := utils.CheckNetworkBlackList(server, blackInterfaces)
-						if isBlack {
-							log.Warnf("Network interface is blacklisted, skipping upload for record %s", recordCache.GetRecordCachePath())
-							return
-						}
-					}
-				}
+			if queue == nil {
+				log.Error("upload queue is nil, skip")
+				continue
+			}
 
-				manualDisabled := checkDisabledUpload(confManager)
-				if manualDisabled {
-					log.Warnf("Upload is manual disabled, skipping upload for record %s", recordCache.GetRecordCachePath())
-					return
-				}
+			if queue.IsFull() {
+				log.Warn("upload queue is full, skip")
+				continue
+			}
 
-				log.Infof("start to upload record %s", recordCache.GetRecordCachePath())
-				err := uploadFiles(reqClient, confManager, recordCache)
-				if err != nil {
-					select {
-					case errorChan <- err:
-					default:
-						log.Warnf("Error channel is full, dropping error: %v", err)
-					}
-				}
-			}()
+			queue.Push(recordCache)
 		case <-ctx.Done():
 			log.Info("upload goroutine done")
 			return
@@ -146,6 +215,10 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 	toUploadFiles := make([]model.FileInfo, 0)
 	for filePath, fileInfo := range recordCache.OriginalFiles {
+		if lo.Contains(recordCache.UploadedFilePaths, filePath) {
+			continue
+		}
+
 		if fileInfo.Path == "" {
 			fileInfo.Path = filePath
 		}
@@ -309,34 +382,26 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		return errors.New("file path is empty")
 	}
 
-	cachedFileInfo := getCacheFileInfo(storage, fileInfo.Path)
-	if fileInfo.Size <= 0 {
-		if cachedFileInfo.Size > 0 {
-			fileInfo.Size = cachedFileInfo.Size
-		} else {
-			fileSize, err := utils.GetFileSize(fileInfo.Path)
-			if err != nil {
-				log.Errorf("failed to get file size: %v", err)
-				return err
-			}
-			fileInfo.Size = fileSize
-		}
+	fileInfo, cleanUploadCache, err := getFileInfoFromCacheOrFile(storage, fileInfo)
+	if err != nil {
+		log.Errorf("failed to get file info from cache or file: %v", err)
+		return err
+	}
+	if cleanUploadCache {
+		log.Infof("clean upload cache for file %s", fileInfo.Path)
+		deleteCacheFileInfo(storage, fileInfo.Path)
 	}
 
 	if !appConfig.Collector.SkipCheckSameFile && fileInfo.Sha256 == "" {
-		if cachedFileInfo.Sha256 != "" {
-			fileInfo.Sha256 = cachedFileInfo.Sha256
-		} else {
-			log.Infof("file %s sha256 is empty, calculate it", fileInfo.Path)
-			sha256, _, err := utils.CalSha256AndSize(fileInfo.Path, fileInfo.Size)
-			if err != nil {
-				log.Errorf("failed to calculate sha256: %v", err)
-				return err
-			}
-
-			log.Infof("file %s sha256 is %s", fileInfo.Path, sha256)
-			fileInfo.Sha256 = sha256
+		log.Infof("file %s sha256 is empty, calculate it", fileInfo.Path)
+		sha256, _, err := utils.CalSha256AndSize(fileInfo.Path, fileInfo.Size)
+		if err != nil {
+			log.Errorf("failed to calculate sha256: %v", err)
+			return err
 		}
+
+		log.Infof("file %s sha256 is %s", fileInfo.Path, sha256)
+		fileInfo.Sha256 = sha256
 	}
 
 	if fileInfo.FileName == "" || fileInfo.FileName == "." {
@@ -406,7 +471,7 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 
 	log.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
 	tags := map[string]string{}
-	err = um.FPutObject(fileInfo.Path, constant.UploadBucket, fileResourceName.String(), fileInfo.Size, tags)
+	err = um.FPutObject(fileInfo.Path, constant.UploadBucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
 	if err != nil {
 		log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 		return err
@@ -415,7 +480,74 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 	return nil
 }
 
+// just use file size assertion to determine whether file changed, may not be accurate enough.
+func getFileInfoFromCacheOrFile(storage *storage.Storage, prevFileInfo *model.FileInfo) (*model.FileInfo, bool, error) {
+	cachedFileInfo := getCacheFileInfo(storage, prevFileInfo.Path)
+	currentSize, err := utils.GetFileSize(prevFileInfo.Path)
+	if err != nil {
+		log.Errorf("failed to get file size: %v", err)
+		return nil, false, err
+	}
+	expectedSize := prevFileInfo.Size
+
+	// if expected size is 0 or less, it means we don't know the expected size
+	if expectedSize <= 0 {
+		if cachedFileInfo.Size > 0 && cachedFileInfo.Size <= currentSize {
+			return &model.FileInfo{
+				FileName: prevFileInfo.FileName,
+				Path:     prevFileInfo.Path,
+				Size:     cachedFileInfo.Size,
+				Sha256:   cachedFileInfo.Sha256,
+			}, false, nil
+		}
+
+		return &model.FileInfo{
+			FileName: prevFileInfo.FileName,
+			Path:     prevFileInfo.Path,
+			Size:     currentSize,
+			Sha256:   "",
+		}, true, nil
+	}
+
+	// expected size > 0, need to compare with current size
+	if currentSize < expectedSize {
+		// current size < expected size, maybe file be written from 0, need to recalculate sha256
+		return &model.FileInfo{
+			FileName: prevFileInfo.FileName,
+			Path:     prevFileInfo.Path,
+			Size:     currentSize,
+			Sha256:   "",
+		}, true, nil
+	}
+
+	if expectedSize == cachedFileInfo.Size {
+		return &model.FileInfo{
+			FileName: prevFileInfo.FileName,
+			Path:     prevFileInfo.Path,
+			Size:     cachedFileInfo.Size,
+			Sha256:   cachedFileInfo.Sha256,
+		}, false, nil
+	}
+
+	// current size >= expected size && expected size != cached size, file maybe appended, need to recalculate sha256
+	return &model.FileInfo{
+		FileName: prevFileInfo.FileName,
+		Path:     prevFileInfo.Path,
+		Size:     expectedSize,
+		Sha256:   "",
+	}, true, nil
+}
+
 func getCacheFileInfo(storage *storage.Storage, file string) *model.FileInfo {
+	if storage == nil {
+		log.Warn("storage is nil, skip getting cache file info")
+		return &model.FileInfo{Size: -1}
+	}
+	if file == "" {
+		log.Warn("file is empty, skip getting cache file info")
+		return &model.FileInfo{Size: -1}
+	}
+
 	info := model.FileInfo{Size: -1}
 	value, err := (*storage).Get([]byte(constant.FileInfoBucket), []byte(file))
 	if err != nil {
@@ -448,9 +580,32 @@ func saveCacheFileInfo(storage *storage.Storage, info *model.FileInfo) {
 		log.Errorf("failed to marshal file info: %v", err)
 		return
 	}
+	if storage == nil {
+		log.Warn("storage is nil, skip saving cache file info")
+		return
+	}
+	if info.Path == "" {
+		log.Warn("file path is empty, skip saving cache file info")
+		return
+	}
 
 	if err := (*storage).Put([]byte(constant.FileInfoBucket), []byte(info.Path), bytes); err != nil {
 		log.Errorf("failed to save file info: %v", err)
+	}
+}
+
+func deleteCacheFileInfo(storage *storage.Storage, file string) {
+	if storage == nil {
+		log.Warn("storage is nil, skip deleting cache file info")
+		return
+	}
+	if file == "" {
+		log.Warn("file is empty, skip deleting cache file info")
+		return
+	}
+
+	if err := (*storage).Delete([]byte(constant.FileInfoBucket), []byte(file)); err != nil {
+		log.Errorf("failed to delete cache file info for %s: %v", file, err)
 	}
 }
 

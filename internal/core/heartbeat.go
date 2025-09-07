@@ -16,6 +16,8 @@ package core
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"time"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/services"
@@ -89,6 +91,11 @@ func SendHeartbeat(ctx context.Context, reqClient *api.RequestClient, storage *s
 				DownloadBytes: receivedBytes,
 			}
 
+			ips := GetDeviceIps()
+			if len(ips) > 0 {
+				slices.Sort(ips)
+				extraInfo["ips"] = strings.Join(ips, ",")
+			}
 			cosVersion := coscout.GetVersion()
 			//nolint: contextcheck //context is checked in the parent goroutine
 			_, err := reqClient.SendHeartbeat(deviceInfo.GetName(), cosVersion, &nc, extraInfo)
