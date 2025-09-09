@@ -39,23 +39,24 @@ jobs:
         id: check
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual trigger: use user input
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "cos_version=${{ inputs.cosVersion }}" >> "$GITHUB_OUTPUT"
+            echo "Manual trigger: using version '${{ inputs.cosVersion }}'"
           else
-            # For workflow_run, check if it was a release or prerelease
+            # Auto trigger: determine from git tag (same logic as release workflow)
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             
-            # Get the version using git describe (same as release workflow)
             VERSION=$(git describe --always --tags --abbrev=8 --dirty)
-            echo "Detected version: $VERSION"
+            echo "Auto trigger: detected version '$VERSION'"
             
-            # Check if it's a release version (v1.2.3) or beta (same regex as release workflow)
-            if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
-              echo "This is a release version"
+            # Same regex as release workflow: ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$
+            if echo "$VERSION" | grep -q -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
               echo "cos_version=latest" >> "$GITHUB_OUTPUT"
+              echo "Version '$VERSION' matches release pattern -> using 'latest'"
             else
-              echo "This is a beta/prerelease version"
               echo "cos_version=beta" >> "$GITHUB_OUTPUT"
+              echo "Version '$VERSION' does not match release pattern -> using 'beta'"
             fi
           fi
 
