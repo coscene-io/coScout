@@ -10,21 +10,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - name: Get Version
-        id: get_version
-        run: |
-          echo $(git describe --always --tags --abbrev=8 --dirty)
-          echo "version=$(git describe --always --tags --abbrev=8 --dirty)" >> "$GITHUB_OUTPUT"
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-
   upload-cli-artifact-to-oss:
     strategy:
       matrix:
@@ -41,25 +26,28 @@ jobs:
             os: linux
     runs-on: ubuntu-latest
     environment: azure-dev-east-us
-    needs: [ check ]
     permissions:
       contents: write
     steps:
-      - name: Check if version is release or beta
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
-        run: |
-          if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
-            echo "IS_RELEASE=true" >> $GITHUB_ENV
-            echo "VERSION_TAG=latest" >> $GITHUB_ENV
-          else
-            echo "IS_RELEASE=false" >> $GITHUB_ENV
-            echo "VERSION_TAG=beta" >> $GITHUB_ENV
-          fi
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Check if version is release or beta
+        run: |
+          # 获取版本号并判断是否为正式版本
+          VERSION=$(git describe --always --tags --abbrev=8 --dirty)
+          echo "DEBUG: VERSION is '$VERSION'"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
+            echo "IS_RELEASE=true" >> $GITHUB_ENV
+            echo "VERSION_TAG=latest" >> $GITHUB_ENV
+            echo "Matched release pattern"
+          else
+            echo "IS_RELEASE=false" >> $GITHUB_ENV
+            echo "VERSION_TAG=beta" >> $GITHUB_ENV
+            echo "Did not match release pattern"
+          fi
       - name: Set up go
         uses: actions/setup-go@v6
         with:
@@ -83,18 +71,14 @@ jobs:
       - name: Install gzip
         run: sudo apt-get update && sudo apt-get install -y gzip
       - name: Build coScout agent
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
         run: |
-          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} make build-binary VERSION="$VERSION"
+          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} make build-binary VERSION="${{ env.VERSION }}"
           cp bin/cos cos
           chmod +x cos
       - name: Build metadata files
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
         run: |
           SHA256SUM=$(sha256sum cos | awk '{print $1}' | xxd -r -p | base64) 
-          echo "{\"Version\": \"$VERSION\", \"Sha256\": \"$SHA256SUM\"}" > ${{ matrix.os }}-${{ matrix.arch }}.json
+          echo "{\"Version\": \"${{ env.VERSION }}\", \"Sha256\": \"$SHA256SUM\"}" > ${{ matrix.os }}-${{ matrix.arch }}.json
       - name: gzip coscout
         run: gzip cos
       - name: Upload cos agent to oss
@@ -105,8 +89,8 @@ jobs:
           region: oss-cn-hangzhou
           bucket: coscene-download
           assets: |
-            cos.gz:/coscout/v2/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.gz
-            ${{ matrix.os }}-${{ matrix.arch }}.json:/coscout/v2/versions/${{ needs.check.outputs.version }}/${{ matrix.os }}-${{ matrix.arch }}.json
+            cos.gz:/coscout/v2/versions/${{ env.VERSION }}/${{ matrix.os }}-${{ matrix.arch }}.gz
+            ${{ matrix.os }}-${{ matrix.arch }}.json:/coscout/v2/versions/${{ env.VERSION }}/${{ matrix.os }}-${{ matrix.arch }}.json
       - name: Upload coscli release metadata files to oss
         if: env.IS_RELEASE == 'true'
         uses: tvrcgo/oss-action@master
