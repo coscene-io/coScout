@@ -50,8 +50,8 @@ jobs:
             VERSION=$(git describe --always --tags --abbrev=8 --dirty)
             echo "Auto trigger: detected version '$VERSION'"
             
-            # Same regex as release workflow: ^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$
-            if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
+            # Same regex as release workflow: ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$
+            if echo "$VERSION" | grep -q -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
               echo "cos_version=latest" >> "$GITHUB_OUTPUT"
               echo "Version '$VERSION' matches release pattern -> using 'latest'"
             else
