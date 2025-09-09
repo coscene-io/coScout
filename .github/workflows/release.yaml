@@ -39,7 +39,7 @@ jobs:
           VERSION=$(git describe --always --tags --abbrev=8 --dirty)
           echo "DEBUG: VERSION is '$VERSION'"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          if echo "$VERSION" | grep -q -E '^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'; then
+          if echo "$VERSION" | grep -q -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
             echo "IS_RELEASE=true" >> $GITHUB_ENV
             echo "VERSION_TAG=latest" >> $GITHUB_ENV
             echo "Matched release pattern"
