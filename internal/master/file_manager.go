@@ -145,6 +145,11 @@ func ParseSlaveFilePath(filePath string) (slaveID, remotePath string, err error)
 	// Remove "slave://" prefix
 	pathWithoutPrefix := strings.TrimPrefix(filePath, "slave://")
 
+	// Check if path is empty after removing prefix
+	if pathWithoutPrefix == "" {
+		return "", "", errors.Wrapf(ErrInvalidSlaveFilePath, "path: %s", filePath)
+	}
+
 	// Split by first "/" to get slaveID and remotePath
 	parts := strings.SplitN(pathWithoutPrefix, "/", 2)
 	if len(parts) != 2 {
@@ -152,6 +157,11 @@ func ParseSlaveFilePath(filePath string) (slaveID, remotePath string, err error)
 	}
 
 	slaveID = parts[0]
+	// Check if slaveID is empty (e.g., slave:///absolute/path)
+	if slaveID == "" {
+		return "", "", errors.Wrapf(ErrInvalidSlaveFilePath, "path: %s", filePath)
+	}
+
 	remotePath = "/" + parts[1] // Ensure remotePath starts with "/"
 
 	return slaveID, remotePath, nil

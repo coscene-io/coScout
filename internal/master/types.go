@@ -161,6 +161,10 @@ func (sfi *SlaveFileInfo) GetRemotePath() string {
 
 // FormatSlaveFilePath formats a slave file path using the slave:// protocol.
 func FormatSlaveFilePath(slaveID, filePath string) string {
+	// Ensure filePath starts with "/"
+	if !strings.HasPrefix(filePath, "/") {
+		filePath = "/" + filePath
+	}
 	return fmt.Sprintf("slave://%s%s", slaveID, filePath)
 }
 
