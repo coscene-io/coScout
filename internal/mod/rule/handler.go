@@ -474,16 +474,16 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			continue
 		}
 
-		stat, err := os.Stat(extraFileAbs)
+		realPath, fileInfo, err := utils.GetRealFileInfo(extraFileAbs)
 		if err != nil {
-			log.Errorf("stat extra file failed after check read path: %v", err)
+			log.Errorf("get real file info for extra file: %v", err)
 			continue
 		}
 
 		uploadFileStates = append(uploadFileStates, file_state_handler.FileState{
-			Size:     stat.Size(),
-			IsDir:    stat.IsDir(),
-			Pathname: extraFileAbs,
+			Size:     fileInfo.Size(),
+			IsDir:    fileInfo.IsDir(),
+			Pathname: realPath,
 		})
 	}
 
@@ -606,8 +606,13 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 			continue
 		}
 
-		baseDir := filepath.Dir(fileState.Pathname)
-		filePaths, err := utils.GetAllFilePaths(fileState.Pathname, &utils.SymWalkOptions{
+		realPath, _, err := utils.GetRealFileInfo(fileState.Pathname)
+		if err != nil {
+			log.Errorf("failed to stat dir %s: %v", realPath, err)
+			continue
+		}
+		baseDir := filepath.Dir(realPath)
+		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
 			FollowSymlinks:       true,
 			SkipPermissionErrors: true,
 			SkipEmptyFiles:       true,
@@ -641,7 +646,7 @@ func computeFileInfos(fileStates []file_state_handler.FileState) map[string]mode
 				Path:     realPath,
 			}
 		}
-		log.Errorf("failed to walk through dir %s: %v", fileState.Pathname, err)
+		log.Errorf("failed to walk through dir %s: %v", realPath, err)
 	}
 
 	return files
