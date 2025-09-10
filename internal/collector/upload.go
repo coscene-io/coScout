@@ -18,17 +18,20 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/enums"
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
+	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/name"
 	"github.com/coscene-io/coscout/internal/storage"
@@ -42,7 +45,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error) {
+func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager) {
 	log.Infof("Start upload goroutine")
 	queue := upload.NewDedupQueue(8)
 
@@ -154,7 +157,7 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 					}
 
 					log.Infof("start to upload record %s", rcPath)
-					err = uploadFiles(reqClient, confManager, &rc)
+					err = uploadFiles(reqClient, confManager, &rc, fileManager)
 					if err != nil {
 						select {
 						case errorChan <- err:
@@ -196,7 +199,7 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 	}
 }
 
-func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, recordCache *model.RecordCache) error {
+func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, recordCache *model.RecordCache, fileManager *master.FileManager) error {
 	allCompleted := true
 	appConfig := confManager.LoadWithRemote()
 	getStorage := confManager.GetStorage()
@@ -241,7 +244,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			return nil
 		}
 
-		if !utils.CheckReadPath(filePath) {
+		if !isSlaveFile(filePath) && !utils.CheckReadPath(filePath) {
 			log.Warnf("local file %s not exist", filePath)
 			continue
 		}
@@ -268,7 +271,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			return errors.New("upload is manually disabled, skipping upload")
 		}
 
-		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo); err != nil {
+		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
 			log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 
 			allCompleted = false
@@ -375,13 +378,24 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	return nil
 }
 
-func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
+func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
 	log.Infof("prepare to upload file %s", fileInfo.Path)
 	if fileInfo.Path == "" {
 		log.Warn("file path is empty")
 		return errors.New("file path is empty")
 	}
 
+	// Check if it's a slave file
+	if isSlaveFile(fileInfo.Path) {
+		return uploadSlaveFile(reqClient, appConfig, storage, projectName, recordName, fileInfo, cacheFolder, fileManager)
+	}
+
+	// Handle local files with existing logic
+	return uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo)
+}
+
+// uploadLocalFile handles local file upload with standard logic.
+func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
 	fileInfo, cleanUploadCache, err := getFileInfoFromCacheOrFile(storage, fileInfo)
 	if err != nil {
 		log.Errorf("failed to get file info from cache or file: %v", err)
@@ -669,4 +683,129 @@ func checkDisabledUpload(confManager *config.ConfManager) bool {
 	}
 
 	return disabled
+}
+
+// isSlaveFile checks if the file path is a slave file.
+func isSlaveFile(filePath string) bool {
+	return strings.HasPrefix(filePath, "slave://")
+}
+
+// uploadSlaveFile downloads slave file to local cache and then uploads using standard logic.
+func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
+	log.Infof("Processing slave file: %s", fileInfo.Path)
+
+	// Check if FileManager is available
+	if fileManager == nil {
+		return errors.New("FileManager not available for slave file upload")
+	}
+
+	// Generate local cache file path in recordCache directory
+	localCachePath := getSlaveFileCachePath(cacheFolder, fileInfo.Path)
+
+	// Check if local cache file exists and size matches
+	if utils.CheckReadPath(localCachePath) {
+		cachedSize, err := utils.GetFileSize(localCachePath)
+		if err == nil && cachedSize == fileInfo.Size {
+			log.Infof("Using existing cached slave file: %s (size: %d)", localCachePath, cachedSize)
+			// Update fileInfo to point to local cache file
+			fileInfo.Path = localCachePath
+			// Continue with standard upload logic
+			return uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo)
+		} else {
+			log.Infof("Cached file size mismatch (cached: %d, expected: %d), re-downloading", cachedSize, fileInfo.Size)
+		}
+	}
+
+	// Download slave file to local cache
+	log.Infof("Downloading slave file to local cache: %s", localCachePath)
+	if err := downloadSlaveFileToLocal(fileManager, fileInfo, localCachePath); err != nil {
+		return errors.Wrap(err, "failed to download slave file to local cache")
+	}
+
+	// Update fileInfo to point to local cache file and recalculate size
+	fileInfo.Path = localCachePath
+
+	// Recalculate file size from local cache (in case slave file was modified)
+	actualSize, err := utils.GetFileSize(localCachePath)
+	if err != nil {
+		log.Warnf("Failed to get actual file size for %s: %v", localCachePath, err)
+	} else {
+		fileInfo.Size = actualSize
+		log.Infof("Updated file size from %d to %d for %s", fileInfo.Size, actualSize, localCachePath)
+	}
+
+	// Continue with standard upload logic
+	return uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo)
+}
+
+// getSlaveFileCachePath generates local cache path for slave files.
+func getSlaveFileCachePath(cacheFolder, slaveFilePath string) string {
+	// Parse slave file path to get slave ID and original path
+	slaveID, originalPath, err := master.ParseSlaveFilePath(slaveFilePath)
+	if err != nil {
+		log.Errorf("Failed to parse slave file path %s: %v", slaveFilePath, err)
+		// Fallback to using the full path as filename
+		slaveID = "unknown"
+		originalPath = slaveFilePath
+	}
+
+	// Create cache directory structure: recordCache/projectName/recordName/slave_files/slaveID/
+	cacheDir := filepath.Join(cacheFolder, "slave_files", slaveID)
+
+	// Ensure directory exists
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		log.Errorf("Failed to create cache directory %s: %v", cacheDir, err)
+	}
+
+	// Generate filename from original path
+	filename := filepath.Base(originalPath)
+	if filename == "" || filename == "." {
+		filename = "slave_file"
+	}
+
+	return filepath.Join(cacheDir, filename)
+}
+
+// downloadSlaveFileToLocal downloads slave file to local cache.
+func downloadSlaveFileToLocal(fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	// Get file reader from FileManager (without size limit for complete file copy)
+	reader, err := fileManager.GetFileReader(ctx, *fileInfo)
+	if err != nil {
+		return errors.Wrap(err, "failed to get slave file reader")
+	}
+	defer func(reader io.ReadCloser) {
+		err := reader.Close()
+		if err != nil {
+			log.Errorf("Unable to close slave file reader: %v", err)
+		}
+	}(reader)
+
+	// Create local file
+	localFile, err := os.Create(localPath)
+	if err != nil {
+		return errors.Wrap(err, "failed to create local cache file")
+	}
+	defer func(localFile *os.File) {
+		err := localFile.Close()
+		if err != nil {
+			log.Errorf("Unable to close local cache file: %v", err)
+		}
+	}(localFile)
+
+	// Copy complete content to local file (no size limit)
+	bytesCopied, err := io.Copy(localFile, reader)
+	if err != nil {
+		// Clean up on error
+		err := os.Remove(localPath)
+		if err != nil {
+			return err
+		}
+		return errors.Wrap(err, "failed to copy slave file content")
+	}
+
+	log.Infof("Successfully downloaded slave file to local cache: %s (copied %d bytes)", localPath, bytesCopied)
+	return nil
 }

@@ -83,5 +83,6 @@ func NewCommand() *cobra.Command {
 
 	cmd.AddCommand(NewVersionCommand())
 	cmd.AddCommand(NewDaemonCommand(&cfgPath))
+	cmd.AddCommand(NewSlaveCommand())
 	return cmd
 }
