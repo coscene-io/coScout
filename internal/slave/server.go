@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/coscene-io/coscout/internal/master"
+	"github.com/coscene-io/coscout/internal/mod/rule/file_handlers"
 	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -35,6 +36,7 @@ type Server struct {
 	server     *http.Server
 	port       int
 	filePrefix string
+	handlers   []file_handlers.Interface
 }
 
 // NewServer creates a new slave server.
@@ -52,9 +54,14 @@ func NewServer(port int, filePrefix string) *Server {
 		server:     server,
 		port:       port,
 		filePrefix: filePrefix,
+		handlers:   []file_handlers.Interface{},
 	}
+	
+	// Register file handlers
+	s.registerHandlers()
 
 	mux.HandleFunc("/api/v1/files/scan", s.handleFileScan)
+	mux.HandleFunc("/api/v1/files/scan-by-content", s.handleFileScanByContent)
 	mux.HandleFunc("/api/v1/files/download", s.handleFileDownload)
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
 
@@ -174,4 +181,95 @@ func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 		log.Errorf("Failed to encode JSON response: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
+}
+
+// registerHandlers registers the handlers for different file types.
+func (s *Server) registerHandlers() {
+	s.handlers = []file_handlers.Interface{
+		file_handlers.NewLogHandler(),
+		file_handlers.NewMcapHandler(),
+		file_handlers.NewRos1Handler(),
+	}
+}
+
+// getFileHandler returns the handler for a given file path.
+func (s *Server) getFileHandler(filePath string) file_handlers.Interface {
+	for _, handler := range s.handlers {
+		if handler.CheckFilePath(filePath) {
+			return handler
+		}
+	}
+	return nil
+}
+
+// handleFileScanByContent handles file scan requests based on file content time.
+func (s *Server) handleFileScanByContent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req master.TaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	log.Infof("Received file scan by content request: %+v", req)
+
+	files := s.scanFilesByContent(req.ScanFolders, req.AdditionalFiles, req.StartTime, req.EndTime)
+	resp := master.TaskResponse{
+		TaskID:  req.TaskID,
+		Files:   files,
+		Success: true,
+	}
+
+	s.writeJSON(w, resp)
+}
+
+// scanFilesByContent scans files based on their content time rather than modification time.
+func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []string, startTime time.Time, endTime time.Time) []master.SlaveFileInfo {
+	// Get all files using the existing logic
+	files, noPermissionFiles := upload.ComputeUploadFiles(scanFolders, additionalFiles, startTime, endTime)
+	if len(noPermissionFiles) > 0 {
+		log.Warnf("Some files/folders are not readable: %v", noPermissionFiles)
+	}
+
+	result := make([]master.SlaveFileInfo, 0)
+	for _, file := range files {
+		// Get the handler for this file
+		handler := s.getFileHandler(file.Path)
+		if handler == nil {
+			// No handler available, skip this file
+			log.Debugf("No handler available for file: %s", file.Path)
+			continue
+		}
+
+		// Get start and end time from file content
+		fileStartTime, fileEndTime, err := handler.GetStartTimeEndTime(file.Path)
+		if err != nil {
+			log.Errorf("Failed to get start/end time for file %s: %v", file.Path, err)
+			continue
+		}
+
+		// Check if file time range overlaps with requested time range
+		if fileStartTime.After(endTime) || fileEndTime.Before(startTime) {
+			log.Debugf("File %s time range [%v, %v] does not overlap with requested range [%v, %v]", 
+				file.Path, fileStartTime, fileEndTime, startTime, endTime)
+			continue
+		}
+
+		// Update file info with content-based times
+		file.FileName = filepath.Join(s.filePrefix, file.FileName)
+
+		info := master.SlaveFileInfo{
+			FileInfo:  file,
+			StartTime: *fileStartTime,
+			EndTime:   *fileEndTime,
+		}
+		result = append(result, info)
+	}
+
+	log.Infof("Found %d files matching content time range", len(result))
+	return result
 }

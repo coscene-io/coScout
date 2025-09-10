@@ -151,7 +151,9 @@ func (r *SlaveRegistry) CheckAndCleanup(timeout time.Duration) []string {
 // SlaveFileInfo contains slave file information.
 type SlaveFileInfo struct {
 	model.FileInfo
-	SlaveID string `json:"slave_id"` // Source slave ID
+	SlaveID   string    `json:"slave_id"`   // Source slave ID
+	StartTime time.Time `json:"start_time"` // File content start time
+	EndTime   time.Time `json:"end_time"`   // File content end time
 }
 
 // GetRemotePath returns remote file identifier (using slave:// protocol format).

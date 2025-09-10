@@ -435,7 +435,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			AdditionalFiles: info.Cut.ExtraFiles,
 		}
 
-		responses := c.masterClient.RequestAllSlaveFiles(ctx, c.slaveRegistry, taskReq)
+		responses := c.masterClient.RequestAllSlaveFilesByContent(ctx, c.slaveRegistry, taskReq)
 		for slaveID, response := range responses {
 			if response != nil && response.Success {
 				log.Infof("Slave %s returned %d files for rule collection", slaveID, len(response.Files))
