@@ -281,7 +281,7 @@ func (c *Client) RequestAllSlaveFilesByContent(ctx context.Context, registry *Sl
 
 	// Collect results
 	results := make(map[string]*TaskResponse)
-	for range len(slaves) {
+	for range slaves {
 		select {
 		case res := <-resultChan:
 			if res.err != nil {

@@ -27,6 +27,7 @@ import (
 	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/mod/rule/file_handlers"
 	"github.com/coscene-io/coscout/pkg/upload"
+	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -56,7 +57,7 @@ func NewServer(port int, filePrefix string) *Server {
 		filePrefix: filePrefix,
 		handlers:   []file_handlers.Interface{},
 	}
-	
+
 	// Register file handlers
 	s.registerHandlers()
 
@@ -137,6 +138,11 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	realPath, err := filepath.EvalSymlinks(req.FilePath)
 	if err != nil {
 		http.Error(w, "File not found: "+req.FilePath, http.StatusNotFound)
+		return
+	}
+
+	if !utils.CheckReadPath(realPath) {
+		http.Error(w, "File no permission: "+req.FilePath, http.StatusBadRequest)
 		return
 	}
 
@@ -254,7 +260,7 @@ func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []stri
 
 		// Check if file time range overlaps with requested time range
 		if fileStartTime.After(endTime) || fileEndTime.Before(startTime) {
-			log.Debugf("File %s time range [%v, %v] does not overlap with requested range [%v, %v]", 
+			log.Debugf("File %s time range [%v, %v] does not overlap with requested range [%v, %v]",
 				file.Path, fileStartTime, fileEndTime, startTime, endTime)
 			continue
 		}

@@ -372,14 +372,14 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 			}
 
 			log.Infof("Found collect info: %v", collectInfoId)
-			c.handleCollectInfo(*collectInfo)
+			c.handleCollectInfo(*collectInfo, modConfig.CollectDirs)
 		}
 	}
 	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
 }
 
 // handleCollectInfo handles a single the collect info.
-func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
+func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, collectDirs []string) {
 	if info.Skip {
 		log.Infof("Skipping collect info: %v, cleaning", info.Id)
 		info.Clean()
@@ -422,7 +422,6 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 
 	// Get slave files if master-slave is enabled
 	var slaveFiles []master.SlaveFileInfo
-	//nolint: nestif // check master-slave components
 	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
 		defer cancel()
@@ -431,32 +430,16 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 			TaskID:          info.Id,
 			StartTime:       time.Unix(info.Cut.Start, 0),
 			EndTime:         time.Unix(info.Cut.End, 0),
-			ScanFolders:     []string{}, // rule mode depends on collect_dirs configuration
+			ScanFolders:     collectDirs,
 			AdditionalFiles: info.Cut.ExtraFiles,
+			WhiteList:       info.Cut.WhiteList,
 		}
 
 		responses := c.masterClient.RequestAllSlaveFilesByContent(ctx, c.slaveRegistry, taskReq)
 		for slaveID, response := range responses {
 			if response != nil && response.Success {
 				log.Infof("Slave %s returned %d files for rule collection", slaveID, len(response.Files))
-
-				// Apply whitelist filter to slave files
-				for _, file := range response.Files {
-					matched := false
-					if len(info.Cut.WhiteList) == 0 {
-						matched = true
-					} else {
-						for _, pattern := range info.Cut.WhiteList {
-							if match, err := doublestar.PathMatch(pattern, file.FileName); err == nil && match {
-								matched = true
-								break
-							}
-						}
-					}
-					if matched {
-						slaveFiles = append(slaveFiles, file)
-					}
-				}
+				slaveFiles = append(slaveFiles, response.Files...)
 			}
 		}
 		log.Infof("Total slave files collected for rule: %d", len(slaveFiles))
@@ -492,8 +475,8 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo) {
 	allFiles := make(map[string]model.FileInfo)
 
 	// Add local files
-	for path, fileInfo := range localFiles {
-		allFiles[path] = fileInfo
+	for p, fileInfo := range localFiles {
+		allFiles[p] = fileInfo
 	}
 
 	// Add slave files

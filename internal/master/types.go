@@ -177,6 +177,7 @@ type TaskRequest struct {
 	EndTime         time.Time `json:"end_time"`
 	ScanFolders     []string  `json:"scan_folders"`
 	AdditionalFiles []string  `json:"additional_files"`
+	WhiteList       []string  `json:"whitelist,omitempty"`
 }
 
 // TaskResponse task response structure.

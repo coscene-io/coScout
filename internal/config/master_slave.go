@@ -58,6 +58,6 @@ func DefaultMasterConfig() *MasterConfig {
 		SlaveTimeout:      5 * time.Second,
 		MaxSlaves:         0,                // 0 means unlimited
 		FileTransferChunk: 10 * 1024 * 1024, // 10MB
-		RequestTimeout:    5 * time.Second,
+		RequestTimeout:    15 * time.Second,
 	}
 }
