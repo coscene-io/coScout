@@ -153,7 +153,8 @@ func (c *Client) startHeartbeat(ctx context.Context) {
 		case <-ticker.C:
 			if err := c.sendHeartbeat(ctx); err != nil {
 				log.Errorf("Failed to send heartbeat: %v", err)
-				// Consider re-registration logic here
+			} else {
+				log.Infof("Successfully send heartbeat to master %s", c.config.MasterAddr)
 			}
 		case <-ctx.Done():
 			log.Info("Heartbeat stopped")

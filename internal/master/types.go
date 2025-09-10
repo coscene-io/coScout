@@ -151,9 +151,7 @@ func (r *SlaveRegistry) CheckAndCleanup(timeout time.Duration) []string {
 // SlaveFileInfo contains slave file information.
 type SlaveFileInfo struct {
 	model.FileInfo
-	SlaveID   string    `json:"slave_id"`   // Source slave ID
-	StartTime time.Time `json:"start_time"` // File content start time
-	EndTime   time.Time `json:"end_time"`   // File content end time
+	SlaveID string `json:"slave_id"` // Source slave ID
 }
 
 // GetRemotePath returns remote file identifier (using slave:// protocol format).
@@ -172,12 +170,13 @@ func FormatSlaveFilePath(slaveID, filePath string) string {
 
 // TaskRequest task request structure.
 type TaskRequest struct {
-	TaskID          string    `json:"task_id"`
-	StartTime       time.Time `json:"start_time"`
-	EndTime         time.Time `json:"end_time"`
-	ScanFolders     []string  `json:"scan_folders"`
-	AdditionalFiles []string  `json:"additional_files"`
-	WhiteList       []string  `json:"whitelist,omitempty"`
+	TaskID              string    `json:"task_id"`
+	StartTime           time.Time `json:"start_time"`
+	EndTime             time.Time `json:"end_time"`
+	ScanFolders         []string  `json:"scan_folders"`
+	AdditionalFiles     []string  `json:"additional_files"`
+	WhiteList           []string  `json:"whitelist,omitempty"`
+	RecursivelyWalkDirs bool      `json:"recursively_walk_dirs,omitempty"`
 }
 
 // TaskResponse task response structure.

@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/slave"
@@ -87,11 +88,31 @@ The slave node will:
 				}
 			}()
 
-			// Register to master and start heartbeat
+			// Register to master and start heartbeat with retry logic
 			go func() {
-				if err := client.RegisterAndStartHeartbeat(ctx); err != nil {
-					log.Errorf("Failed to register with master: %v", err)
-					cancel()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+						if err := client.RegisterAndStartHeartbeat(ctx); err != nil {
+							log.Errorf("Failed to register with master: %v", err)
+							log.Info("Will retry registration in 30 seconds...")
+
+							// Wait 30 seconds before retrying, but respect context cancellation
+							select {
+							case <-ctx.Done():
+								return
+							case <-time.After(30 * time.Second):
+								log.Info("Retrying registration with master...")
+								continue
+							}
+						} else {
+							// Registration successful, heartbeat will continue in background
+							log.Info("Successfully registered with master, heartbeat started")
+							return
+						}
+					}
 				}
 			}()
 

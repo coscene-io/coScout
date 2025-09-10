@@ -1,9 +1,26 @@
+// Copyright 2025 coScene
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package upload
 
 import (
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/djherbis/times"
@@ -189,4 +206,79 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 	}
 
 	return files, noPermissionFolders
+}
+
+func ComputeRuleFileInfos(fileStates []file_state_handler.FileState) map[string]model.FileInfo {
+	files := make(map[string]model.FileInfo)
+	for _, fileState := range fileStates {
+		if !fileState.IsDir {
+			realPath, info, err := utils.GetRealFileInfo(fileState.Pathname)
+			if err != nil {
+				log.Errorf("failed to stat file %s: %v", realPath, err)
+				continue
+			}
+
+			fileName := filepath.Base(realPath)
+			switch {
+			case strings.HasSuffix(fileName, ".bag"):
+				fileName = path.Join("bag", fileName)
+			case strings.HasSuffix(fileName, ".log"):
+				fileName = path.Join("log", fileName)
+			case strings.HasSuffix(fileName, ".mcap"):
+				fileName = path.Join("mcap", fileName)
+			default:
+				fileName = path.Join("files", fileName)
+			}
+
+			files[realPath] = model.FileInfo{
+				FileName: fileName,
+				Size:     info.Size(),
+				Path:     realPath,
+			}
+			continue
+		}
+
+		realPath, _, err := utils.GetRealFileInfo(fileState.Pathname)
+		if err != nil {
+			log.Errorf("failed to stat dir %s: %v", realPath, err)
+			continue
+		}
+		baseDir := filepath.Dir(realPath)
+		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: true,
+			SkipEmptyFiles:       true,
+			MaxFiles:             99999,
+		})
+		if err != nil {
+			log.Errorf("failed to get all file paths: %v", err)
+			continue
+		}
+
+		for _, filePath := range filePaths {
+			realPath, info, err := utils.GetRealFileInfo(filePath)
+			if err != nil {
+				log.Errorf("failed to stat file %s: %v", realPath, err)
+				continue
+			}
+
+			if info.IsDir() {
+				continue
+			}
+
+			filename, err := filepath.Rel(baseDir, realPath)
+			if err != nil {
+				log.Errorf("failed to get relative path: %v", err)
+				filename = filepath.Base(realPath)
+			}
+
+			files[realPath] = model.FileInfo{
+				FileName: filename,
+				Size:     info.Size(),
+				Path:     realPath,
+			}
+		}
+	}
+
+	return files
 }

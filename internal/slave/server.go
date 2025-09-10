@@ -24,8 +24,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/master"
-	"github.com/coscene-io/coscout/internal/mod/rule/file_handlers"
+	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
+	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/pkg/errors"
@@ -37,7 +40,8 @@ type Server struct {
 	server     *http.Server
 	port       int
 	filePrefix string
-	handlers   []file_handlers.Interface
+	// collectFileStateHandler caches file metadata and content time
+	collectFileStateHandler file_state_handler.FileStateHandler
 }
 
 // NewServer creates a new slave server.
@@ -55,11 +59,14 @@ func NewServer(port int, filePrefix string) *Server {
 		server:     server,
 		port:       port,
 		filePrefix: filePrefix,
-		handlers:   []file_handlers.Interface{},
 	}
 
-	// Register file handlers
-	s.registerHandlers()
+	// Initialize collect file state handler for content-based scans
+	if fsh, err := file_state_handler.New("slaveCollectFile.state.json"); err != nil {
+		log.Errorf("Failed to initialize file state handler: %v", err)
+	} else {
+		s.collectFileStateHandler = fsh
+	}
 
 	mux.HandleFunc("/api/v1/files/scan", s.handleFileScan)
 	mux.HandleFunc("/api/v1/files/scan-by-content", s.handleFileScanByContent)
@@ -134,6 +141,10 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Infof("Received file download request for %s", req.FilePath)
+	if !utils.CheckReadPath(req.FilePath) {
+		http.Error(w, "File no permission: "+req.FilePath, http.StatusBadRequest)
+		return
+	}
 
 	realPath, err := filepath.EvalSymlinks(req.FilePath)
 	if err != nil {
@@ -189,25 +200,6 @@ func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 	}
 }
 
-// registerHandlers registers the handlers for different file types.
-func (s *Server) registerHandlers() {
-	s.handlers = []file_handlers.Interface{
-		file_handlers.NewLogHandler(),
-		file_handlers.NewMcapHandler(),
-		file_handlers.NewRos1Handler(),
-	}
-}
-
-// getFileHandler returns the handler for a given file path.
-func (s *Server) getFileHandler(filePath string) file_handlers.Interface {
-	for _, handler := range s.handlers {
-		if handler.CheckFilePath(filePath) {
-			return handler
-		}
-	}
-	return nil
-}
-
 // handleFileScanByContent handles file scan requests based on file content time.
 func (s *Server) handleFileScanByContent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -222,8 +214,7 @@ func (s *Server) handleFileScanByContent(w http.ResponseWriter, r *http.Request)
 	}
 
 	log.Infof("Received file scan by content request: %+v", req)
-
-	files := s.scanFilesByContent(req.ScanFolders, req.AdditionalFiles, req.StartTime, req.EndTime)
+	files := s.scanFilesByContent(req.ScanFolders, req.AdditionalFiles, req.WhiteList, req.RecursivelyWalkDirs, req.StartTime, req.EndTime)
 	resp := master.TaskResponse{
 		TaskID:  req.TaskID,
 		Files:   files,
@@ -234,46 +225,81 @@ func (s *Server) handleFileScanByContent(w http.ResponseWriter, r *http.Request)
 }
 
 // scanFilesByContent scans files based on their content time rather than modification time.
-func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []string, startTime time.Time, endTime time.Time) []master.SlaveFileInfo {
-	// Get all files using the existing logic
-	files, noPermissionFiles := upload.ComputeUploadFiles(scanFolders, additionalFiles, startTime, endTime)
-	if len(noPermissionFiles) > 0 {
-		log.Warnf("Some files/folders are not readable: %v", noPermissionFiles)
+func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []string, whiteList []string, recursivelyWalkDirs bool, startTime time.Time, endTime time.Time) []master.SlaveFileInfo {
+	result := make([]master.SlaveFileInfo, 0)
+
+	if s.collectFileStateHandler == nil {
+		log.Errorf("collect file state handler is nil")
+		return result
 	}
 
-	result := make([]master.SlaveFileInfo, 0)
-	for _, file := range files {
-		// Get the handler for this file
-		handler := s.getFileHandler(file.Path)
-		if handler == nil {
-			// No handler available, skip this file
-			log.Debugf("No handler available for file: %s", file.Path)
-			continue
-		}
+	// Update cache via file_state_handler using provided scan folders
+	conf := config.DefaultModConfConfig{
+		CollectDirs:         scanFolders,
+		RecursivelyWalkDirs: recursivelyWalkDirs,
+	}
+	if err := s.collectFileStateHandler.UpdateCollectDirs(conf); err != nil {
+		log.Errorf("file state handler update collect dirs: %v", err)
+		return result
+	}
 
-		// Get start and end time from file content
-		fileStartTime, fileEndTime, err := handler.GetStartTimeEndTime(file.Path)
+	// Build filters: collecting + time overlap
+	uploadWhiteListFilter := func(filename string, _ file_state_handler.FileState) bool {
+		if len(whiteList) == 0 {
+			return true
+		}
+		for _, pattern := range whiteList {
+			matched, err := doublestar.PathMatch(pattern, filename)
+			if err == nil && matched {
+				return true
+			}
+		}
+		return false
+	}
+	filters := []file_state_handler.FileFilter{
+		file_state_handler.FilterIsCollecting(),
+		file_state_handler.FilterTime(startTime.Unix(), endTime.Unix()),
+		uploadWhiteListFilter,
+	}
+	fileStates := s.collectFileStateHandler.Files(filters...)
+	log.Infof("Scanning %d files in fileStates", len(fileStates))
+
+	for _, extraFileRaw := range additionalFiles {
+		extraFileAbs, err := filepath.Abs(extraFileRaw)
 		if err != nil {
-			log.Errorf("Failed to get start/end time for file %s: %v", file.Path, err)
+			log.Errorf("get abs path for extra file: %v", err)
 			continue
 		}
 
-		// Check if file time range overlaps with requested time range
-		if fileStartTime.After(endTime) || fileEndTime.Before(startTime) {
-			log.Debugf("File %s time range [%v, %v] does not overlap with requested range [%v, %v]",
-				file.Path, fileStartTime, fileEndTime, startTime, endTime)
+		if !utils.CheckReadPath(extraFileAbs) {
+			log.Warnf("Path %s is not readable, skip!", extraFileAbs)
 			continue
 		}
 
-		// Update file info with content-based times
-		file.FileName = filepath.Join(s.filePrefix, file.FileName)
-
-		info := master.SlaveFileInfo{
-			FileInfo:  file,
-			StartTime: *fileStartTime,
-			EndTime:   *fileEndTime,
+		realPath, fileInfo, err := utils.GetRealFileInfo(extraFileAbs)
+		if err != nil {
+			log.Errorf("get real file info for extra file: %v", err)
+			continue
 		}
-		result = append(result, info)
+
+		fileStates = append(fileStates, file_state_handler.FileState{
+			Size:     fileInfo.Size(),
+			IsDir:    fileInfo.IsDir(),
+			Pathname: realPath,
+		})
+	}
+
+	localFiles := upload.ComputeRuleFileInfos(fileStates)
+	for _, file := range localFiles {
+		fileName := filepath.Join(s.filePrefix, file.FileName)
+		result = append(result, master.SlaveFileInfo{
+			FileInfo: model.FileInfo{
+				Path:     file.Path,
+				Size:     file.Size,
+				Sha256:   file.Sha256,
+				FileName: fileName,
+			},
+		})
 	}
 
 	log.Infof("Found %d files matching content time range", len(result))

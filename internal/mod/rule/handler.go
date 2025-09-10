@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -36,6 +35,7 @@ import (
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
+	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -372,14 +372,14 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 			}
 
 			log.Infof("Found collect info: %v", collectInfoId)
-			c.handleCollectInfo(*collectInfo, modConfig.CollectDirs)
+			c.handleCollectInfo(*collectInfo, *modConfig)
 		}
 	}
 	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
 }
 
 // handleCollectInfo handles a single the collect info.
-func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, collectDirs []string) {
+func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig config.DefaultModConfConfig) {
 	if info.Skip {
 		log.Infof("Skipping collect info: %v, cleaning", info.Id)
 		info.Clean()
@@ -427,12 +427,13 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, collectDir
 		defer cancel()
 
 		taskReq := &master.TaskRequest{
-			TaskID:          info.Id,
-			StartTime:       time.Unix(info.Cut.Start, 0),
-			EndTime:         time.Unix(info.Cut.End, 0),
-			ScanFolders:     collectDirs,
-			AdditionalFiles: info.Cut.ExtraFiles,
-			WhiteList:       info.Cut.WhiteList,
+			TaskID:              info.Id,
+			StartTime:           time.Unix(info.Cut.Start, 0),
+			EndTime:             time.Unix(info.Cut.End, 0),
+			ScanFolders:         modConfig.CollectDirs,
+			AdditionalFiles:     info.Cut.ExtraFiles,
+			WhiteList:           info.Cut.WhiteList,
+			RecursivelyWalkDirs: modConfig.RecursivelyWalkDirs,
 		}
 
 		responses := c.masterClient.RequestAllSlaveFilesByContent(ctx, c.slaveRegistry, taskReq)
@@ -471,7 +472,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, collectDir
 	}
 
 	// Merge local and slave files
-	localFiles := computeFileInfos(uploadFileStates)
+	localFiles := upload.ComputeRuleFileInfos(uploadFileStates)
 	allFiles := make(map[string]model.FileInfo)
 
 	// Add local files
@@ -556,83 +557,6 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, collectDir
 	if err != nil {
 		log.Errorf("Failed to publish collect message: %v", err)
 	}
-}
-
-// computeFileInfos computes the fileInfos given the fileStates.
-func computeFileInfos(fileStates []file_state_handler.FileState) map[string]model.FileInfo {
-	files := make(map[string]model.FileInfo)
-	for _, fileState := range fileStates {
-		if !fileState.IsDir {
-			realPath, info, err := utils.GetRealFileInfo(fileState.Pathname)
-			if err != nil {
-				log.Errorf("failed to stat file %s: %v", realPath, err)
-				continue
-			}
-
-			fileName := filepath.Base(realPath)
-			switch {
-			case strings.HasSuffix(fileName, ".bag"):
-				fileName = path.Join("bag", fileName)
-			case strings.HasSuffix(fileName, ".log"):
-				fileName = path.Join("log", fileName)
-			case strings.HasSuffix(fileName, ".mcap"):
-				fileName = path.Join("mcap", fileName)
-			default:
-				fileName = path.Join("files", fileName)
-			}
-
-			files[realPath] = model.FileInfo{
-				FileName: fileName,
-				Size:     info.Size(),
-				Path:     realPath,
-			}
-			continue
-		}
-
-		realPath, _, err := utils.GetRealFileInfo(fileState.Pathname)
-		if err != nil {
-			log.Errorf("failed to stat dir %s: %v", realPath, err)
-			continue
-		}
-		baseDir := filepath.Dir(realPath)
-		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
-			FollowSymlinks:       true,
-			SkipPermissionErrors: true,
-			SkipEmptyFiles:       true,
-			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.Errorf("failed to get all file paths: %v", err)
-			continue
-		}
-
-		for _, filePath := range filePaths {
-			realPath, info, err := utils.GetRealFileInfo(filePath)
-			if err != nil {
-				log.Errorf("failed to stat file %s: %v", realPath, err)
-				continue
-			}
-
-			if info.IsDir() {
-				continue
-			}
-
-			filename, err := filepath.Rel(baseDir, realPath)
-			if err != nil {
-				log.Errorf("failed to get relative path: %v", err)
-				filename = filepath.Base(realPath)
-			}
-
-			files[realPath] = model.FileInfo{
-				FileName: filename,
-				Size:     info.Size(),
-				Path:     realPath,
-			}
-		}
-		log.Errorf("failed to walk through dir %s: %v", realPath, err)
-	}
-
-	return files
 }
 
 // EnhanceRuleHandlerWithMasterSlave adds master-slave support to rule handler.
