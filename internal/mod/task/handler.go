@@ -318,6 +318,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				Size:     info.Size(),
 				Path:     realPath,
 			}
+
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 
@@ -344,12 +346,12 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				continue
 			}
 
+			time.Sleep(10 * time.Millisecond)
 			if !utils.CheckReadPath(realPath) {
 				log.Warnf("Path %s is not readable, skip!", realPath)
 				continue
 			}
 
-			log.Infof("file %s, mod time: %s", realPath, info.ModTime().String())
 			//nolint: nestif // check file modification time
 			if info.ModTime().After(startTime) && info.ModTime().Before(endTime) {
 				filename, err := filepath.Rel(folder, realPath)
@@ -371,7 +373,6 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				}
 
 				if stat.HasBirthTime() {
-					log.Infof("File %s has birth time: %s", realPath, stat.BirthTime().String())
 					if stat.BirthTime().After(startTime) && stat.BirthTime().Before(endTime) {
 						filename, err := filepath.Rel(folder, realPath)
 						if err != nil {
@@ -417,6 +418,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				Size:     info.Size(),
 				Path:     realPath,
 			}
+
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 
@@ -446,6 +449,7 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				continue
 			}
 
+			time.Sleep(10 * time.Millisecond)
 			if !utils.CheckReadPath(realPath) {
 				log.Warnf("Path %s is not readable, skip!", realPath)
 				continue

@@ -17,6 +17,7 @@ package commands
 import (
 	"os"
 	"os/signal"
+	"runtime"
 	"sync/atomic"
 	"syscall"
 
@@ -34,11 +35,16 @@ type authState struct {
 	isAuthed atomic.Bool
 }
 
-func NewDaemonCommand(cfgPath *string) *cobra.Command {
+func NewDaemonCommand(cfgPath *string, maxProcs int) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run coScout as a daemon",
 		Run: func(cmd *cobra.Command, args []string) {
+			if maxProcs > 0 {
+				runtime.GOMAXPROCS(maxProcs)
+				log.Infof("Set GOMAXPROCS to %d", maxProcs)
+			}
+
 			storageDB := storage.NewBoltDB(config.GetDBPath())
 			confManager := config.InitConfManager(*cfgPath, &storageDB)
 

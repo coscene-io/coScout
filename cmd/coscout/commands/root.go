@@ -20,8 +20,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/coscene-io/coscout"
+	internallog "github.com/coscene-io/coscout/internal/log"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -33,6 +35,7 @@ func NewCommand() *cobra.Command {
 		cfgPath   = ""
 		logLevel  = ""
 		logFolder = ""
+		maxProcs  = 0
 	)
 
 	cmd := &cobra.Command{
@@ -63,13 +66,34 @@ func NewCommand() *cobra.Command {
 					log.Fatalf("Failed to create log directory: %v", err)
 				}
 
-				log.SetOutput(&lumberjack.Logger{
+				// Use lumberjack for log rotation
+				lumberjackLogger := &lumberjack.Logger{
 					Filename:   logFilepath,
 					MaxSize:    20,
 					MaxBackups: 5,
 					MaxAge:     30,
 					Compress:   false,
 					LocalTime:  true,
+				}
+
+				// Wrap with buffer layer to reduce syscalls
+				// 64KB buffer, 100ms flush interval
+				bufferedWriter := internallog.NewBufferedWriter(
+					lumberjackLogger,
+					64*1024, // 64KB buffer
+					time.Second,
+				)
+
+				log.SetOutput(bufferedWriter)
+				cobra.OnFinalize(func() {
+					err := bufferedWriter.Flush()
+					if err != nil {
+						log.Errorf("Failed to flush buffered writer: %v", err)
+					}
+					err = lumberjackLogger.Close()
+					if err != nil {
+						log.Errorf("Failed to close lumberjack logger: %v", err)
+					}
 				})
 			}
 		},
@@ -80,8 +104,9 @@ func NewCommand() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&cfgPath, "config-path", "c", defaultConfigPath, "config path")
 	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "set the logging level, one of: debug|info|warn|error")
 	cmd.PersistentFlags().StringVarP(&logFolder, "log-dir", "l", "", "log file directory")
+	cmd.PersistentFlags().IntVarP(&maxProcs, "max-procs", "p", 0, "set the maximum number of CPUs to use. Default is all available CPUs")
 
 	cmd.AddCommand(NewVersionCommand())
-	cmd.AddCommand(NewDaemonCommand(&cfgPath))
+	cmd.AddCommand(NewDaemonCommand(&cfgPath, maxProcs))
 	return cmd
 }

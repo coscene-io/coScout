@@ -229,6 +229,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	})
 
 	for _, fileInfo := range toUploadFiles {
+		time.Sleep(10 * time.Millisecond) // sleep a while to avoid cpu usage too high
 		filePath := fileInfo.Path
 
 		recordCache, err := recordCache.Reload()

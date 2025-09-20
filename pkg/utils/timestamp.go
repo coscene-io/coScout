@@ -15,38 +15,32 @@
 package utils
 
 import (
+	"math"
 	"time"
 )
 
 // NormalizeFloatTimestamp normalizes a floating-point timestamp to seconds and nanoseconds.
 // keep the precision of the timestamp with microseconds precision.
 func NormalizeFloatTimestamp(timestamp float64) (int64, int32) {
+	var sec float64
+	var nsec float64
+
 	switch {
-	case timestamp >= 1_000_000_000_000_000_000:
-		// timestamp in nanoseconds
-		sec := int64(timestamp / 1_000_000_000)
-		nsec := (int64(timestamp/1000) - sec*1_000_000) * 1_000
-		//nolint: gosec // ignore int64 to int32 conversion
-		return sec, int32(nsec)
-	case timestamp >= 1_000_000_000_000_000:
-		// timestamp in microseconds
-		sec := int64(timestamp / 1_000_000)
-		nsec := (int64(timestamp) - sec*1_000_000) * 1_000
-		//nolint: gosec // ignore int64 to int32 conversion
-		return sec, int32(nsec)
-	case timestamp >= 1_000_000_000_000:
-		// timestamp in milliseconds
-		sec := int64(timestamp / 1_000)
-		nsec := (int64(timestamp*1_000) - sec*1_000_000) * 1_000
-		//nolint: gosec // ignore int64 to int32 conversion
-		return sec, int32(nsec)
-	default:
-		// timestamp in seconds, with microseconds precision
-		sec := int64(timestamp)
-		nsec := (int64(timestamp*1000_000) - sec*1_000_000) * 1_000
-		//nolint: gosec // ignore int64 to int32 conversion
-		return sec, int32(nsec)
+	case timestamp >= 1e18: // nanoseconds
+		sec = timestamp / 1e9
+		nsec = math.Mod(timestamp, 1e9)
+	case timestamp >= 1e15: // microseconds
+		sec = timestamp / 1e6
+		nsec = math.Mod(timestamp, 1e6) * 1e3
+	case timestamp >= 1e12: // milliseconds
+		sec = timestamp / 1e3
+		nsec = math.Mod(timestamp, 1e3) * 1e6
+	default: // seconds
+		sec, nsec = math.Modf(timestamp)
+		nsec *= 1e9
 	}
+
+	return int64(sec), int32(nsec)
 }
 
 // TimeFromFloat converts a floating-point timestamp to a time.Time instance.

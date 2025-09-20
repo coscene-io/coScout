@@ -318,6 +318,8 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 			}
 
 			for _, entryPath := range filePaths {
+				time.Sleep(5 * time.Millisecond)
+
 				// Check if the entry is readable
 				if !utils.CheckReadPath(entryPath) {
 					log.Warnf("Skipping file %s due to insufficient permissions", entryPath)
@@ -342,6 +344,7 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 			}
 
 			for _, entry := range entries {
+				time.Sleep(5 * time.Millisecond)
 				if entry.IsDir() {
 					continue
 				}
@@ -430,6 +433,7 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 			}
 
 			for _, entryPath := range filePaths {
+				time.Sleep(5 * time.Millisecond)
 				// Check if the entry is readable
 				if !utils.CheckReadPath(entryPath) {
 					log.Warnf("Skipping file %s due to insufficient permissions", entryPath)
@@ -454,6 +458,8 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 			}
 
 			for _, entry := range entries {
+				time.Sleep(5 * time.Millisecond)
+
 				if entry.IsDir() {
 					continue
 				}
