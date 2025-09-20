@@ -190,7 +190,6 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 
 	// upload all record caches
 	for _, record := range records {
-		time.Sleep(10 * time.Millisecond)
 		log.Infof("Processing record cache: %s", record)
 
 		if !utils.CheckReadPath(record) {

@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
-	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
 	gcmessage "github.com/ThreeDotsLabs/watermill/message"
@@ -81,7 +80,6 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 				continue
 			}
 
-			time.Sleep(10 * time.Millisecond)
 			msg := gcmessage.NewMessage(watermill.NewUUID(), data)
 			if err := pubSub.Publish(constant.TopicRuleMsg, msg); err != nil {
 				log.Errorf("Failed to publish message: %v", err)
