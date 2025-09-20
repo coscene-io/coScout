@@ -35,14 +35,15 @@ type authState struct {
 	isAuthed atomic.Bool
 }
 
-func NewDaemonCommand(cfgPath *string, maxProcs int) *cobra.Command {
+func NewDaemonCommand(cfgPath *string, maxProcs *int) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run coScout as a daemon",
 		Run: func(cmd *cobra.Command, args []string) {
-			if maxProcs > 0 {
-				runtime.GOMAXPROCS(maxProcs)
-				log.Infof("Set GOMAXPROCS to %d", maxProcs)
+			log.Infof("maxProcs is set to %d", *maxProcs)
+			if *maxProcs > 0 {
+				runtime.GOMAXPROCS(*maxProcs)
+				log.Infof("Set GOMAXPROCS to %d", *maxProcs)
 			}
 
 			storageDB := storage.NewBoltDB(config.GetDBPath())

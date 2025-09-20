@@ -107,6 +107,6 @@ func NewCommand() *cobra.Command {
 	cmd.PersistentFlags().IntVarP(&maxProcs, "max-procs", "p", 0, "set the maximum number of CPUs to use. Default is all available CPUs")
 
 	cmd.AddCommand(NewVersionCommand())
-	cmd.AddCommand(NewDaemonCommand(&cfgPath, maxProcs))
+	cmd.AddCommand(NewDaemonCommand(&cfgPath, &maxProcs))
 	return cmd
 }
