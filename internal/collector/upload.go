@@ -244,6 +244,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 		if !utils.CheckReadPath(filePath) {
 			log.Warnf("local file %s not exist", filePath)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 

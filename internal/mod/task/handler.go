@@ -292,6 +292,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 	noPermissionFolders := make([]string, 0)
 
 	for _, folder := range scanFolders {
+		time.Sleep(20 * time.Millisecond)
+
 		if !utils.CheckReadPath(folder) {
 			log.Warnf("Path %s is not readable, skip!", folder)
 
@@ -318,8 +320,6 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				Size:     info.Size(),
 				Path:     realPath,
 			}
-
-			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 
@@ -335,6 +335,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 		}
 
 		for _, path := range filePaths {
+			time.Sleep(20 * time.Millisecond)
+
 			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
 				continue
@@ -346,7 +348,6 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				continue
 			}
 
-			time.Sleep(10 * time.Millisecond)
 			if !utils.CheckReadPath(realPath) {
 				log.Warnf("Path %s is not readable, skip!", realPath)
 				continue
@@ -392,6 +393,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 	}
 
 	for _, file := range additionalFiles {
+		time.Sleep(20 * time.Millisecond)
+
 		if !utils.CheckReadPath(file) {
 			log.Warnf("Path %s is not readable, skip!", file)
 
@@ -418,8 +421,6 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				Size:     info.Size(),
 				Path:     realPath,
 			}
-
-			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 
@@ -438,6 +439,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 		}
 
 		for _, path := range filePaths {
+			time.Sleep(20 * time.Millisecond)
+
 			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
 				continue
