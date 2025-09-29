@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250915074700-e5499cd30e76.1
 	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.9-20250915074700-e5499cd30e76.1
-	connectrpc.com/connect v1.18.1
+	connectrpc.com/connect v1.19.0
 	github.com/ThreeDotsLabs/watermill v1.5.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/deckarep/golang-set/v2 v2.8.0

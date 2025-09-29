@@ -54,6 +54,7 @@ func (c *CustomHttpHandler) Run(ctx context.Context) {
 	router.HandleFunc("/config/setLogLevel", server.LogConfigHandler()).Methods("POST")
 	router.HandleFunc("/config/setUploadStatus", server.UploadConfigHandler(c.confManager)).Methods("POST")
 	router.HandleFunc("/config/getUploadStatus", server.GetUploadConfigHandler(c.confManager)).Methods("GET")
+	router.HandleFunc("/device/info", server.DeviceInfoHandler(c.confManager)).Methods("GET")
 
 	srv := &http.Server{
 		Addr:         "127.0.0.1:" + strconv.Itoa(serverPort),
