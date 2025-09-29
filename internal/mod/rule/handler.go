@@ -338,6 +338,8 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 
 	collectInfoIds := make([]string, 0)
 	for _, entry := range entries {
+		time.Sleep(10 * time.Millisecond)
+
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}

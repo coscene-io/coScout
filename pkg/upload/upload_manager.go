@@ -93,18 +93,7 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 		uploadedSizeKey := fmt.Sprintf(uploadedSizeKeyTemplate, absPath)
 		partsKey := fmt.Sprintf(partsKeyTemplate, absPath)
 
-		err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
-		if err != nil {
-			log.Errorf("Delete upload id failed: %v", err)
-		}
-		err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
-		if err != nil {
-			log.Errorf("Delete parts failed: %v", err)
-		}
-		err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
-		if err != nil {
-			log.Errorf("Delete uploaded size failed: %v", err)
-		}
+		u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 	}
 
 	if filesize > int64(minPartSize) {
@@ -195,7 +184,6 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	if err != nil {
 		log.Debugf("Get uploaded size by: %s warn: %v", uploadedSizeKey, err)
 	}
-	//nolint: nestif // readability
 	if uploadedSizeBytes != nil {
 		uploadedSize, err = strconv.ParseInt(string(uploadedSizeBytes), 10, 64)
 		if err != nil {
@@ -206,21 +194,8 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 			log.Warnf("Cached uploaded size %d exceeds file size %d, resetting to 0", uploadedSize, fileSize)
 			uploadedSize = 0
 
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
-			if err != nil {
-				log.Errorf("Delete uploaded size failed: %v", err)
-			}
-
-			// Reset uploadId and parts as well
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
-			if err != nil {
-				log.Errorf("Delete upload id failed: %v", err)
-			}
-
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
-			if err != nil {
-				log.Errorf("Delete parts failed: %v", err)
-			}
+			// reset all cached info
+			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 		}
 	} else {
 		uploadedSize = 0
@@ -300,43 +275,21 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 			_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 			if err != nil {
 				log.Errorf("Complete multipart upload failed: %v", err)
+				if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) {
+					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+				}
+
 				return errors.Wrapf(err, "Complete multipart upload failed")
 			}
 
-			// Clean up cache entries
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
-			if err != nil {
-				log.Errorf("Delete upload id failed: %v", err)
-			}
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
-			if err != nil {
-				log.Errorf("Delete parts failed: %v", err)
-			}
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
-			if err != nil {
-				log.Errorf("Delete uploaded size failed: %v", err)
-			}
-
+			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 			return nil
 		} else {
 			// Parts count or size mismatch - need to re-upload
 			log.Warnf("File: %s, parts/size mismatch (total parts: %d, uploaded parts: %d, uploaded size: %d, file size: %d), clearing cache",
 				filePath, totalPartsCount, len(partNumbers), uploadedSize, fileSize)
 
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
-			if err != nil {
-				log.Errorf("Delete uploaded size failed: %v", err)
-			}
-
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
-			if err != nil {
-				log.Errorf("Delete upload id failed: %v", err)
-			}
-
-			err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
-			if err != nil {
-				log.Errorf("Delete parts failed: %v", err)
-			}
+			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 			return errors.New("File parts/size mismatch, need to re-upload all parts")
 		}
 	}
@@ -443,21 +396,9 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 		case <-ctx.Done():
 			return ctx.Err()
 		case uploadRes := <-uploadedPartsCh:
-			//nolint: nestif // readability
 			if uploadRes.Error != nil {
 				if strings.Contains(strings.ToLower(uploadRes.Error.Error()), strings.ToLower("Invalid upload id")) {
-					err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
-					if err != nil {
-						return errors.Wrapf(err, "Delete upload id failed")
-					}
-					err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
-					if err != nil {
-						return errors.Wrapf(err, "Delete parts failed")
-					}
-					err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
-					if err != nil {
-						return errors.Wrapf(err, "Delete uploaded size failed")
-					}
+					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 				}
 				return uploadRes.Error
 			}
@@ -509,23 +450,32 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 	if err != nil {
 		log.Errorf("Complete multipart upload failed: %v", err)
+		if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) {
+			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+			return errors.Wrapf(err, "Complete multipart upload failed with invalid upload id, cache cleared")
+		}
+
 		return errors.Wrapf(err, "Complete multipart upload failed")
 	}
 
-	err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
+	u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+	return nil
+}
+
+// cleanUploadCache cleans up all upload-related cache entries.
+func (u *Manager) cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey string) {
+	err := (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadIdKey))
 	if err != nil {
-		return errors.Wrapf(err, "Delete upload id failed")
+		log.Errorf("Delete upload id failed: %v", err)
 	}
 	err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(partsKey))
 	if err != nil {
-		return errors.Wrapf(err, "Delete parts failed")
+		log.Errorf("Delete parts failed: %v", err)
 	}
 	err = (*u.storage).Delete([]byte(u.cacheBucket), []byte(uploadedSizeKey))
 	if err != nil {
-		return errors.Wrapf(err, "Delete uploaded size failed")
+		log.Errorf("Delete uploaded size failed: %v", err)
 	}
-
-	return nil
 }
 
 type uploadProgressReader struct {
