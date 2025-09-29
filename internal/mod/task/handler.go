@@ -377,10 +377,11 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				if stat.HasBirthTime() {
 					log.Infof("File %s has birth time: %s", realPath, stat.BirthTime().String())
 					// birth time and modification time has intersection with the task time range
-					// include the file
-					// e.g. task time range is [10, 20], file birth time is 9, modification time is 15
-					// e.g. task time range is [10, 20], file birth time is 25, modification time is 15
-					if stat.BirthTime().Before(endTime) && info.ModTime().After(startTime) {
+					// birth time may be later than modification time, for example, copy a file from another disk
+					// if birth time is before modification time, then birth time should be before end time and modification time should be after start time
+					// if birth time is after modification time, then birth time should be after start time and modification time should be before end time
+					if (stat.BirthTime().Before(info.ModTime()) && stat.BirthTime().Before(endTime) && info.ModTime().After(startTime)) ||
+						(stat.BirthTime().After(info.ModTime()) && stat.BirthTime().After(startTime) && info.ModTime().Before(endTime)) {
 						filename, err := filepath.Rel(folder, realPath)
 						if err != nil {
 							log.Errorf("Failed to get relative path: %v", err)
