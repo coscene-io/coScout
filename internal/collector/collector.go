@@ -559,6 +559,7 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 	record, err := reqClient.CreateRecord(recordCache.ProjectName, record)
 	if err != nil {
 		log.Errorf("create record failed: %v", err)
+		return
 	}
 	recordCache.Record = map[string]interface{}{
 		"name":        record.GetName(),

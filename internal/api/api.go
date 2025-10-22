@@ -420,8 +420,8 @@ func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.
 
 	apiRes, err := r.rcdCli.CreateRecord(ctx, apiReq)
 	if err != nil {
-		log.Errorf("unable to save record cache: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to save record cache"))
+		log.Errorf("unable to create record: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to create record"))
 	}
 
 	return apiRes.Msg, nil
