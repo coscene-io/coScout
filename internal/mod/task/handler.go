@@ -292,6 +292,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 	noPermissionFolders := make([]string, 0)
 
 	for _, folder := range scanFolders {
+		time.Sleep(20 * time.Millisecond)
+
 		if !utils.CheckReadPath(folder) {
 			log.Warnf("Path %s is not readable, skip!", folder)
 
@@ -333,6 +335,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 		}
 
 		for _, path := range filePaths {
+			time.Sleep(20 * time.Millisecond)
+
 			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
 				continue
@@ -372,7 +376,12 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 
 				if stat.HasBirthTime() {
 					log.Infof("File %s has birth time: %s", realPath, stat.BirthTime().String())
-					if stat.BirthTime().After(startTime) && stat.BirthTime().Before(endTime) {
+					// birth time and modification time has intersection with the task time range
+					// birth time may be later than modification time, for example, copy a file from another disk
+					// if birth time is before modification time, then birth time should be before end time and modification time should be after start time
+					// if birth time is after modification time, then birth time should be after start time and modification time should be before end time
+					if (stat.BirthTime().Before(info.ModTime()) && stat.BirthTime().Before(endTime) && info.ModTime().After(startTime)) ||
+						(stat.BirthTime().After(info.ModTime()) && stat.BirthTime().After(startTime) && info.ModTime().Before(endTime)) {
 						filename, err := filepath.Rel(folder, realPath)
 						if err != nil {
 							log.Errorf("Failed to get relative path: %v", err)
@@ -391,6 +400,8 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 	}
 
 	for _, file := range additionalFiles {
+		time.Sleep(20 * time.Millisecond)
+
 		if !utils.CheckReadPath(file) {
 			log.Warnf("Path %s is not readable, skip!", file)
 
@@ -435,8 +446,11 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 		}
 
 		for _, path := range filePaths {
+			time.Sleep(20 * time.Millisecond)
+
 			if !utils.CheckReadPath(path) {
 				log.Warnf("Path %s is not readable, skip!", path)
+				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 
@@ -448,6 +462,7 @@ func computeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 
 			if !utils.CheckReadPath(realPath) {
 				log.Warnf("Path %s is not readable, skip!", realPath)
+				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 

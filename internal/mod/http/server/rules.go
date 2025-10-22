@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
 	gcmessage "github.com/ThreeDotsLabs/watermill/message"
@@ -73,6 +74,8 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 		})
 
 		for _, message := range req.Messages {
+			time.Sleep(10 * time.Millisecond)
+
 			message.Source = "http"
 			data, err := json.Marshal(message)
 			if err != nil {

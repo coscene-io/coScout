@@ -229,6 +229,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	})
 
 	for _, fileInfo := range toUploadFiles {
+		time.Sleep(10 * time.Millisecond) // sleep a while to avoid too many files uploaded at the same time
 		filePath := fileInfo.Path
 
 		recordCache, err := recordCache.Reload()
@@ -243,11 +244,13 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 		if !utils.CheckReadPath(filePath) {
 			log.Warnf("local file %s not exist", filePath)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
 		if lo.Contains(recordCache.UploadedFilePaths, filePath) {
 			log.Infof("file %s has been uploaded, skip", filePath)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
