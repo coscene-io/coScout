@@ -519,7 +519,8 @@ func createRecordRelatedUploadTasks(_ *openDpsV1alpha1Resource.Device, rc *model
 }
 
 func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model.RecordCache, reqClient *api.RequestClient) {
-	if recordCache.Record["name"] != nil {
+	rcName, ok := recordCache.Record["name"].(string)
+	if ok && rcName != "" {
 		return
 	}
 
