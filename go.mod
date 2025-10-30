@@ -11,7 +11,7 @@ require (
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/djherbis/times v1.6.0
 	github.com/foxglove/go-rosbag v0.0.7
-	github.com/foxglove/mcap/go/mcap v1.7.3
+	github.com/foxglove/mcap/go/mcap v1.7.4
 	github.com/google/cel-go v0.26.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
