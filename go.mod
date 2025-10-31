@@ -5,34 +5,34 @@ go 1.24.4
 require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.18.1-20250613072610-46122efff246.1
 	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.6-20250613072610-46122efff246.1
-	connectrpc.com/connect v1.18.1
+	connectrpc.com/connect v1.19.1
 	github.com/ThreeDotsLabs/watermill v1.5.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/djherbis/times v1.6.0
 	github.com/foxglove/go-rosbag v0.0.7
-	github.com/foxglove/mcap/go/mcap v1.7.3
+	github.com/foxglove/mcap/go/mcap v1.7.4
 	github.com/google/cel-go v0.26.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
-	github.com/itchyny/timefmt-go v0.1.6
+	github.com/itchyny/timefmt-go v0.1.7
 	github.com/knadh/koanf/parsers/json v1.0.0
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
-	github.com/knadh/koanf/v2 v2.2.2
+	github.com/knadh/koanf/v2 v2.3.0
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/oriser/regroup v0.0.0-20240925165441-f6bb0e08289e
 	github.com/pkg/errors v0.9.1
-	github.com/samber/lo v1.51.0
+	github.com/samber/lo v1.52.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/sosodev/duration v1.3.1
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
-	golang.org/x/sys v0.36.0
-	golang.org/x/time v0.13.0
-	google.golang.org/protobuf v1.36.8
+	golang.org/x/sys v0.37.0
+	golang.org/x/time v0.14.0
+	google.golang.org/protobuf v1.36.10
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -46,7 +46,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.3.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect

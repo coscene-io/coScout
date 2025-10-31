@@ -62,12 +62,21 @@ type RequestClient struct {
 }
 
 func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, networkChan chan *model.NetworkUsage, registerChan chan model.DeviceStatusResponse) *RequestClient {
+	// Force TLS certificate verification for security. InsecureSkipVerify is always false.
+	if apiConfig.Insecure {
+		log.Warnf("insecure TLS configuration is deprecated and ignored. TLS certificate verification is now mandatory for security.")
+	}
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			TLSClientConfig: &tls.Config{
-				//nolint: gosec// make work in some old machines.
-				InsecureSkipVerify: apiConfig.Insecure,
+				// TLS certificate verification is mandatory for security.
+				// InsecureSkipVerify is always false to prevent MITM attacks.
+				InsecureSkipVerify: false,
+				// Minimum TLS version 1.2 is required for security.
+				// TLS 1.0 and 1.1 are deprecated (RFC 8996).
+				// TLS 1.3 will be used automatically if supported by the server.
+				MinVersion: tls.VersionTLS12,
 			},
 			ForceAttemptHTTP2: true,
 			IdleConnTimeout:   10 * time.Second,
@@ -420,8 +429,8 @@ func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.
 
 	apiRes, err := r.rcdCli.CreateRecord(ctx, apiReq)
 	if err != nil {
-		log.Errorf("unable to save record cache: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to save record cache"))
+		log.Errorf("unable to create record: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to create record"))
 	}
 
 	return apiRes.Msg, nil

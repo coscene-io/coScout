@@ -191,6 +191,7 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 
 	// upload all record caches
 	for _, record := range records {
+		time.Sleep(10 * time.Millisecond)
 		log.Infof("Processing record cache: %s", record)
 
 		if !utils.CheckReadPath(record) {
@@ -519,7 +520,8 @@ func createRecordRelatedUploadTasks(_ *openDpsV1alpha1Resource.Device, rc *model
 }
 
 func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model.RecordCache, reqClient *api.RequestClient) {
-	if recordCache.Record["name"] != nil {
+	rcName, ok := recordCache.Record["name"].(string)
+	if ok && rcName != "" {
 		return
 	}
 
@@ -558,6 +560,7 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 	record, err := reqClient.CreateRecord(recordCache.ProjectName, record)
 	if err != nil {
 		log.Errorf("create record failed: %v", err)
+		return
 	}
 	recordCache.Record = map[string]interface{}{
 		"name":        record.GetName(),

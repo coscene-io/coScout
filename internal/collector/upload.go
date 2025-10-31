@@ -232,6 +232,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	})
 
 	for _, fileInfo := range toUploadFiles {
+		time.Sleep(10 * time.Millisecond) // sleep a while to avoid too many files uploaded at the same time
 		filePath := fileInfo.Path
 
 		recordCache, err := recordCache.Reload()
@@ -246,11 +247,13 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 		if !isSlaveFile(filePath) && !utils.CheckReadPath(filePath) {
 			log.Warnf("local file %s not exist", filePath)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
 		if lo.Contains(recordCache.UploadedFilePaths, filePath) {
 			log.Infof("file %s has been uploaded, skip", filePath)
+			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
@@ -449,11 +452,20 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		return errors.New("generate security token endpoint is empty")
 	}
 
+	// Force TLS certificate verification for security. InsecureSkipVerify is always false.
+	if appConfig.Api.Insecure {
+		log.Warnf("insecure TLS configuration is deprecated and ignored. TLS certificate verification is now mandatory for security.")
+	}
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
-			//nolint: gosec// InsecureSkipVerify is used to skip certificate verification
-			InsecureSkipVerify: appConfig.Api.Insecure,
+			// TLS certificate verification is mandatory for security.
+			// InsecureSkipVerify is always false to prevent MITM attacks.
+			InsecureSkipVerify: false,
+			// Minimum TLS version 1.2 is required for security.
+			// TLS 1.0 and 1.1 are deprecated (RFC 8996).
+			// TLS 1.3 will be used automatically if supported by the server.
+			MinVersion: tls.VersionTLS12,
 		},
 		MaxIdleConns:          3,
 		IdleConnTimeout:       30 * time.Second,
