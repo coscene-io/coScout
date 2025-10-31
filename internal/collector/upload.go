@@ -438,11 +438,20 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 		return errors.New("generate security token endpoint is empty")
 	}
 
+	// Force TLS certificate verification for security. InsecureSkipVerify is always false.
+	if appConfig.Api.Insecure {
+		log.Warnf("insecure TLS configuration is deprecated and ignored. TLS certificate verification is now mandatory for security.")
+	}
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{
-			//nolint: gosec// InsecureSkipVerify is used to skip certificate verification
-			InsecureSkipVerify: appConfig.Api.Insecure,
+			// TLS certificate verification is mandatory for security.
+			// InsecureSkipVerify is always false to prevent MITM attacks.
+			InsecureSkipVerify: false,
+			// Minimum TLS version 1.2 is required for security.
+			// TLS 1.0 and 1.1 are deprecated (RFC 8996).
+			// TLS 1.3 will be used automatically if supported by the server.
+			MinVersion: tls.VersionTLS12,
 		},
 		MaxIdleConns:          3,
 		IdleConnTimeout:       30 * time.Second,

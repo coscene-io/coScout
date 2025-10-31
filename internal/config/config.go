@@ -49,7 +49,9 @@ type ApiConfig struct {
 	ServerURL   string `koanf:"server_url"   yaml:"server_url" json:"server_url"`
 	ProjectSlug string `koanf:"project_slug" yaml:"project_slug" json:"project_slug"`
 	OrgSlug     string `koanf:"org_slug"     yaml:"org_slug" json:"org_slug"`
-	Insecure    bool   `koanf:"insecure"     yaml:"insecure" json:"insecure"`
+	// Insecure is deprecated. TLS certificate verification is now mandatory for security.
+	// This field is kept for backward compatibility but is ignored at runtime.
+	Insecure bool `koanf:"insecure" yaml:"insecure" json:"insecure"`
 }
 
 type CollectorConfig struct {
