@@ -151,7 +151,7 @@ usage: $0 [OPTIONS]
     --coLink_endpoint       coLink endpoint, will skip if not provided
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
-    --skip_verify_cert      Skip verify certificate when download files
+    --skip_verify_cert      Skip verify certificate when download files (deprecated: runtime TLS verification is always enforced)
 EOF
 }
 
@@ -571,10 +571,8 @@ fi
 
 # create config file
 echo "Creating config file..."
-INSECURE=false
-if [[ $SKIP_VERIFY_CERT -eq 1 ]]; then
-  INSECURE=true
-fi
+# Note: insecure TLS configuration is deprecated. TLS certificate verification is now mandatory for security.
+# The SKIP_VERIFY_CERT option only affects file downloads during installation, not runtime API connections.
 
 # create config file ~/.config/cos/config.yaml
 sudo -u "$CUR_USER" tee "${COS_CONFIG_DIR}/config.yaml" >/dev/null <<EOL
@@ -582,7 +580,7 @@ api:
   server_url: $SERVER_URL
   project_slug: $PROJECT_SLUG
   org_slug: $ORG_SLUG
-  insecure: $INSECURE
+  insecure: false
 
 register:
   type: file
