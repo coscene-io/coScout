@@ -17,9 +17,12 @@ package slave
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -51,7 +54,15 @@ type Client struct {
 func NewClient(cfg *config.SlaveConfig) *Client {
 	slaveID := cfg.ID
 	if slaveID == "" {
-		slaveID = generateSlaveID()
+		// If IP is set, use it to generate a stable slaveID
+		if cfg.IP != "" {
+			slaveID = generateSlaveIDFromIP(cfg.IP)
+			log.Infof("Generated slaveID from IP %s: %s", cfg.IP, slaveID)
+		} else {
+			// Fallback to UUID if IP is not set
+			slaveID = generateSlaveID()
+			log.Warn("No IP address set, using random UUID for slaveID")
+		}
 	}
 
 	return &Client{
@@ -154,7 +165,7 @@ func (c *Client) startHeartbeat(ctx context.Context) {
 			if err := c.sendHeartbeat(ctx); err != nil {
 				log.Errorf("Failed to send heartbeat: %v", err)
 			} else {
-				log.Infof("Successfully send heartbeat to master %s", c.config.MasterAddr)
+				log.Infof("%s successfully send heartbeat to master %s", c.slaveID, c.config.MasterAddr)
 			}
 		case <-ctx.Done():
 			log.Info("Heartbeat stopped")
@@ -199,4 +210,37 @@ func (c *Client) sendHeartbeat(ctx context.Context) error {
 func generateSlaveID() string {
 	// Generate a new UUID and take the first 16 characters.
 	return uuid.New().String()[:16]
+}
+
+// generateSlaveIDFromIP generates a stable 16-character hex slaveID from an IP address.
+// The slaveID preserves IP information for easy debugging:
+//   - IPv4: First 8 chars are hex-encoded IP (e.g., 192.168.1.100 -> c0a80164),
+//     last 8 chars are checksum from SHA256 hash.
+//     To decode IPv4 from slaveID: parse first 8 hex chars as 4 octets.
+//     Example: "c0a80164" -> 192.168.1.100 (c0=192, a8=168, 01=1, 64=100)
+//   - IPv6: Uses SHA256 hash (first 16 chars) as IPv6 addresses are too long to encode directly
+func generateSlaveIDFromIP(ip string) string {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		// Invalid IP, fallback to hash
+		hash := sha256.Sum256([]byte(ip))
+		return hex.EncodeToString(hash[:])[:16]
+	}
+
+	// Handle IPv4 addresses
+	if ipv4 := parsedIP.To4(); ipv4 != nil {
+		// Encode IPv4 directly: each octet becomes 2 hex chars (8 chars total)
+		ipHex := fmt.Sprintf("%02x%02x%02x%02x", ipv4[0], ipv4[1], ipv4[2], ipv4[3])
+
+		// Use SHA256 hash for the remaining 8 characters to ensure uniqueness and stability
+		hash := sha256.Sum256([]byte(ip))
+		hashHex := hex.EncodeToString(hash[:])
+
+		// Combine: IP (8 chars) + hash suffix (8 chars) = 16 chars
+		return ipHex + hashHex[:8]
+	}
+
+	// Handle IPv6 addresses: use SHA256 hash as IPv6 is too long to encode directly
+	hash := sha256.Sum256([]byte(ip))
+	return hex.EncodeToString(hash[:])[:16]
 }
