@@ -48,8 +48,11 @@ error_handler() {
 
 # Cleanup function
 cleanup() {
+    if [ ! -d "$TEMP_DIR" ]; then
+        return
+    fi
     echo "Cleaning up temp directory $TEMP_DIR"
-    [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]] && rm -rf "$TEMP_DIR"
+    rm -rf "$TEMP_DIR"
 }
 
 # Set up traps
@@ -78,14 +81,17 @@ esac
 # Set download ARCH based on system architecture
 ARCH=$(uname -m)
 COLINK_ARCH=""
+ROS_NODE_ARCH=""
 case "$ARCH" in
 x86_64)
   ARCH="amd64"
   COLINK_ARCH="amd64"
+  ROS_NODE_ARCH="amd64"
   ;;
 arm64 | aarch64)
   ARCH="arm64"
   COLINK_ARCH="aarch64"
+  ROS_NODE_ARCH="arm64"
   ;;
 armv7l)
   ARCH="arm"
@@ -121,16 +127,18 @@ SERIAL_NUM=""
 USE_32BIT=0
 SKIP_VERIFY_CERT=0
 COLINK_ENDPOINT=""
+INSTALL_COLISTENER=0
+INSTALL_COBRIDGE=0
+ENABLE_MASTER=0
+HTTP_PROXY=""
+NO_PROXY="localhost,127.0.0.1,::1,.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
 COLINK_VERSION=1.0.4
+TRZSZ_VERSION=1.1.6
 ARTIFACT_BASE_URL=https://download.coscene.cn
+APT_BASE_URL=https://apt.coscene.cn
 COLINK_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/colink/v${COLINK_VERSION}/colink-${COLINK_ARCH}
-TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v1.1.6/trzsz_1.1.6_linux_${COLINK_ARCH}.tar.gz
-
-# cgroup path
-GROUP_NAME="cos_cpu_limited"
-CPU_PERCENT=15
-CGROUP_PATH="/sys/fs/cgroup/cpu"
+TRZSZ_DOWNLOAD_URL=${ARTIFACT_BASE_URL}/trzsz/v${TRZSZ_VERSION}/trzsz_${TRZSZ_VERSION}_linux_${COLINK_ARCH}.tar.gz
 
 help() {
   cat <<EOF
@@ -143,7 +151,7 @@ usage: $0 [OPTIONS]
     --remove_config         Remove all config files, current device will be treated as a new device
     --beta                  Use beta version for cos
     --use_local             Use local binary file zip path e.g. /xx/path/cos_binaries.tar.gz
-    --disable_service       Disable systemd or upstart service installation
+    --disable_service       Disable systemd service installation
     --mod                   Select the mod to install - task, default or other mod (default is 'default')
     --sn_file               The file path of the serial number file, will skip if not provided
     --sn_field              The field name of the serial number, should be provided with sn_file, unique field to identify the device
@@ -151,7 +159,12 @@ usage: $0 [OPTIONS]
     --coLink_endpoint       coLink endpoint, will skip if not provided
     --coLink_network        coLink network id, e.g. organization id, will skip if not provided
     --use_32bit             Use 32-bit version for cos
-    --skip_verify_cert      Skip verify certificate when download files (deprecated: runtime TLS verification is always enforced)
+    --skip_verify_cert      Skip verify certificate when download files
+    --install_colistener    Install colistener component (default: false)
+    --install_cobridge      Install cobridge component (default: false)
+    --enable_master         Enable master mode for master-slave architecture (default: false)
+    --http_proxy            Set HTTP proxy for cos service (e.g. http://proxy.example.com:8080)
+    --version               Show the version of the cos
 EOF
 }
 
@@ -186,13 +199,13 @@ download_file() {
   fi
 }
 
-check_cgroup_tools() {
-  if ! command -v cgcreate &>/dev/null; then
-    echo_error "Cannot install cgroup-tools automatically. Please install it manually 'apt-get install -y cgroup-tools'."
-    return 1
-  else
-    echo "cgroup-tools is installed."
+# Check if systemd is available
+check_systemd() {
+  if [[ "$(ps --no-headers -o comm 1 2>/dev/null)" == "systemd" ]]; then
     return 0
+  else
+    echo_error "This script requires systemd. For upstart systems, please use install-initd.sh instead."
+    return 1
   fi
 }
 
@@ -270,6 +283,32 @@ while test $# -gt 0; do
     SKIP_VERIFY_CERT=1
     shift # past argument
     ;;
+  --install_colistener)
+    INSTALL_COLISTENER=1
+    shift # past argument
+    ;;
+  --install_cobridge)
+    INSTALL_COBRIDGE=1
+    shift # past argument
+    ;;
+  --enable_master)
+    ENABLE_MASTER=1
+    shift # past argument
+    ;;
+  --http_proxy=*)
+    HTTP_PROXY="${1#*=}"
+    shift # past argument=value
+    ;;
+  --version)
+    VERSION_FILE="$(getent passwd "${USER:-$(whoami)}" | cut -d: -f6)/.local/state/cos/version.yaml"
+    echo "read version from ${VERSION_FILE}"
+    if [ -f "$VERSION_FILE" ]; then
+      cat "$VERSION_FILE"
+    else
+      echo "no version file was found."
+    fi
+    exit 0
+    ;;
   *)
     echo_error "unknown option: $1"
     help
@@ -284,6 +323,7 @@ if [[ $USE_32BIT -eq 1 ]]; then
     exit 1
   fi
   ARCH="arm"
+  ROS_NODE_ARCH="armhf"
 fi
 
 CUR_USER=${USER:-$(whoami)}
@@ -339,39 +379,35 @@ else
   exit 1
 fi
 
-# if mod is default, check
-if [[ $MOD == "default" ]]; then
+# SN_FILE and SERIAL_NUM all empty, exit
+if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
+  echo_error "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
+  exit 1
+fi
 
-  # SN_FILE and SERIAL_NUM all empty, exit
-  if [[ -z $SN_FILE && -z $SERIAL_NUM ]]; then
-    echo_error "ERROR: Both sn_file and serial_num cannot be empty. One of them must be specified. Exiting."
+# check sn_file and sn_field
+# Check if SN_FILE is specified
+if [[ -n $SN_FILE ]]; then
+# Check if SN_FILE has valid extension
+valid_extensions=(.txt .json .yaml .yml)
+extension="${SN_FILE##*.}"
+if [[ ! " ${valid_extensions[*]} " =~ $extension ]]; then
+    echo_error "ERROR: sn file has an invalid extension. Only .txt, .json, .yaml, .yml extensions are allowed. Exiting."
     exit 1
-  fi
+fi
 
-  # check sn_file and sn_field
-  # Check if SN_FILE is specified
-  if [[ -n $SN_FILE ]]; then
-    # Check if SN_FILE has valid extension
-    valid_extensions=(.txt .json .yaml .yml)
-    extension="${SN_FILE##*.}"
-    if [[ ! " ${valid_extensions[*]} " =~ $extension ]]; then
-      echo_error "ERROR: sn file has an invalid extension. Only .txt, .json, .yaml, .yml extensions are allowed. Exiting."
-      exit 1
-    fi
+# Check if SN_FILE exists
+if [[ ! -f $SN_FILE ]]; then
+    echo_error "ERROR: sn file does not exist. Exiting."
+    exit 1
+fi
 
-    # Check if SN_FILE exists
-    if [[ ! -f $SN_FILE ]]; then
-      echo_error "ERROR: sn file does not exist. Exiting."
-      exit 1
-    fi
-
-    # Check if extension is not .txt and SN_FIELD is empty
-    echo "extension is $extension"
-    if [[ $extension != "txt" && -z $SN_FIELD ]]; then
-      echo_error "ERROR: --sn_field is not specified when sn file exist. Exiting."
-      exit 1
-    fi
-  fi
+# Check if extension is not .txt and SN_FIELD is empty
+echo "extension is $extension"
+if [[ $extension != "txt" && -z $SN_FIELD ]]; then
+    echo_error "ERROR: --sn_field is not specified when sn file exist. Exiting."
+    exit 1
+fi
 fi
 
 # check local file path
@@ -408,9 +444,8 @@ if [ -e /usr/local/bin/colink ]; then
   /usr/local/bin/colink -V
 fi
 
-# remove old config before install
 if [[ $REMOVE_CONFIG -eq 1 ]]; then
-  echo "remove exists colink config file."
+  echo "remove exists config file."
   [ -f "/etc/virmesh.key" ] && sudo rm -f /etc/virmesh.key
   [ -f "/etc/virmesh.pub" ] && sudo rm -f /etc/virmesh.pub
   [ -f "/etc/colink.key" ] && sudo rm -f /etc/colink.key
@@ -437,7 +472,7 @@ else
 
   if [[ -n $USE_LOCAL ]]; then
     echo "Moving new trzsz binary..."
-    cp "$TEMP_DIR/cos_binaries/trzsz_tar/trzsz_1.1.6_linux_${COLINK_ARCH}.tar.gz" "$TEMP_DIR"/trzsz.tar.gz
+    cp "$TEMP_DIR/cos_binaries/trzsz_tar/trzsz_${TRZSZ_VERSION}_linux_${COLINK_ARCH}.tar.gz" "$TEMP_DIR"/trzsz.tar.gz
   else
     echo "Downloading new trzsz binary..."
     download_file "$TEMP_DIR"/trzsz.tar.gz $TRZSZ_DOWNLOAD_URL $SKIP_VERIFY_CERT
@@ -449,9 +484,9 @@ else
   chmod -R +x "$TEMP_DIR"/trzsz
   sudo mv -f "$TEMP_DIR"/trzsz/* /usr/local/bin/
   rm -rf "$TEMP_DIR"/trzsz.tar.gz
-  # check systemd or upstart service
+  # check systemd service
   if [[ $DISABLE_SERVICE -eq 0 ]]; then
-    if [[ "$(ps --no-headers -o comm 1 2>&1)" == "systemd" ]] && command -v systemctl 2>&1; then
+    if check_systemd; then
       echo "Installing systemd service..."
       sudo tee /etc/systemd/system/colink.service >/dev/null <<EOF
 [Unit]
@@ -476,51 +511,15 @@ EOF
       sudo systemctl enable colink
       sudo systemctl start colink
       echo "Start coLink service done."
-    elif /sbin/init --version 2>&1 | grep -q upstart; then
-      echo "Installing upstart service..."
-      sudo tee /etc/init/colink.conf >/dev/null <<EOF
-description "coLink Client Daemon"
-
-# Start the service when networking is up
-start on started networking
-
-# Stop the service when leaving runlevel 2, 3, 4, 5
-stop on runlevel [!2345]
-
-# Respawn the service if it crashes
-respawn
-
-# Limit respawn attempts to 4 within a 25 second period
-respawn limit 4 30
-
-# Consider exit code 0 as normal and not trigger a respawn
-normal exit 0
-
-env COLINK_ENDPOINT=$COLINK_ENDPOINT
-env COLINK_NETWORK=$COLINK_NETWORK
-script
-    # Change to the appropriate working directory
-    cd /etc
-    # Start the daemon
-    exec /usr/local/bin/colink --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh
-end script
-EOF
-
-      SERVICE_NAME="colink"
-      STATUS_OUTPUT=$(sudo initctl status "$SERVICE_NAME")
-      if echo "$STATUS_OUTPUT" | grep -q "start/running"; then
-        echo "$SERVICE_NAME is running. Stopping it now..."
-        sudo initctl stop "$SERVICE_NAME"
-        echo "$SERVICE_NAME has been stopped."
-      else
-        echo "$SERVICE_NAME is not running."
-      fi
-      sudo initctl start $SERVICE_NAME
+    else
+      echo_error "This script requires systemd. For upstart systems, please use install-initd.sh instead."
+      exit 1
     fi
   else
-    echo "Skipping systemd or upstart service installation, just install coLink binary..."
+    echo "Skipping systemd service installation, just install coLink binary..."
+    echo "You can manually start coLink with the command: /usr/local/bin/colink daemon --endpoint ${COLINK_ENDPOINT} --network ${COLINK_NETWORK} --allow-ssh"
   fi
-  echo "Successfully installed coLink."
+  echo_info "Successfully installed coLink."
 fi
 
 echo ""
@@ -571,8 +570,15 @@ fi
 
 # create config file
 echo "Creating config file..."
-# Note: insecure TLS configuration is deprecated. TLS certificate verification is now mandatory for security.
-# The SKIP_VERIFY_CERT option only affects file downloads during installation, not runtime API connections.
+INSECURE=false
+if [[ $SKIP_VERIFY_CERT -eq 1 ]]; then
+  INSECURE=true
+fi
+
+MASTER_ENABLED=false
+if [[ $ENABLE_MASTER -eq 1 ]]; then
+  MASTER_ENABLED=true
+fi
 
 # create config file ~/.config/cos/config.yaml
 sudo -u "$CUR_USER" tee "${COS_CONFIG_DIR}/config.yaml" >/dev/null <<EOL
@@ -580,7 +586,7 @@ api:
   server_url: $SERVER_URL
   project_slug: $PROJECT_SLUG
   org_slug: $ORG_SLUG
-  insecure: false
+  insecure: $INSECURE
 
 register:
   type: file
@@ -592,6 +598,9 @@ mod:
   name: $MOD
   conf:
     enabled: true
+
+master_slave:
+  enabled: $MASTER_ENABLED
 
 __import__:
   - $DEFAULT_IMPORT_CONFIG
@@ -640,6 +649,7 @@ if [[ -n $USE_LOCAL ]]; then
     echo "ERROR: Failed to find cos binary or JSON file. Exiting."
     exit 1
   fi
+  mv "$TEMP_DIR/cos_binaries/version.yaml" "$COS_STATE_DIR/version.yaml"
 else
   mkdir -p "$TEMP_DIR/cos_binaries/cos"
   TMP_FILE="$TEMP_DIR/cos_binaries/cos/$OS-$ARCH.gz"
@@ -691,20 +701,26 @@ fi
 
 # check disable systemd, default will install cos.service
 if [[ $DISABLE_SERVICE -eq 0 ]]; then
-  if [[ "$(ps --no-headers -o comm 1 2>&1)" == "systemd" ]] && command -v systemctl 2>&1; then
+  if check_systemd; then
     echo "Installing cos systemd service..."
 
-    echo "Enabling linger for $CUR_USER..."
-    sudo loginctl enable-linger "$CUR_USER"
-    # create cos.service systemd file
+    # Create system-level systemd service file
     echo "Creating cos.service systemd file..."
-    #  echo "Installing the systemd service requires root permissions."
-    #  cat >/lib/systemd/system/cos.service <<EOL
 
-    USER_SYSTEMD_DIR="$CUR_USER_HOME/.config/systemd/user"
-    USER_DEFAULT_TARGET="$CUR_USER_HOME/.config/systemd/user/default.target.wants"
-    sudo -u "$CUR_USER" mkdir -p "$USER_SYSTEMD_DIR" "$USER_DEFAULT_TARGET"
-    sudo -u "$CUR_USER" tee "$USER_SYSTEMD_DIR"/cos.service >/dev/null <<EOL
+    # Prepare environment section for systemd service
+    ENV_SECTION=""
+    if [[ -n "$HTTP_PROXY" ]]; then
+      echo "Setting HTTP proxy: $HTTP_PROXY"
+      echo "Setting NO_PROXY (default): $NO_PROXY"
+      ENV_SECTION="Environment=HTTP_PROXY=$HTTP_PROXY
+Environment=HTTPS_PROXY=$HTTP_PROXY
+Environment=http_proxy=$HTTP_PROXY
+Environment=https_proxy=$HTTP_PROXY
+Environment=NO_PROXY=$NO_PROXY
+Environment=no_proxy=$NO_PROXY"
+    fi
+
+    sudo tee /etc/systemd/system/cos.service >/dev/null <<EOL
 [Unit]
 Description=coScout: Data Collector by coScene
 Documentation=https://github.com/coscene-io/coScout
@@ -713,132 +729,148 @@ StartLimitIntervalSec=86400
 
 [Service]
 Type=simple
+User=$CUR_USER
+Group=$CUR_USER
 WorkingDirectory=$CUR_USER_HOME/.local/state/cos
 CPUQuota=10%
+${ENV_SECTION}
 ExecStart=$COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}
 SyslogIdentifier=cos
 RestartSec=60
 Restart=always
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 EOL
-    echo "Created cos.service systemd file: $USER_SYSTEMD_DIR/cos.service"
+    echo "Created cos.service systemd file: /etc/systemd/system/cos.service"
+
+    echo "Enabling linger for $CUR_USER..."
+    sudo loginctl enable-linger "$CUR_USER"
+    XDG_RUNTIME_DIR="/run/user/$(id -u "${CUR_USER}")"
+    echo "Setting XDG_RUNTIME_DIR to $XDG_RUNTIME_DIR for user $CUR_USER"
+    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user is-active --quiet cos && sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user stop cos && sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user disable cos
 
     echo ""
     echo "Starting cos service for $CUR_USER..."
 
-    XDG_RUNTIME_DIR="/run/user/$(id -u "${CUR_USER}")"
-    echo "Setting XDG_RUNTIME_DIR to $XDG_RUNTIME_DIR for user $CUR_USER"
-
     echo "Reloading systemd daemon..."
-    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user daemon-reload
+    sudo systemctl daemon-reload
 
     echo "Checking if cos service is running..."
-    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user is-active --quiet cos && sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user stop cos && sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user disable cos
-    
+    sudo systemctl is-active --quiet cos && sudo systemctl stop cos && sudo systemctl disable cos
+
     echo "Enabling cos service..."
-    sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user enable cos
-    
+    sudo systemctl enable cos
+
     echo "Starting cos service..."
-    if sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user start cos; then 
+    if sudo systemctl start cos; then
       echo "Cos service started successfully."
     else
       echo_error "Cos service failed to start."
 
       echo_error "Checking service status for more details..."
-      sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" systemctl --user status cos || true
+      sudo systemctl status cos || true
       echo_error "Checking journal logs for more details..."
-      sudo -u "$CUR_USER" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" journalctl --user -xe -u cos --no-pager | tail -n 50
+      sudo journalctl -xe -u cos --no-pager | tail -n 50
     fi
-    
+
     echo ""
     echo_info "🎉 Installation completed successfully , you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
-  elif /sbin/init --version 2>&1 | grep -q upstart; then
-    echo "Installing cos upstart service..."
-
-    if ! command -v cgcreate &>/dev/null; then
-      if [[ -n $USE_LOCAL  ]] && [[ $ARCH == "arm" ]]; then
-        echo "Installing cgroup-tools..."
-        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/libcgroup1.deb"
-        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/cgroup_lite.deb"
-        sudo dpkg -i "$TEMP_DIR/cos_binaries/cos/$ARCH/cgroup_bin.deb"
-
-        if ! command -v cgcreate &>/dev/null; then
-          echo_error "Failed to install cgroup-tools."
-          exit 1
-        fi
-      fi
-    fi
-
-    exec_command="exec $COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}"
-    if check_cgroup_tools; then
-      exec_command="exec cgexec -g cpu:$GROUP_NAME $COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}"
-    fi
-
-    sudo tee /etc/init/cos.conf >/dev/null <<EOF
-description "coScout: Data Collector by coScene"
-author "coScene"
-
-start on started networking
-stop on runlevel [!2345]
-
-nice 19
-
-# Limit the start attempts
-respawn
-respawn limit 10 86400
-
-pre-start script
-  rm -rf $CUR_USER_HOME/.cache/coscene/onefile_*
-
-  if command -v cgcreate &>/dev/null; then
-    if [ -d "$CGROUP_PATH/$GROUP_NAME" ]; then
-      cgdelete cpu:$GROUP_NAME
-    fi
-
-    if ! cgcreate -g cpu:$GROUP_NAME; then
-      echo "Failed to create cgroup"
-      exit 1
-    fi
-
-    cgset -r cpu.cfs_period_us=100000 $GROUP_NAME
-    cgset -r cpu.cfs_quota_us=$((CPU_PERCENT * 1000)) $GROUP_NAME
-  fi
-end script
-
-script
-    cd $CUR_USER_HOME/.local/state/cos
-    $exec_command
-end script
-
-post-stop script
-  # post-stop script
-end script
-
-# Logging settings
-console log
-EOF
-
-    SERVICE_NAME="cos"
-    STATUS_OUTPUT=$(sudo initctl status "$SERVICE_NAME")
-    if echo "$STATUS_OUTPUT" | grep -q "start/running"; then
-      echo "$SERVICE_NAME is running. Stopping it now..."
-      sudo initctl stop "$SERVICE_NAME"
-      echo "$SERVICE_NAME has been stopped."
-    else
-      echo "$SERVICE_NAME is not running."
-    fi
-
-    echo "reload upstart configuration..."
-    sudo initctl reload-configuration
-    sudo initctl start $SERVICE_NAME
-
-    echo_info "🎉 Installation completed successfully, you can use 'tail -f ${COS_LOG_DIR}/cos.log' to check the logs."
+  else
+    echo_error "This script requires systemd. For upstart systems, please use install-initd.sh instead."
+    exit 1
   fi
 else
   echo "Skipping systemd service installation, just install cos binary..."
+  echo "You can manually start cos with the command: $COS_SHELL_BASE/bin/cos daemon --config-path=${COS_CONFIG_DIR}/config.yaml --log-dir=${COS_LOG_DIR}"
 fi
+
+get_ubuntu_distro() {
+  # in keenon's ubuntu14.04, /etc/os-release file exists, but `VERSION_CODENAME` and `UBUNTU_CODENAME` not found.
+  # so, check /etc/lsb-release first, if file not exists, fallback to /etc/os-release.
+  if [[ -f /etc/lsb-release ]]; then
+    source /etc/lsb-release
+    echo "${DISTRIB_CODENAME:-unknown}"
+  elif [[ -f /etc/os-release ]]; then
+    source /etc/os-release
+    if [[ -n "${VERSION_CODENAME:-}" ]]; then
+      echo "$VERSION_CODENAME"
+    elif [[ -n "${UBUNTU_CODENAME:-}" ]]; then
+      echo "$UBUNTU_CODENAME"
+    else
+      echo "unknown"
+    fi
+  else
+    echo "unknown"
+  fi
+}
+
+get_ros_distro() {
+  if [[ -n "${ROS_DISTRO:-}" ]]; then
+      echo "$ROS_DISTRO"
+  else
+      # Try to find ROS installation in /opt/ros
+      for ros_path in /opt/ros/*; do
+          if [[ -d "$ros_path" ]]; then
+              echo "$(basename "$ros_path")"
+              return 0
+          fi
+      done
+      echo "unknown"
+  fi
+}
+
+if [[ $INSTALL_COBRIDGE -eq 1 ]] || [[ $INSTALL_COLISTENER -eq 1 ]]; then
+  UBUNTU_DISTRO=$(get_ubuntu_distro)
+  ROS_VERSION=$(get_ros_distro)
+  echo "current ubuntu distro: ${UBUNTU_DISTRO}, ROS distro: ${ROS_VERSION}"
+fi
+
+COLISTENER_VERSION="none"
+COBRIDGE_VERSION="none"
+
+if [[ $INSTALL_COLISTENER -eq 1 ]]; then
+  echo "Install coListener"
+  if [[ -n $USE_LOCAL ]]; then
+    COLISTENER_DEB_FILE="ros-${ROS_VERSION}-colistener_${UBUNTU_DISTRO}_${ROS_NODE_ARCH}.deb"
+    sudo dpkg -i "$TEMP_DIR/cos_binaries/colistener/${UBUNTU_DISTRO}/${ROS_NODE_ARCH}/${ROS_VERSION}/${COLISTENER_DEB_FILE}"
+  else
+    COLISTENER_VERSION="2.2.0-0"
+    COLISTENER_DEB_FILE="ros-${ROS_VERSION}-colistener_${COLISTENER_VERSION}${UBUNTU_DISTRO}_${ROS_NODE_ARCH}.deb"
+    COLISTENER_DOWNLOAD_URL="${APT_BASE_URL}/dists/${UBUNTU_DISTRO}/main/binary-${ROS_NODE_ARCH}/${COLISTENER_DEB_FILE}"
+    download_file "$TEMP_DIR"/colistener.deb $COLISTENER_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    sudo dpkg -i "$TEMP_DIR"/colistener.deb
+  fi
+fi
+
+if [[ $INSTALL_COBRIDGE -eq 1 ]]; then
+  echo "Install coBridge"
+
+  if [[ -n $USE_LOCAL ]]; then
+    COBRIDGE_DEB_FILE="ros-${ROS_VERSION}-cobridge_${UBUNTU_DISTRO}_${ROS_NODE_ARCH}.deb"
+    sudo dpkg -i "$TEMP_DIR/cos_binaries/cobridge/${UBUNTU_DISTRO}/${ROS_NODE_ARCH}/${ROS_VERSION}/${COBRIDGE_DEB_FILE}"
+  else
+    COBRIDGE_VERSION="1.1.2-0"
+    COBRIDGE_DEB_FILE="ros-${ROS_VERSION}-cobridge_${COBRIDGE_VERSION}${UBUNTU_DISTRO}_${ROS_NODE_ARCH}.deb"
+    COBRIDGE_DOWNLOAD_URL="${APT_BASE_URL}/dists/${UBUNTU_DISTRO}/main/binary-${ROS_NODE_ARCH}/${COBRIDGE_DEB_FILE}"
+    download_file "$TEMP_DIR"/cobridge.deb $COBRIDGE_DOWNLOAD_URL $SKIP_VERIFY_CERT
+    sudo dpkg -i "$TEMP_DIR"/cobridge.deb
+  fi
+fi
+
+VERSION_FILE="$COS_STATE_DIR/version.yaml"
+sudo tee "${VERSION_FILE}" > /dev/null << EOF
+# coScene Edge Software Package Versions
+# Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+release_version: online
+assemblies:
+  colink_version: ${COLINK_VERSION}
+  cos_version: ${VERSION}
+  colistener_version: ${COLISTENER_VERSION}
+  cobridge_version: ${COBRIDGE_VERSION}
+  trzsz_version: ${TRZSZ_VERSION}
+EOF
 
 echo_info "Successfully installed cos."
 exit 0
