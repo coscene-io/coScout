@@ -275,7 +275,8 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 			_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 			if err != nil {
 				log.Errorf("Complete multipart upload failed: %v", err)
-				if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) {
+				if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) ||
+					strings.Contains(strings.ToLower(err.Error()), strings.ToLower("The specified multipart upload does not exist")) {
 					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 				}
 
@@ -450,7 +451,8 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 	if err != nil {
 		log.Errorf("Complete multipart upload failed: %v", err)
-		if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) {
+		if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) ||
+			strings.Contains(strings.ToLower(err.Error()), strings.ToLower("The specified multipart upload does not exist")) {
 			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 			return errors.Wrapf(err, "Complete multipart upload failed with invalid upload id, cache cleared")
 		}

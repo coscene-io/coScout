@@ -15,6 +15,7 @@
 package upload
 
 import (
+	"fmt"
 	"path"
 	"path/filepath"
 	"strings"
@@ -281,4 +282,16 @@ func ComputeRuleFileInfos(fileStates []file_state_handler.FileState) map[string]
 	}
 
 	return files
+}
+
+func GetUploadIdKey(absPath string) string {
+	return fmt.Sprintf(uploadIdKeyTemplate, absPath)
+}
+
+func GetUploadedSizeKey(absPath string) string {
+	return fmt.Sprintf(uploadedSizeKeyTemplate, absPath)
+}
+
+func GetUploadPartsKey(absPath string) string {
+	return fmt.Sprintf(partsKeyTemplate, absPath)
 }
