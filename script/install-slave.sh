@@ -100,25 +100,14 @@ fi
 USE_LOCAL=""
 BETA=0
 DISABLE_SERVICE=0
-MASTER_ADDR=""
+MASTER_IP=""
+MASTER_PORT=22525
 PORT=22525
 FILE_PREFIX=""
 SLAVE_IP=""
 SLAVE_ID=""
 
 ARTIFACT_BASE_URL=https://download.coscene.cn
-LATEST_COS_URL="${ARTIFACT_BASE_URL}/coscout/v2/latest/$OS-$ARCH.gz"
-BETA_COS_URL="${ARTIFACT_BASE_URL}/coscout/v2/beta/$OS-$ARCH.gz"
-LATEST_COS_INFO_URL="${ARTIFACT_BASE_URL}/coscout/v2/latest/$OS-$ARCH.json"
-BETA_COS_INFO_URL="${ARTIFACT_BASE_URL}/coscout/v2/beta/$OS-$ARCH.json"
-
-DEFAULT_INFO_URL="$LATEST_COS_INFO_URL"
-DEFAULT_BINARY_URL="$LATEST_COS_URL"
-# set binary_url based on beta flag
-if [[ $BETA -eq 1 ]]; then
-  DEFAULT_BINARY_URL="$BETA_COS_URL"
-  DEFAULT_INFO_URL="$BETA_COS_INFO_URL"
-fi
 
 help() {
   cat <<EOF
@@ -127,7 +116,8 @@ usage: $0 [OPTIONS]
 Install coScout as a slave node for master-slave architecture.
 
     --help                  Show this message
-    --master_addr           Master node address (required, format: ip:port)
+    --master_ip             Master node IP address (required)
+    --master_port           Master node port (default: 22525)
     --port                  Slave listening port (default: 22525)
     --file_prefix           File folder prefix for uploaded files (optional, e.g., 'device1')
     --ip                    IP address of this slave node (required)
@@ -168,8 +158,12 @@ while test $# -gt 0; do
     help
     exit 0
     ;;
-  --master_addr=*)
-    MASTER_ADDR="${1#*=}"
+  --master_ip=*)
+    MASTER_IP="${1#*=}"
+    shift # past argument=value
+    ;;
+  --master_port=*)
+    MASTER_PORT="${1#*=}"
     shift # past argument=value
     ;;
   --port=*)
@@ -234,28 +228,42 @@ echo "User home directory: $CUR_USER_HOME"
 
 # get user input
 echo ""
-if [[ -z "$MASTER_ADDR" ]]; then
-  read -r -p "please input master_addr (format: ip:port): " MASTER_ADDR
+if [[ -z "$MASTER_IP" ]]; then
+  read -r -p "please input master IP address: " MASTER_IP
 fi
 if [[ -z "$SLAVE_IP" ]]; then
   read -r -p "please input slave IP address: " SLAVE_IP
 fi
 
-echo "master_addr:   ${MASTER_ADDR}"
+echo "master_ip:     ${MASTER_IP}"
+echo "master_port:   ${MASTER_PORT}"
 echo "port:          ${PORT}"
 echo "file_prefix:   ${FILE_PREFIX}"
 echo "ip:            ${SLAVE_IP}"
 echo "slave_id:      ${SLAVE_ID}"
 
 # Validate required parameters
-if [[ -z "$MASTER_ADDR" ]]; then
-  echo_error "ERROR: --master_addr must be provided. Exiting." >&2
+if [[ -z "$MASTER_IP" ]]; then
+  echo_error "ERROR: --master_ip must be provided. Exiting." >&2
   exit 1
 fi
 
 if [[ -z "$SLAVE_IP" ]]; then
   echo_error "ERROR: --ip must be provided. Exiting." >&2
   exit 1
+fi
+
+# set binary_url based on beta flag
+LATEST_COS_URL="${ARTIFACT_BASE_URL}/coscout/v2/latest/$OS-$ARCH.gz"
+BETA_COS_URL="${ARTIFACT_BASE_URL}/coscout/v2/beta/$OS-$ARCH.gz"
+LATEST_COS_INFO_URL="${ARTIFACT_BASE_URL}/coscout/v2/latest/$OS-$ARCH.json"
+BETA_COS_INFO_URL="${ARTIFACT_BASE_URL}/coscout/v2/beta/$OS-$ARCH.json"
+
+DEFAULT_INFO_URL="$LATEST_COS_INFO_URL"
+DEFAULT_BINARY_URL="$LATEST_COS_URL"
+if [[ $BETA -eq 1 ]]; then
+  DEFAULT_BINARY_URL="$BETA_COS_URL"
+  DEFAULT_INFO_URL="$BETA_COS_INFO_URL"
 fi
 
 # check local file path
@@ -357,7 +365,7 @@ else
 fi
 
 # Build command arguments
-SLAVE_CMD_ARGS="slave --master-addr=${MASTER_ADDR} --port=${PORT} --ip=${SLAVE_IP}"
+SLAVE_CMD_ARGS="slave --master-ip=${MASTER_IP} --master-port=${MASTER_PORT} --port=${PORT} --ip=${SLAVE_IP}"
 if [[ -n "$FILE_PREFIX" ]]; then
   SLAVE_CMD_ARGS="${SLAVE_CMD_ARGS} --file-prefix=\"${FILE_PREFIX}\""
 fi

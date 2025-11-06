@@ -24,6 +24,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coscene-io/coscout"
@@ -86,9 +88,20 @@ func (c *Client) RegisterAndStartHeartbeat(ctx context.Context) error {
 	return nil
 }
 
+// getMasterAddr returns the complete master address with proper IPv6 support.
+func (c *Client) getMasterAddr() string {
+	// Check if IP is an IPv6 address
+	if net.ParseIP(c.config.MasterIP) != nil && strings.Contains(c.config.MasterIP, ":") {
+		// IPv6 address needs brackets
+		return "[" + c.config.MasterIP + "]:" + strconv.Itoa(c.config.MasterPort)
+	}
+	// IPv4 address or hostname
+	return net.JoinHostPort(c.config.MasterIP, strconv.Itoa(c.config.MasterPort))
+}
+
 // Unregister sends an unregister request to the master.
 func (c *Client) Unregister(ctx context.Context) error {
-	url := fmt.Sprintf("http://%s/api/v1/slave/unregister?slave_id=%s", c.config.MasterAddr, c.slaveID)
+	url := fmt.Sprintf("http://%s/api/v1/slave/unregister?slave_id=%s", c.getMasterAddr(), c.slaveID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
@@ -111,7 +124,7 @@ func (c *Client) Unregister(ctx context.Context) error {
 }
 
 func (c *Client) register(ctx context.Context) error {
-	url := fmt.Sprintf("http://%s/api/v1/slave/register", c.config.MasterAddr)
+	url := fmt.Sprintf("http://%s/api/v1/slave/register", c.getMasterAddr())
 	reqPayload := master.RegisterRequest{
 		SlaveID:    c.slaveID,
 		IP:         c.ip,
@@ -165,7 +178,7 @@ func (c *Client) startHeartbeat(ctx context.Context) {
 			if err := c.sendHeartbeat(ctx); err != nil {
 				log.Errorf("Failed to send heartbeat: %v", err)
 			} else {
-				log.Infof("%s successfully send heartbeat to master %s", c.slaveID, c.config.MasterAddr)
+				log.Infof("%s successfully send heartbeat to master %s", c.slaveID, c.getMasterAddr())
 			}
 		case <-ctx.Done():
 			log.Info("Heartbeat stopped")
@@ -175,7 +188,7 @@ func (c *Client) startHeartbeat(ctx context.Context) {
 }
 
 func (c *Client) sendHeartbeat(ctx context.Context) error {
-	url := fmt.Sprintf("http://%s/api/v1/slave/heartbeat", c.config.MasterAddr)
+	url := fmt.Sprintf("http://%s/api/v1/slave/heartbeat", c.getMasterAddr())
 
 	reqPayload := master.HeartbeatRequest{
 		SlaveID: c.slaveID,

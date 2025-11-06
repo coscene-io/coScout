@@ -23,7 +23,8 @@ type SlaveConfig struct {
 	ID                string        `yaml:"id"`                 // Unique slave ID (auto-generated)
 	IP                string        `yaml:"ip"`                 // IP address of the slave, required
 	Port              int           `yaml:"port"`               // Listening port
-	MasterAddr        string        `yaml:"master_addr"`        // Master address, format: ip:port
+	MasterIP          string        `yaml:"master_ip"`          // Master IP address, required
+	MasterPort        int           `yaml:"master_port"`        // Master port
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"` // Heartbeat interval
 	RequestTimeout    time.Duration `yaml:"request_timeout"`    // Request timeout
 	MaxFileSize       int64         `yaml:"max_file_size"`      // Maximum file size
@@ -35,6 +36,8 @@ func DefaultSlaveConfig() *SlaveConfig {
 	return &SlaveConfig{
 		IP:                "", // This must be set by the user
 		Port:              22525,
+		MasterIP:          "", // This must be set by the user
+		MasterPort:        22525,
 		HeartbeatInterval: 3 * time.Second,
 		RequestTimeout:    5 * time.Second,
 		MaxFileSize:       100 * 1024 * 1024 * 1024, // 100GB

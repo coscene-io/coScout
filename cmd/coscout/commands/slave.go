@@ -30,7 +30,8 @@ import (
 func NewSlaveCommand() *cobra.Command {
 	var (
 		port       int
-		masterAddr string
+		masterIP   string
+		masterPort int
 		slaveID    string
 		filePrefix string
 		ip         string
@@ -51,7 +52,8 @@ The slave node will:
 
 			slaveConfig.IP = ip
 			slaveConfig.Port = port
-			slaveConfig.MasterAddr = masterAddr
+			slaveConfig.MasterIP = masterIP
+			slaveConfig.MasterPort = masterPort
 			slaveConfig.FilePrefix = filePrefix
 			if slaveID != "" {
 				slaveConfig.ID = slaveID
@@ -64,11 +66,11 @@ The slave node will:
 			}
 
 			// Validate required parameters
-			if masterAddr == "" {
-				log.Fatal("Master address is required. Use --master-addr flag")
+			if masterIP == "" {
+				log.Fatal("Master IP address is required. Use --master-ip flag")
 			}
 
-			log.Infof("Starting slave node on port %d, connecting to master %s", port, masterAddr)
+			log.Infof("Starting slave node on port %d, connecting to master %s:%d", port, masterIP, masterPort)
 
 			// Create context
 			ctx, cancel := context.WithCancel(context.Background())
@@ -138,7 +140,8 @@ The slave node will:
 	}
 
 	cmd.Flags().IntVarP(&port, "port", "p", 22525, "Port to listen on")
-	cmd.Flags().StringVarP(&masterAddr, "master-addr", "m", "", "Master address (required, format: ip:port)")
+	cmd.Flags().StringVarP(&masterIP, "master-ip", "m", "", "Master IP address (required)")
+	cmd.Flags().IntVar(&masterPort, "master-port", 22525, "Master port (default: 22525)")
 	cmd.Flags().StringVar(&slaveID, "slave-id", "", "Slave ID (auto-generated if not provided)")
 	cmd.Flags().StringVar(&filePrefix, "file-prefix", "", "File folder prefix for uploaded files (e.g., 'device1' creates 'device1/filename.log')")
 	cmd.Flags().StringVar(&ip, "ip", "", "IP address of this slave (required)")
