@@ -59,7 +59,7 @@ The slave node will:
 				slaveConfig.ID = slaveID
 			}
 			if slaveConfig.IP == "" {
-				log.Fatal("Please set the IP address in the configuration file or environment variable")
+				log.Fatal("Please set the IP address using --slave-ip flag or in the configuration file")
 			}
 			if slaveConfig.FilePrefix == "" {
 				slaveConfig.FilePrefix = slaveConfig.IP
@@ -139,11 +139,11 @@ The slave node will:
 		},
 	}
 
-	cmd.Flags().IntVarP(&port, "port", "p", 22525, "Port to listen on")
+	cmd.Flags().IntVarP(&port, "slave-port", "p", 22525, "Port to listen on")
 	cmd.Flags().StringVarP(&masterIP, "master-ip", "m", "", "Master IP address (required)")
 	cmd.Flags().IntVar(&masterPort, "master-port", 22525, "Master port (default: 22525)")
 	cmd.Flags().StringVar(&slaveID, "slave-id", "", "Slave ID (auto-generated if not provided)")
 	cmd.Flags().StringVar(&filePrefix, "file-prefix", "", "File folder prefix for uploaded files (e.g., 'device1' creates 'device1/filename.log')")
-	cmd.Flags().StringVar(&ip, "ip", "", "IP address of this slave (required)")
+	cmd.Flags().StringVar(&ip, "slave-ip", "", "IP address of this slave (required)")
 	return cmd
 }

@@ -118,9 +118,9 @@ Install coScout as a slave node for master-slave architecture.
     --help                  Show this message
     --master_ip             Master node IP address (required)
     --master_port           Master node port (default: 22525)
-    --port                  Slave listening port (default: 22525)
+    --slave_port            Slave listening port (default: 22525)
     --file_prefix           File folder prefix for uploaded files (optional, e.g., 'device1')
-    --ip                    IP address of this slave node (required)
+    --slave_ip              IP address of this slave node (required)
     --slave_id              Slave ID (optional, auto-generated if not provided)
     --beta                  Use beta version for cos
     --use_local             Use local binary file zip path e.g. /xx/path/cos_binaries.tar.gz
@@ -166,7 +166,7 @@ while test $# -gt 0; do
     MASTER_PORT="${1#*=}"
     shift # past argument=value
     ;;
-  --port=*)
+  --slave_port=*)
     PORT="${1#*=}"
     shift # past argument=value
     ;;
@@ -174,7 +174,7 @@ while test $# -gt 0; do
     FILE_PREFIX="${1#*=}"
     shift # past argument=value
     ;;
-  --ip=*)
+  --slave_ip=*)
     SLAVE_IP="${1#*=}"
     shift # past argument=value
     ;;
@@ -249,7 +249,7 @@ if [[ -z "$MASTER_IP" ]]; then
 fi
 
 if [[ -z "$SLAVE_IP" ]]; then
-  echo_error "ERROR: --ip must be provided. Exiting." >&2
+  echo_error "ERROR: --slave_ip must be provided. Exiting." >&2
   exit 1
 fi
 
@@ -365,7 +365,7 @@ else
 fi
 
 # Build command arguments
-SLAVE_CMD_ARGS="slave --master-ip=${MASTER_IP} --master-port=${MASTER_PORT} --port=${PORT} --ip=${SLAVE_IP}"
+SLAVE_CMD_ARGS="slave --master-ip=${MASTER_IP} --master-port=${MASTER_PORT} --slave-port=${PORT} --slave-ip=${SLAVE_IP}"
 if [[ -n "$FILE_PREFIX" ]]; then
   SLAVE_CMD_ARGS="${SLAVE_CMD_ARGS} --file-prefix=\"${FILE_PREFIX}\""
 fi
