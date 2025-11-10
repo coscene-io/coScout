@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,10 +31,11 @@ import (
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
-	"github.com/djherbis/times"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -44,6 +44,11 @@ type CustomTaskHandler struct {
 	confManager config.ConfManager
 	errChan     chan error
 	pubSub      *gochannel.GoChannel
+
+	// Master-slave components (optional)
+	slaveRegistry *master.SlaveRegistry
+	masterClient  *master.Client
+	masterConfig  *config.MasterConfig
 }
 
 func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomTaskHandler {
@@ -231,8 +236,48 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	log.Infof("UploadTask %s, start time: %s, end time: %s, folders: %v, additional files: %v",
 		task.GetName(), startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
 
-	files, noPermissionFolders := computeUploadFiles(taskFolders, additionalFiles, startTime.AsTime(), endTime.AsTime())
-	if len(files) == 0 {
+	// Get local files
+	localFiles, noPermissionFolders := upload.ComputeUploadFiles(taskFolders, additionalFiles, startTime.AsTime(), endTime.AsTime())
+
+	// Get slave files if master-slave is enabled
+	allFiles := make(map[string]model.FileInfo)
+	for path, fileInfo := range localFiles {
+		allFiles[path] = fileInfo
+	}
+
+	var slaveFileCount int
+	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
+		defer cancel()
+
+		taskReq := &master.TaskRequest{
+			TaskID:          task.GetName(),
+			StartTime:       startTime.AsTime(),
+			EndTime:         endTime.AsTime(),
+			ScanFolders:     taskFolders,
+			AdditionalFiles: additionalFiles,
+		}
+
+		responses := c.masterClient.RequestAllSlaveFiles(ctx, c.slaveRegistry, taskReq)
+		for slaveID, response := range responses {
+			if response != nil && response.Success {
+				log.Infof("Slave %s returned %d files for task %s", slaveID, len(response.Files), task.GetName())
+				for _, file := range response.Files {
+					remotePath := file.GetRemotePath()
+					if remotePath == "" {
+						continue
+					}
+					// use slave file path as key to avoid duplication
+					file.FileInfo.Path = remotePath
+					allFiles[remotePath] = file.FileInfo
+					slaveFileCount++
+				}
+			}
+		}
+	}
+	log.Infof("Total files for task %s: %d (local: %d, slave: %d)", task.GetName(), len(allFiles), len(localFiles), slaveFileCount)
+
+	if len(allFiles) == 0 {
 		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum())
 		if err != nil {
 			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
@@ -260,7 +305,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			"title":       task.GetTitle(),
 			"description": task.GetDescription(),
 		},
-		OriginalFiles: files,
+		OriginalFiles: allFiles,
 	}
 	err := rc.Save()
 	if err != nil {
@@ -270,7 +315,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 
 	log.Infof("Record cache saved for task %s", task.GetName())
 	tags := make(map[string]string)
-	tags["totalFiles"] = strconv.Itoa(len(files))
+	tags["totalFiles"] = strconv.Itoa(len(allFiles))
 	if len(noPermissionFolders) > 0 {
 		tags["noPermissionFiles"] = strings.Join(noPermissionFolders, ",")
 	}
@@ -287,198 +332,19 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	}
 }
 
-func computeUploadFiles(scanFolders []string, additionalFiles []string, startTime time.Time, endTime time.Time) (map[string]model.FileInfo, []string) {
-	files := make(map[string]model.FileInfo)
-	noPermissionFolders := make([]string, 0)
-
-	for _, folder := range scanFolders {
-		time.Sleep(20 * time.Millisecond)
-
-		if !utils.CheckReadPath(folder) {
-			log.Warnf("Path %s is not readable, skip!", folder)
-
-			noPermissionFolders = append(noPermissionFolders, folder)
-			continue
-		}
-
-		realPath, info, err := utils.GetRealFileInfo(folder)
-		if err != nil {
-			log.Errorf("Failed to get folder info: %v", err)
-			continue
-		}
-
-		if !utils.CheckReadPath(realPath) {
-			log.Warnf("Path %s is not readable, skip!", realPath)
-
-			noPermissionFolders = append(noPermissionFolders, realPath)
-			continue
-		}
-
-		if !info.IsDir() {
-			files[realPath] = model.FileInfo{
-				FileName: filepath.Base(realPath),
-				Size:     info.Size(),
-				Path:     realPath,
-			}
-			continue
-		}
-
-		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
-			FollowSymlinks:       true,
-			SkipPermissionErrors: true,
-			SkipEmptyFiles:       true,
-			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.Errorf("Failed to get all file paths in folder %s: %v", folder, err)
-			continue
-		}
-
-		for _, path := range filePaths {
-			time.Sleep(20 * time.Millisecond)
-
-			if !utils.CheckReadPath(path) {
-				log.Warnf("Path %s is not readable, skip!", path)
-				continue
-			}
-
-			realPath, info, err := utils.GetRealFileInfo(path)
-			if err != nil {
-				log.Errorf("Failed to get file info for %s: %v", path, err)
-				continue
-			}
-
-			if !utils.CheckReadPath(realPath) {
-				log.Warnf("Path %s is not readable, skip!", realPath)
-				continue
-			}
-
-			log.Infof("file %s, mod time: %s", realPath, info.ModTime().String())
-			//nolint: nestif // check file modification time
-			if info.ModTime().After(startTime) && info.ModTime().Before(endTime) {
-				filename, err := filepath.Rel(folder, realPath)
-				if err != nil {
-					log.Errorf("Failed to get relative path: %v", err)
-					filename = filepath.Base(realPath)
-				}
-
-				files[realPath] = model.FileInfo{
-					FileName: filename,
-					Size:     info.Size(),
-					Path:     realPath,
-				}
-			} else {
-				stat, err := times.Stat(realPath)
-				if err != nil {
-					log.Errorf("Failed to get file times for %s: %v", realPath, err)
-					continue
-				}
-
-				if stat.HasBirthTime() {
-					log.Infof("File %s has birth time: %s", realPath, stat.BirthTime().String())
-					// birth time and modification time has intersection with the task time range
-					// birth time may be later than modification time, for example, copy a file from another disk
-					// if birth time is before modification time, then birth time should be before end time and modification time should be after start time
-					// if birth time is after modification time, then birth time should be after start time and modification time should be before end time
-					if (stat.BirthTime().Before(info.ModTime()) && stat.BirthTime().Before(endTime) && info.ModTime().After(startTime)) ||
-						(stat.BirthTime().After(info.ModTime()) && stat.BirthTime().After(startTime) && info.ModTime().Before(endTime)) {
-						filename, err := filepath.Rel(folder, realPath)
-						if err != nil {
-							log.Errorf("Failed to get relative path: %v", err)
-							filename = filepath.Base(realPath)
-						}
-
-						files[realPath] = model.FileInfo{
-							FileName: filename,
-							Size:     info.Size(),
-							Path:     realPath,
-						}
-					}
-				}
-			}
-		}
+// EnhanceTaskHandlerWithMasterSlave adds master-slave support to task handler.
+func (c *CustomTaskHandler) EnhanceTaskHandlerWithMasterSlave(
+	registry *master.SlaveRegistry,
+	masterConfig *config.MasterConfig,
+) {
+	if registry == nil || masterConfig == nil {
+		log.Warn("Master-slave components not provided, task handler will work in normal mode")
+		return
 	}
 
-	for _, file := range additionalFiles {
-		time.Sleep(20 * time.Millisecond)
+	c.slaveRegistry = registry
+	c.masterClient = master.NewClient(masterConfig)
+	c.masterConfig = masterConfig
 
-		if !utils.CheckReadPath(file) {
-			log.Warnf("Path %s is not readable, skip!", file)
-
-			noPermissionFolders = append(noPermissionFolders, file)
-			continue
-		}
-
-		realPath, info, err := utils.GetRealFileInfo(file)
-		if err != nil {
-			log.Errorf("Failed to get folder info: %v", err)
-			continue
-		}
-
-		if !utils.CheckReadPath(realPath) {
-			log.Warnf("Path %s is not readable, skip!", realPath)
-
-			noPermissionFolders = append(noPermissionFolders, realPath)
-			continue
-		}
-
-		if !info.IsDir() {
-			files[realPath] = model.FileInfo{
-				FileName: filepath.Base(realPath),
-				Size:     info.Size(),
-				Path:     realPath,
-			}
-			continue
-		}
-
-		// Clean the file path to handle trailing slashes correctly
-		cleanFile := filepath.Clean(realPath)
-		parentFolder := filepath.Dir(cleanFile)
-		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
-			FollowSymlinks:       true,
-			SkipPermissionErrors: true,
-			SkipEmptyFiles:       true,
-			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.Errorf("Failed to walk through folder %s: %v", realPath, err)
-			continue
-		}
-
-		for _, path := range filePaths {
-			time.Sleep(20 * time.Millisecond)
-
-			if !utils.CheckReadPath(path) {
-				log.Warnf("Path %s is not readable, skip!", path)
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-
-			realPath, info, err := utils.GetRealFileInfo(path)
-			if err != nil {
-				log.Errorf("Failed to get file info for %s: %v", path, err)
-				continue
-			}
-
-			if !utils.CheckReadPath(realPath) {
-				log.Warnf("Path %s is not readable, skip!", realPath)
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-
-			filename, err := filepath.Rel(parentFolder, realPath)
-			if err != nil {
-				log.Errorf("Failed to get relative path: %v", err)
-				filename = filepath.Base(realPath)
-			}
-
-			files[realPath] = model.FileInfo{
-				FileName: filename,
-				Size:     info.Size(),
-				Path:     realPath,
-			}
-		}
-	}
-
-	return files, noPermissionFolders
+	log.Info("Task handler enhanced with master-slave support")
 }
