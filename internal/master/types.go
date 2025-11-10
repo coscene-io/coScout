@@ -23,11 +23,19 @@ import (
 	"time"
 
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
 	// SlaveStatusOnline represents online status.
 	SlaveStatusOnline = "online"
+)
+
+// Static errors for better error handling.
+var (
+	// ErrSlaveIDConflict indicates that a slave ID is already registered with different IP/Port.
+	ErrSlaveIDConflict = errors.New("slave ID conflict")
 )
 
 // SlaveInfo stores slave node information.
@@ -72,13 +80,26 @@ func NewSlaveRegistry() *SlaveRegistry {
 }
 
 // Register registers or updates a slave.
-func (r *SlaveRegistry) Register(slave *SlaveInfo) {
+// Returns error if slave ID conflicts with existing slave (different IP/Port).
+func (r *SlaveRegistry) Register(slave *SlaveInfo) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if existing, exists := r.slaves[slave.ID]; exists {
+		// Check if it's the same slave (same IP and Port)
+		if existing.IP != slave.IP || existing.Port != slave.Port {
+			return errors.Wrapf(ErrSlaveIDConflict,
+				"slave ID %s already registered with %s:%d, but new registration from %s:%d",
+				slave.ID, existing.IP, existing.Port, slave.IP, slave.Port)
+		}
+		// Same slave, update information (e.g., version, capabilities may have changed)
+		log.Debugf("Updating existing slave %s information", slave.ID)
+	}
 
 	slave.LastSeen = time.Now()
 	slave.Status = SlaveStatusOnline
 	r.slaves[slave.ID] = slave
+	return nil
 }
 
 // Unregister removes a slave from registry.
@@ -197,8 +218,9 @@ type HeartbeatRequest struct {
 
 // HeartbeatResponse heartbeat response structure.
 type HeartbeatResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
+	Success        bool   `json:"success"`
+	Message        string `json:"message,omitempty"`
+	NeedReRegister bool   `json:"need_re_register,omitempty"` // If true, slave should re-register
 }
 
 // FileTransferRequest file transfer request structure.

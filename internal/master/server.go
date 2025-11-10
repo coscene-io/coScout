@@ -147,7 +147,16 @@ func (s *Server) handleSlaveRegister(w http.ResponseWriter, r *http.Request) {
 		FilePrefix:   req.FilePrefix,
 	}
 
-	s.registry.Register(slave)
+	if err := s.registry.Register(slave); err != nil {
+		log.Errorf("Failed to register slave %s: %v", req.SlaveID, err)
+		resp := RegisterResponse{
+			Success: false,
+			Message: err.Error(),
+		}
+		s.writeJSON(w, resp)
+		return
+	}
+
 	log.Infof("Slave %s registered from %s:%d", req.SlaveID, req.IP, req.Port)
 
 	resp := RegisterResponse{
@@ -177,7 +186,21 @@ func (s *Server) handleSlaveHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update heartbeat
+	// Check if slave exists in registry
+	_, exists := s.registry.GetSlave(req.SlaveID)
+	if !exists {
+		// Slave not found, likely master restarted and lost registry
+		log.Warnf("Received heartbeat from unregistered slave %s, requesting re-registration", req.SlaveID)
+		resp := HeartbeatResponse{
+			Success:        true,
+			NeedReRegister: true,
+			Message:        "Slave not found in registry, please re-register",
+		}
+		s.writeJSON(w, resp)
+		return
+	}
+
+	// Update heartbeat for existing slave
 	s.registry.UpdateHeartbeat(req.SlaveID)
 	log.Debugf("Received heartbeat from slave %s", req.SlaveID)
 

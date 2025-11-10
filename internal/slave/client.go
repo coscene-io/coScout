@@ -169,6 +169,34 @@ func (c *Client) register(ctx context.Context) error {
 }
 
 func (c *Client) startHeartbeat(ctx context.Context) {
+	// Add panic recovery to prevent goroutine crash
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("Heartbeat goroutine panic: %v, restarting heartbeat after 5 seconds...", r)
+			// After panic is recovered, the current goroutine will end.
+			// Start a new goroutine to restart heartbeat with delay to prevent immediate restart loop.
+			go func() {
+				// Use a timer with context cancellation to avoid unnecessary wait
+				timer := time.NewTimer(5 * time.Second)
+				defer timer.Stop()
+
+				select {
+				case <-timer.C:
+					// 5 seconds elapsed, check if context is still valid
+					if ctx.Err() == nil {
+						log.Info("Restarting heartbeat goroutine after panic recovery")
+						c.startHeartbeat(ctx)
+					} else {
+						log.Info("Context cancelled during panic recovery delay, skipping heartbeat restart")
+					}
+				case <-ctx.Done():
+					// Context cancelled during delay, skip restart
+					log.Info("Context cancelled during panic recovery delay, skipping heartbeat restart")
+				}
+			}()
+		}
+	}()
+
 	ticker := time.NewTicker(c.config.HeartbeatInterval)
 	defer ticker.Stop()
 
@@ -214,6 +242,22 @@ func (c *Client) sendHeartbeat(ctx context.Context) error {
 
 	if resp.StatusCode != http.StatusOK {
 		return errors.Wrapf(ErrHeartbeatFailed, "status %d", resp.StatusCode)
+	}
+
+	// Parse response to check if re-registration is needed
+	var heartbeatResp master.HeartbeatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&heartbeatResp); err != nil {
+		// If decode fails, assume success (backward compatibility)
+		log.Debug("Heartbeat sent successfully (response decode failed, assuming success)")
+		return nil
+	}
+
+	if heartbeatResp.NeedReRegister {
+		log.Warnf("Master requested re-registration for slave %s, re-registering...", c.slaveID)
+		if err := c.register(ctx); err != nil {
+			return errors.Wrap(err, "failed to re-register after heartbeat request")
+		}
+		log.Infof("Successfully re-registered slave %s after heartbeat request", c.slaveID)
 	}
 
 	log.Debug("Heartbeat sent successfully")
