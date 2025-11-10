@@ -485,6 +485,12 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 	// Add slave files
 	for _, slaveFileInfo := range slaveFiles {
 		remotePath := slaveFileInfo.GetRemotePath()
+		if remotePath == "" {
+			log.Warnf("slave file has empty remote path: %s, skip!", slaveFileInfo.Path)
+			continue
+		}
+		// use slave file path as key to avoid duplication
+		slaveFileInfo.FileInfo.Path = remotePath
 		allFiles[remotePath] = slaveFileInfo.FileInfo
 	}
 
