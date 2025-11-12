@@ -25,6 +25,7 @@ import (
 	"github.com/coscene-io/coscout/internal/collector"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/mod"
 	"github.com/coscene-io/coscout/pkg/constant"
 	log "github.com/sirupsen/logrus"
@@ -36,6 +37,15 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	appConfig := confManager.LoadWithRemote()
+
+	// Determine mode based on configuration
+	if appConfig.MasterSlave.Enabled {
+		log.Info("Starting daemon in master-slave mode")
+	} else {
+		log.Info("Starting daemon in single-node mode")
+	}
 
 	pubSub := gochannel.NewGoChannel(
 		gochannel.Config{
@@ -52,8 +62,34 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		}
 	}(pubSub)
 
+	// Start master server if master-slave mode is enabled
+	var masterServer *master.Server
+	var masterConfig *config.MasterConfig
+	var fileManager *master.FileManager
+	if appConfig.MasterSlave.Enabled {
+		masterConfig = config.DefaultMasterConfig()
+		masterServer = master.NewServer(masterConfig.Port, masterConfig)
+		go func() {
+			if err := masterServer.Start(ctx); err != nil {
+				log.Errorf("Master server failed: %v", err)
+				select {
+				case errorChan <- err:
+				default:
+					log.Warnf("Error channel is full, dropping error: %v", err)
+				}
+			}
+		}()
+		log.Infof("Master server started on port %d", masterConfig.Port)
+
+		// Set up FileManager for slave file handling
+		masterClient := master.NewClient(masterConfig)
+		fileManager = master.NewFileManager(masterClient, masterServer.GetRegistry())
+		log.Info("FileManager configured for slave file uploads")
+	}
+
+	// Start collector
 	go func() {
-		err := collector.Collect(ctx, reqClient, confManager, pubSub, errorChan)
+		err := collector.Collect(ctx, reqClient, confManager, fileManager, pubSub, errorChan)
 		if err != nil {
 			select {
 			case errorChan <- err:
@@ -63,6 +99,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		}
 	}()
 
+	// Start configuration refresh timer
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	go func(t *time.Ticker) {
@@ -70,7 +107,6 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 			select {
 			case <-t.C:
 				ticker.Reset(config.RefreshRemoteConfigInterval)
-
 				//nolint: contextcheck // context is checked in the parent goroutine
 				refreshRemoteConfig(confManager, reqClient)
 			case <-ctx.Done():
@@ -80,11 +116,37 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 		}
 	}(ticker)
 
+	// Start core services
 	go core.SendHeartbeat(ctx, reqClient, confManager.GetStorage(), errorChan)
-	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.TaskModType).Run(ctx)
-	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.RuleModType).Run(ctx)
+
+	// Start task handler with optional master-slave enhancement
+	taskHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.TaskModType)
+	if appConfig.MasterSlave.Enabled && masterServer != nil {
+		if customTaskHandler, ok := taskHandler.(interface {
+			EnhanceTaskHandlerWithMasterSlave(*master.SlaveRegistry, *config.MasterConfig)
+		}); ok {
+			customTaskHandler.EnhanceTaskHandlerWithMasterSlave(masterServer.GetRegistry(), masterConfig)
+			log.Info("Task handler enhanced with master-slave support")
+		}
+	}
+	go taskHandler.Run(ctx)
+
+	// Start rule handler with optional master-slave enhancement
+	ruleHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.RuleModType)
+	if appConfig.MasterSlave.Enabled && masterServer != nil {
+		if customRuleHandler, ok := ruleHandler.(interface {
+			EnhanceRuleHandlerWithMasterSlave(*master.SlaveRegistry, *config.MasterConfig)
+		}); ok {
+			customRuleHandler.EnhanceRuleHandlerWithMasterSlave(masterServer.GetRegistry(), masterConfig)
+			log.Info("Rule handler enhanced with master-slave support")
+		}
+	}
+	go ruleHandler.Run(ctx)
+
+	// Start HTTP handler
 	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.HttpModType).Run(ctx)
 
+	log.Info("Daemon started successfully")
 	<-finishChan
 }
 
