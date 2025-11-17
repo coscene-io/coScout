@@ -33,6 +33,7 @@ import (
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/core"
+	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/name"
 	"github.com/coscene-io/coscout/internal/storage"
@@ -73,11 +74,11 @@ func FindAllRecordCaches() []string {
 	return records
 }
 
-func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
+func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, fileManager *master.FileManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
 	uploadChan := make(chan string, 5)
 	triggerChan := make(chan struct{}, 1)
 
-	go Upload(ctx, reqClient, confManager, uploadChan, errorChan)
+	go Upload(ctx, reqClient, confManager, uploadChan, errorChan, fileManager)
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()

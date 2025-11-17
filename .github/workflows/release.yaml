@@ -103,6 +103,7 @@ jobs:
             cos.gz:/coscout/v2/latest/${{ matrix.os }}-${{ matrix.arch }}.gz
             ${{ matrix.os }}-${{ matrix.arch }}.json:/coscout/v2/latest/${{ matrix.os }}-${{ matrix.arch }}.json
             script/install.sh:/coscout/v2/install.sh
+            script/install-slave.sh:/coscout/v2/install-slave.sh
       - name: Upload coscli beta metadata files to oss
         if: env.IS_RELEASE == 'false'
         uses: tvrcgo/oss-action@master
@@ -115,6 +116,7 @@ jobs:
             cos.gz:/coscout/v2/beta/${{ matrix.os }}-${{ matrix.arch }}.gz
             ${{ matrix.os }}-${{ matrix.arch }}.json:/coscout/v2/beta/${{ matrix.os }}-${{ matrix.arch }}.json
             script/install.sh:/coscout/v2/install-beta.sh
+            script/install-slave.sh:/coscout/v2/install-slave-beta.sh
 
       - name: Replace download link in script/install.sh
         run: |

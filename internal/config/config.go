@@ -41,6 +41,9 @@ type AppConfig struct {
 	// Upload
 	Upload UploadConfig `koanf:"upload" yaml:"upload" json:"upload"`
 
+	// Master-Slave configuration
+	MasterSlave MasterSlaveConfig `koanf:"master_slave" yaml:"master_slave" json:"master_slave"`
+
 	// import other config
 	Import []string `koanf:"__import__" yaml:"__import__" json:"__import__"`
 }
@@ -99,4 +102,9 @@ type NetworkRule struct {
 	Enabled         bool     `koanf:"enabled" yaml:"enabled" json:"enabled"`
 	BlackInterfaces []string `koanf:"black_interfaces" yaml:"black_interfaces" json:"black_interfaces"`
 	Server          string   `koanf:"server" yaml:"server" json:"server"`
+}
+
+type MasterSlaveConfig struct {
+	// Whether to enable master mode (default false)
+	Enabled bool `koanf:"enabled" yaml:"enabled" json:"enabled"`
 }
