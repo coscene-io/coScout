@@ -100,10 +100,10 @@ func getDefaultInterfacePortable(server string) (string, error) {
 // strong cipher suites, rejecting weak CBC-SHA and other insecure suites.
 //
 // This configuration enforces:
-// - Minimum TLS 1.2 (TLS 1.3 will be used automatically if supported)
+// - TLS version 1.2 only (both MinVersion and MaxVersion set to TLS 1.2)
 // - Only GCM-based cipher suites (AES-GCM) for TLS 1.2
 // - No CBC-SHA suites (vulnerable to padding oracle attacks)
-// - No CHACHA20_POLY1305 suites (if policy requires GCM only)
+// - No TLS 1.3 suites (TLS_AES_* and TLS_CHACHA20_POLY1305_SHA256)
 //
 
 // Allowed cipher suites for TLS 1.2 (matching server support):
@@ -112,8 +112,8 @@ func getDefaultInterfacePortable(server string) (string, error) {
 // - TLS_RSA_WITH_AES_256_GCM_SHA384 (fallback, no forward secrecy)
 // - TLS_RSA_WITH_AES_128_GCM_SHA256 (fallback, no forward secrecy)
 //
-// TLS 1.3 cipher suites are automatically handled by Go and don't need
-// explicit configuration (they are always secure).
+// TLS 1.3 is disabled by setting MaxVersion to TLS 1.2, ensuring only
+// the configured TLS 1.2 cipher suites appear in the Client Hello.
 func SecureTLSConfig() *tls.Config {
 	return &tls.Config{
 		// TLS certificate verification is mandatory for security.
@@ -121,8 +121,12 @@ func SecureTLSConfig() *tls.Config {
 		InsecureSkipVerify: false,
 		// Minimum TLS version 1.2 is required for security.
 		// TLS 1.0 and 1.1 are deprecated (RFC 8996).
-		// TLS 1.3 will be used automatically if supported by the server.
 		MinVersion: tls.VersionTLS12,
+		// Maximum TLS version 1.2 to match server configuration.
+		// This prevents Go from automatically adding TLS 1.3 cipher suites
+		// (TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256)
+		// in the Client Hello, ensuring only the configured TLS 1.2 suites are used.
+		MaxVersion: tls.VersionTLS12,
 		// Explicitly allow only secure cipher suites.
 		// This prevents the use of weak CBC-SHA suites that are vulnerable
 		// to padding oracle attacks (e.g., BEAST, Lucky 13).
