@@ -16,7 +16,6 @@ package collector
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net"
@@ -457,16 +456,8 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		log.Warnf("insecure TLS configuration is deprecated and ignored. TLS certificate verification is now mandatory for security.")
 	}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		TLSClientConfig: &tls.Config{
-			// TLS certificate verification is mandatory for security.
-			// InsecureSkipVerify is always false to prevent MITM attacks.
-			InsecureSkipVerify: false,
-			// Minimum TLS version 1.2 is required for security.
-			// TLS 1.0 and 1.1 are deprecated (RFC 8996).
-			// TLS 1.3 will be used automatically if supported by the server.
-			MinVersion: tls.VersionTLS12,
-		},
+		Proxy:                 http.ProxyFromEnvironment,
+		TLSClientConfig:       utils.SecureTLSConfig(),
 		MaxIdleConns:          3,
 		IdleConnTimeout:       30 * time.Second,
 		DisableKeepAlives:     true,
