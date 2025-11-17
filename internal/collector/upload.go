@@ -497,7 +497,11 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 
 	log.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
 	tags := map[string]string{}
-	err = um.FPutObject(fileInfo.Path, constant.UploadBucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
+	bucket := constant.UploadBucket
+	if generateSecurityTokenRes.GetBucket() != "" {
+		bucket = generateSecurityTokenRes.GetBucket()
+	}
+	err = um.FPutObject(fileInfo.Path, bucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
 	if err != nil {
 		log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 		return err
