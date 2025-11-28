@@ -16,7 +16,6 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -38,6 +37,7 @@ import (
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
+	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -68,16 +68,8 @@ func NewRequestClient(apiConfig config.ApiConfig, storage storage.Storage, netwo
 	}
 	httpClient := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			TLSClientConfig: &tls.Config{
-				// TLS certificate verification is mandatory for security.
-				// InsecureSkipVerify is always false to prevent MITM attacks.
-				InsecureSkipVerify: false,
-				// Minimum TLS version 1.2 is required for security.
-				// TLS 1.0 and 1.1 are deprecated (RFC 8996).
-				// TLS 1.3 will be used automatically if supported by the server.
-				MinVersion: tls.VersionTLS12,
-			},
+			Proxy:             http.ProxyFromEnvironment,
+			TLSClientConfig:   utils.SecureTLSConfig(),
 			ForceAttemptHTTP2: true,
 			IdleConnTimeout:   10 * time.Second,
 			MaxIdleConns:      3,
