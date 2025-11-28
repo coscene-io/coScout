@@ -3,8 +3,8 @@ module github.com/coscene-io/coscout
 go 1.24.4
 
 require (
-	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.19.1-20251111051611-8e315641d805.2
-	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.10-20251111051611-8e315641d805.1
+	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.19.1-20251126074344-05da902ba782.2
+	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.10-20251126074344-05da902ba782.1
 	connectrpc.com/connect v1.19.1
 	github.com/ThreeDotsLabs/watermill v1.5.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
