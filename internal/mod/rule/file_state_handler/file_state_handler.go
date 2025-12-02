@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/mod/rule/file_handlers"
 	"github.com/coscene-io/coscout/pkg/utils"
@@ -39,7 +40,7 @@ type FileStateHandler interface {
 	UpdateListenDirs(conf config.DefaultModConfConfig) error
 
 	// UpdateCollectDirs updates the directories being collected.
-	UpdateCollectDirs(conf config.DefaultModConfConfig) error
+	UpdateCollectDirs(whitelist []string, conf config.DefaultModConfConfig) error
 
 	// Files returns filename and file state pairs that match the given filters.
 	Files(filters ...FileFilter) []FileState
@@ -386,7 +387,7 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 	return nil
 }
 
-func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) error {
+func (f *fileStateHandler) UpdateCollectDirs(whitelist []string, conf config.DefaultModConfConfig) error {
 	// Filter directories for read access and create sets
 	newCollectDirs := mapset.NewSet[string]()
 	for _, dir := range conf.CollectDirs {
@@ -409,6 +410,20 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 				log.Infof("Deleted file state for %s in directory %s", filename, dir)
 			}
 		}
+	}
+
+	// Helper function to check if file matches whitelist
+	matchesWhitelist := func(filename string) bool {
+		if len(whitelist) == 0 {
+			return true
+		}
+		for _, pattern := range whitelist {
+			matched, err := doublestar.PathMatch(pattern, filename)
+			if err == nil && matched {
+				return true
+			}
+		}
+		return false
 	}
 
 	// Iterate over new directories and update file states
@@ -435,6 +450,11 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 
 			for _, entryPath := range filePaths {
 				time.Sleep(5 * time.Millisecond) // Sleep to prevent high CPU usage
+
+				// Check whitelist before processing (saves expensive file operations)
+				if !matchesWhitelist(entryPath) {
+					continue
+				}
 
 				// Check if the entry is readable
 				if !utils.CheckReadPath(entryPath) {
@@ -466,7 +486,19 @@ func (f *fileStateHandler) UpdateCollectDirs(conf config.DefaultModConfConfig) e
 					continue
 				}
 				// Get absolute path of the entry
-				absPath := filepath.Join(dir, entry.Name())
+				// Use filepath.Abs to ensure consistency with recursive branch and Files() method
+				joinedPath := filepath.Join(dir, entry.Name())
+				absPath, err := filepath.Abs(joinedPath)
+				if err != nil {
+					log.Errorf("Failed to get absolute path for %s, skipping: %v", joinedPath, err)
+					continue
+				}
+
+				// Check whitelist before processing (saves expensive file operations)
+				if !matchesWhitelist(absPath) {
+					continue
+				}
+
 				if !utils.CheckReadPath(absPath) {
 					log.Warnf("Skipping file %s due to insufficient permissions", absPath)
 					continue
