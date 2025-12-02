@@ -29,6 +29,7 @@ import (
 	"github.com/coscene-io/coscout/internal/mod/rule/file_handlers"
 	"github.com/coscene-io/coscout/pkg/utils"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/djherbis/times"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
@@ -607,17 +608,31 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 	// Update state
 	newState := fileState
 	if !hasFileState || fileState.ModifyTime != info.ModTime().Unix() {
-		startTime, endTime, err := handler.GetStartTimeEndTime(absPath)
-		if err != nil {
-			log.Errorf("Error getting start and end time for %s: %v, skip collect", absPath, err)
+		var startTime, endTime *time.Time
 
-			f.setFileState(absPath, FileState{
-				Size:        info.Size(),
-				ModifyTime:  info.ModTime().Unix(),
-				Unsupported: true,
-			})
-			return
+		// Try to use file creation time and modification time if available
+		// This avoids expensive file content reading operations
+		fileTimes, err := times.Stat(absPath)
+		if err == nil && fileTimes.HasBirthTime() {
+			birthTime := fileTimes.BirthTime()
+			modTime := info.ModTime()
+			startTime = &birthTime
+			endTime = &modTime
+		} else {
+			// Fallback to reading file content to get start and end time
+			startTime, endTime, err = handler.GetStartTimeEndTime(absPath)
+			if err != nil {
+				log.Errorf("Error getting start and end time for %s: %v, skip collect", absPath, err)
+
+				f.setFileState(absPath, FileState{
+					Size:        info.Size(),
+					ModifyTime:  info.ModTime().Unix(),
+					Unsupported: true,
+				})
+				return
+			}
 		}
+
 		newState = FileState{
 			Size:       info.Size(),
 			StartTime:  startTime.Unix(),
