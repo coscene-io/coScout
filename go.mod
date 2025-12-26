@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.19.1-20251111051611-8e315641d805.2
-	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.10-20251111051611-8e315641d805.1
+	buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.11-20251226070313-d49f689cdc34.1
 	connectrpc.com/connect v1.19.1
 	github.com/ThreeDotsLabs/watermill v1.5.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
@@ -32,14 +32,14 @@ require (
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/sys v0.38.0
 	golang.org/x/time v0.14.0
-	google.golang.org/protobuf v1.36.10
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20240508200655-46a4cf4ba109.1 // indirect
-	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.10-20230414000709-087bc8072ce4.1 // indirect
+	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20240508200655-46a4cf4ba109.1 // indirect
+	buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.11-20230414000709-087bc8072ce4.1 // indirect
 	cel.dev/expr v0.24.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
