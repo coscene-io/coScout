@@ -161,8 +161,6 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 			log.Infof("Received collect message, start collecting for upload")
 			msg.Ack()
 
-			time.Sleep(1 * time.Second)
-
 			select {
 			case triggerChan <- struct{}{}:
 				log.Infof("Received collect message, trigger upload")
@@ -191,7 +189,6 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 
 	// upload all record caches
 	for _, record := range records {
-		time.Sleep(10 * time.Millisecond)
 		log.Infof("Processing record cache: %s", record)
 
 		if !utils.CheckReadPath(record) {
