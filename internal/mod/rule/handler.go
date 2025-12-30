@@ -355,27 +355,49 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 		collectInfoIds = append(collectInfoIds, collectInfoId)
 	}
 
-	if len(collectInfoIds) > 0 {
-		log.Infof("Found %d collect info files", len(collectInfoIds))
+	if len(collectInfoIds) == 0 {
+		log.Infof("Finished scanning collect info dir, found 0 collect info files")
+		return
+	}
 
-		err := c.collectFileStateHandler.UpdateCollectDirs(*modConfig)
+	log.Infof("Found %d collect info files", len(collectInfoIds))
+	for _, collectInfoId := range collectInfoIds {
+		time.Sleep(100 * time.Millisecond)
+
+		collectInfo := &model.CollectInfo{}
+		if err := collectInfo.Load(collectInfoId); err != nil {
+			log.Errorf("load collect info: %v", err)
+			c.errChan <- errors.Wrap(err, "load collect info")
+			continue
+		}
+
+		// Skip early checks
+		if collectInfo.Skip {
+			log.Infof("Skipping collect info: %v, cleaning", collectInfo.Id)
+			collectInfo.Clean()
+			continue
+		}
+
+		if collectInfo.Cut == nil {
+			log.Errorf("Collect info cut is nil: %v", collectInfo.Id)
+			collectInfo.Clean()
+			continue
+		}
+
+		if time.Unix(collectInfo.Cut.End, 0).After(time.Now()) {
+			log.Infof("Collect info is not reached: %v", collectInfo.Id)
+			continue
+		}
+
+		err := c.collectFileStateHandler.UpdateCollectDirs(collectInfo.Cut.WhiteList, *modConfig)
 		if err != nil {
 			log.Errorf("file state handler update collect dirs: %v", err)
 			c.errChan <- errors.Wrap(err, "file state handler update collect dirs")
 			return
 		}
 
-		for _, collectInfoId := range collectInfoIds {
-			collectInfo := &model.CollectInfo{}
-			if err := collectInfo.Load(collectInfoId); err != nil {
-				log.Errorf("load collect info: %v", err)
-				c.errChan <- errors.Wrap(err, "load collect info")
-				continue
-			}
-
-			log.Infof("Found collect info: %v", collectInfoId)
-			c.handleCollectInfo(*collectInfo, *modConfig)
-		}
+		log.Infof("Found collect info: %v", collectInfo.Id)
+		c.handleCollectInfo(*collectInfo, *modConfig)
 	}
 	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
 }

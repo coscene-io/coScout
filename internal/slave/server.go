@@ -238,7 +238,7 @@ func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []stri
 		CollectDirs:         scanFolders,
 		RecursivelyWalkDirs: recursivelyWalkDirs,
 	}
-	if err := s.collectFileStateHandler.UpdateCollectDirs(conf); err != nil {
+	if err := s.collectFileStateHandler.UpdateCollectDirs(whiteList, conf); err != nil {
 		log.Errorf("file state handler update collect dirs: %v", err)
 		return result
 	}
