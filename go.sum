@@ -1,11 +1,17 @@
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20240508200655-46a4cf4ba109.1 h1:Do0rmF2enWYkHL8DP12vms1LKxh7tKmgWdeiHivsZ2E=
 buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.10-20240508200655-46a4cf4ba109.1/go.mod h1:fUl8CEN/6ZAMk6bP8ahBJPUJw7rbp+j4x+wCcYi2IG4=
+buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20240508200655-46a4cf4ba109.1 h1:NXwdBG3BiC6xWH4iG3csbT+JHF9u1jl5ThDhumCnKnk=
+buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20240508200655-46a4cf4ba109.1/go.mod h1:tvtbpgaVXZX4g6Pn+AnzFycuRK3MOz5HJfEGeEllXYM=
 buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.19.1-20251111051611-8e315641d805.2 h1:FLAD8Uj2k54efzqKgbQXWBriSccBuwaDfmmHnL/BMfA=
 buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.19.1-20251111051611-8e315641d805.2/go.mod h1:tuKtlupvQqGhQ8iD/DxOQL8bEzyVkVAAC7aLGSACE3A=
 buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.10-20251111051611-8e315641d805.1 h1:nJJPQJJS/6ly7u4x8J1248LSNebJG19ubSCaA5WbOEU=
 buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.10-20251111051611-8e315641d805.1/go.mod h1:QBIz62jldWsPMRxTPPMk1qAuy0JL/Z4Mu5eBV1Nxsfk=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.11-20251226070313-d49f689cdc34.1 h1:6XdeAfTLwEuY9LcbgYhRDYVahGi4RKJ9+f8ic9BtoRA=
+buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go v1.36.11-20251226070313-d49f689cdc34.1/go.mod h1:ncUQjVNWzogYkhgQ1XinFjWE1h7HuPtKpimyf90abE0=
 buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.10-20230414000709-087bc8072ce4.1 h1:Am1wPnQeS/axnhTqz9PMkdKU/HWUNzw1blyka+6pVq0=
 buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.10-20230414000709-087bc8072ce4.1/go.mod h1:E0if/vOrI4rwufcOKziOMuFXnmpG1t6LhbZ5fVS6HX0=
+buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.11-20230414000709-087bc8072ce4.1 h1:t8f+WWZ5WNrZaP5zrpWD8f1tKU7eelJMbIAT9FRX558=
+buf.build/gen/go/gnostic/gnostic/protocolbuffers/go v1.36.11-20230414000709-087bc8072ce4.1/go.mod h1:/t9AeRQQp2iNkiGHDLfHLW3SzNpYpNPGRZ+Ih8+SOUs=
 cel.dev/expr v0.24.0 h1:56OvJKSH3hDGL0ml5uSxZmz3/3Pq4tJ+fb1unVLAFcY=
 cel.dev/expr v0.24.0/go.mod h1:hLPLo1W4QUmuYdA72RBX06QTs6MXw941piREPl3Yfiw=
 connectrpc.com/connect v1.19.1 h1:R5M57z05+90EfEvCY1b7hBxDVOUl45PrtXtAV2fOC14=
