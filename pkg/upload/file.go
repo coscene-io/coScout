@@ -101,7 +101,7 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 			if timeStat.HasBirthTime() {
 				fileStartTime = timeStat.BirthTime()
 			}
-			log.Infof("file %s, start time: %s, end time: %s", realPath, fileStartTime, fileEndTime)
+			log.Infof("file %s, start time: %s, end time: %s", realPath, fileStartTime.UTC().String(), fileEndTime.UTC().String())
 
 			if fileStartTime.Unix() <= endTime.Unix() && fileEndTime.Unix() >= startTime.Unix() {
 				filename, err := filepath.Rel(folder, realPath)

@@ -497,6 +497,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 
 	// Add local files
 	for p, fileInfo := range localFiles {
+		log.Infof("Collecting local file: %s for startTime %d, endTime: %d", p, info.Cut.Start, info.Cut.End)
 		allFiles[p] = fileInfo
 	}
 
@@ -510,6 +511,8 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 		// use slave file path as key to avoid duplication
 		slaveFileInfo.FileInfo.Path = remotePath
 		allFiles[remotePath] = slaveFileInfo.FileInfo
+
+		log.Infof("Collecting slave file: %s for startTime %d, endTime: %d", remotePath, info.Cut.Start, info.Cut.End)
 	}
 
 	log.Infof("finish collecting for files start: %v, end: %v, total files: %d (local: %d, slave: %d)",

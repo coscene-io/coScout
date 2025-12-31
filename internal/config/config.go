@@ -96,6 +96,8 @@ type HttpServerConfig struct {
 
 type UploadConfig struct {
 	NetworkRule NetworkRule `koanf:"network_rule" yaml:"network_rule" json:"network_rule"`
+	// RateLimit controls upload throughput, e.g. "10MB", "512KB". Empty or zero means unlimited.
+	RateLimit string `koanf:"rate_limit" yaml:"rate_limit" json:"rate_limit"`
 }
 
 type NetworkRule struct {

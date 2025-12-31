@@ -291,6 +291,8 @@ func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []stri
 
 	localFiles := upload.ComputeRuleFileInfos(fileStates)
 	for _, file := range localFiles {
+		log.Infof("Slave found file matching content time range startTime: %s, endTime: %s, path: %s", startTime.UTC().String(), endTime.UTC().String(), file.Path)
+
 		fileName := filepath.Join(s.filePrefix, file.FileName)
 		result = append(result, master.SlaveFileInfo{
 			FileInfo: model.FileInfo{
