@@ -588,6 +588,7 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 		return
 	}
 
+	log.Infof("Collecting file %s is modified, checking new state", absPath)
 	handler := f.GetFileHandler(absPath)
 	if handler == nil {
 		f.setFileState(absPath, FileState{
