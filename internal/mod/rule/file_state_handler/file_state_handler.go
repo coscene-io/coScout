@@ -150,6 +150,7 @@ func (f *fileStateHandler) registerHandlers() {
 		file_handlers.NewLogHandler(),
 		file_handlers.NewMcapHandler(),
 		file_handlers.NewRos1Handler(),
+		file_handlers.NewDefaultHandler(),
 	}
 }
 
@@ -607,7 +608,7 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 		fileTimes, err := times.Stat(absPath)
 		if err == nil && fileTimes.HasBirthTime() {
 			birthTime := fileTimes.BirthTime()
-			modTime := info.ModTime()
+			modTime := fileTimes.ModTime()
 			startTime = &birthTime
 			endTime = &modTime
 		} else {

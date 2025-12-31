@@ -90,9 +90,20 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 				continue
 			}
 
-			log.Infof("file %s, mod time: %s", realPath, info.ModTime().String())
-			//nolint: nestif // check file modification time
-			if info.ModTime().After(startTime) && info.ModTime().Before(endTime) {
+			timeStat, err := times.Stat(realPath)
+			if err != nil {
+				log.Errorf("Failed to get file times for %s: %v", realPath, err)
+				continue
+			}
+
+			fileStartTime := info.ModTime()
+			fileEndTime := info.ModTime()
+			if timeStat.HasBirthTime() {
+				fileStartTime = timeStat.BirthTime()
+			}
+			log.Infof("file %s, start time: %s, end time: %s", realPath, fileStartTime, fileEndTime)
+
+			if fileStartTime.Unix() <= endTime.Unix() && fileEndTime.Unix() >= startTime.Unix() {
 				filename, err := filepath.Rel(folder, realPath)
 				if err != nil {
 					log.Errorf("Failed to get relative path: %v", err)
@@ -103,29 +114,6 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 					FileName: filename,
 					Size:     info.Size(),
 					Path:     realPath,
-				}
-			} else {
-				stat, err := times.Stat(realPath)
-				if err != nil {
-					log.Errorf("Failed to get file times for %s: %v", realPath, err)
-					continue
-				}
-
-				if stat.HasBirthTime() {
-					log.Infof("File %s has birth time: %s", realPath, stat.BirthTime().String())
-					if stat.BirthTime().After(startTime) && stat.BirthTime().Before(endTime) {
-						filename, err := filepath.Rel(folder, realPath)
-						if err != nil {
-							log.Errorf("Failed to get relative path: %v", err)
-							filename = filepath.Base(realPath)
-						}
-
-						files[realPath] = model.FileInfo{
-							FileName: filename,
-							Size:     info.Size(),
-							Path:     realPath,
-						}
-					}
 				}
 			}
 		}

@@ -50,9 +50,9 @@ func NewServer(port int, filePrefix string) *Server {
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  10 * time.Second,
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	s := &Server{
