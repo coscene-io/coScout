@@ -10,6 +10,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/djherbis/times v1.6.0
+	github.com/dustin/go-humanize v1.0.1
 	github.com/foxglove/go-rosbag v0.0.7
 	github.com/foxglove/mcap/go/mcap v1.7.4
 	github.com/google/cel-go v0.26.1
@@ -43,7 +44,6 @@ require (
 	cel.dev/expr v0.24.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect

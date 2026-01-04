@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -37,6 +38,7 @@ import (
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
+	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pkg/errors"
@@ -231,7 +233,6 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	})
 
 	for _, fileInfo := range toUploadFiles {
-		time.Sleep(10 * time.Millisecond) // sleep a while to avoid too many files uploaded at the same time
 		filePath := fileInfo.Path
 
 		recordCache, err := recordCache.Reload()
@@ -246,13 +247,11 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 
 		if !isSlaveFile(filePath) && !utils.CheckReadPath(filePath) {
 			log.Warnf("local file %s not exist", filePath)
-			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
 		if lo.Contains(recordCache.UploadedFilePaths, filePath) {
 			log.Infof("file %s has been uploaded, skip", filePath)
-			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
@@ -451,6 +450,10 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		return errors.New("generate security token endpoint is empty")
 	}
 
+	uploadRateLimit := parseUploadRateLimitBytes(appConfig)
+	if uploadRateLimit > 0 {
+		log.Infof("upload rate limit enabled: %d bytes/sec", uploadRateLimit)
+	}
 	// Force TLS certificate verification for security. InsecureSkipVerify is always false.
 	if appConfig.Api.Insecure {
 		log.Warnf("insecure TLS configuration is deprecated and ignored. TLS certificate verification is now mandatory for security.")
@@ -480,7 +483,7 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		return err
 	}
 
-	um, err := upload.NewUploadManager(mc, storage, constant.MultiPartUploadBucket, reqClient.GetNetworkChan())
+	um, err := upload.NewUploadManager(mc, storage, constant.MultiPartUploadBucket, reqClient.GetNetworkChan(), uploadRateLimit)
 	if err != nil {
 		log.Errorf("unable to create upload manager: %v", err)
 		return err
@@ -695,6 +698,35 @@ func checkDisabledUpload(confManager *config.ConfManager) bool {
 // isSlaveFile checks if the file path is a slave file.
 func isSlaveFile(filePath string) bool {
 	return strings.HasPrefix(filePath, "slave://")
+}
+
+// parseUploadRateLimitBytes converts the configured rate limit to bytes per second. Empty/invalid values disable throttling.
+func parseUploadRateLimitBytes(appConfig *config.AppConfig) int64 {
+	if appConfig == nil {
+		return 0
+	}
+
+	limitStr := strings.TrimSpace(appConfig.Upload.RateLimit)
+	if limitStr == "" {
+		return 0
+	}
+
+	limitBytes, err := humanize.ParseBytes(limitStr)
+	if err != nil {
+		log.Warnf("invalid upload rate limit %q, disable throttling: %v", limitStr, err)
+		return 0
+	}
+
+	if limitBytes == 0 {
+		return 0
+	}
+
+	if limitBytes > math.MaxInt64 {
+		log.Warnf("upload rate limit %q exceeds int64, disable throttling", limitStr)
+		return 0
+	}
+
+	return int64(limitBytes)
 }
 
 // uploadSlaveFile downloads slave file to local cache and then uploads using standard logic.

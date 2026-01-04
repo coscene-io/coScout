@@ -29,7 +29,7 @@ type BoltDB struct {
 func NewBoltDB(filepath string) Storage {
 	db, err := bbolt.Open(filepath, 0600, &bbolt.Options{Timeout: 3 * time.Second})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("open local boltdb ", filepath, ", err: ", err)
 	}
 
 	return &BoltDB{db: db}

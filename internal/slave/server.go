@@ -50,9 +50,9 @@ func NewServer(port int, filePrefix string) *Server {
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  10 * time.Second,
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	s := &Server{
@@ -291,6 +291,8 @@ func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []stri
 
 	localFiles := upload.ComputeRuleFileInfos(fileStates)
 	for _, file := range localFiles {
+		log.Infof("Slave found file matching content time range startTime: %s, endTime: %s, path: %s", startTime.UTC().String(), endTime.UTC().String(), file.Path)
+
 		fileName := filepath.Join(s.filePrefix, file.FileName)
 		result = append(result, master.SlaveFileInfo{
 			FileInfo: model.FileInfo{

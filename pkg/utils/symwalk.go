@@ -21,7 +21,6 @@ import (
 	"sort"
 	"strings"
 	"syscall"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -323,8 +322,6 @@ func GetAllFilePaths(root string, options *SymWalkOptions) ([]string, error) {
 
 	// Define the walk function that collects file paths
 	walkFn := func(path string, info os.FileInfo, err error) error {
-		time.Sleep(10 * time.Millisecond)
-
 		if err != nil {
 			return err
 		}

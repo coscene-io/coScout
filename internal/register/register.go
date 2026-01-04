@@ -121,11 +121,13 @@ func (r *Register) CheckOrRegisterDevice(channel chan<- model.DeviceStatusRespon
 			// check device status
 			exist, state, err := r.getRemoteDeviceStatus(device.GetName())
 			if err != nil {
-				channel <- model.DeviceStatusResponse{
-					Authorized: false,
-					Exist:      false,
-				}
+				log.Warnf("Failed to get device status: %v", err)
 
+				// keep local running when network offline
+				channel <- model.DeviceStatusResponse{
+					Authorized: true,
+					Exist:      true,
+				}
 				return
 			}
 
