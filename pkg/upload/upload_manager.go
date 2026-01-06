@@ -34,7 +34,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/time/rate"
 )
 
 const (
@@ -60,17 +59,15 @@ type Manager struct {
 	client             *minio.Client
 	uploadProgressChan chan FileUploadProgress
 	networkChan        chan *model.NetworkUsage
-	rateLimiter        *rate.Limiter
 }
 
-func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucket string, networkChan chan *model.NetworkUsage, rateLimitBytesPerSec int64) (*Manager, error) {
+func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucket string, networkChan chan *model.NetworkUsage) (*Manager, error) {
 	u := &Manager{
 		networkChan:        networkChan,
 		uploadProgressChan: make(chan FileUploadProgress, 10),
 		storage:            storage,
 		cacheBucket:        cacheBucket,
 		client:             client,
-		rateLimiter:        newRateLimiter(rateLimitBytesPerSec),
 	}
 
 	go u.handleUploadProgress()
@@ -122,8 +119,7 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 			}
 		}(fileReader)
 
-		reader := newRateLimitedReader(ctx, fileReader, u.rateLimiter)
-		_, err = u.client.PutObject(ctx, bucket, key, reader, filesize,
+		_, err = u.client.PutObject(ctx, bucket, key, fileReader, filesize,
 			minio.PutObjectOptions{Progress: progress, UserTags: userTags, NumThreads: numThreads})
 	}
 
@@ -382,9 +378,8 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 					}
 
 					sectionReader := io.NewSectionReader(fileReader, readOffset, curPartSize)
-					reader := newRateLimitedReader(ctx, sectionReader, u.rateLimiter)
 					log.Debugf("Uploading part: %d", partToUpload)
-					objPart, err := c.PutObjectPart(ctx, bucket, key, uploadId, partToUpload, reader, curPartSize, minio.PutObjectPartOptions{
+					objPart, err := c.PutObjectPart(ctx, bucket, key, uploadId, partToUpload, sectionReader, curPartSize, minio.PutObjectPartOptions{
 						SSE: opts.ServerSideEncryption,
 					})
 					if err != nil {
@@ -510,9 +505,16 @@ func newUploadProgressReader(absPath string, total int64, uploadProgressChan cha
 }
 
 func (r *uploadProgressReader) Read(b []byte) (int, error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+
 	n := len(b)
 	r.mu.Lock()
 	r.uploaded += int64(n)
+	if r.total > 0 && r.uploaded > r.total {
+		r.uploaded = r.total
+	}
 	uploaded := r.uploaded
 	r.mu.Unlock()
 
@@ -529,75 +531,4 @@ func (r *uploadProgressReader) Read(b []byte) (int, error) {
 type uploadedPartRes struct {
 	Error error // Any error encountered while uploading the part.
 	Part  minio.ObjectPart
-}
-
-// newRateLimiter builds a limiter that throttles by bytes per second. Zero/negative disables throttling.
-func newRateLimiter(maxBytesPerSec int64) *rate.Limiter {
-	if maxBytesPerSec <= 0 {
-		return nil
-	}
-
-	burstLimit := maxBytesPerSec
-	if burstLimit > 1<<31-1 {
-		burstLimit = 1<<31 - 1
-	}
-
-	burst := int(burstLimit)
-	if burst < 64*1024 {
-		burst = 64 * 1024
-	}
-
-	// The limiter is shared across all part uploads to enforce a total ceiling.
-	return rate.NewLimiter(rate.Limit(maxBytesPerSec), burst)
-}
-
-type rateLimitedReader struct {
-	reader   io.Reader
-	limiter  *rate.Limiter
-	maxChunk int
-	wait     func(int) error
-}
-
-func newRateLimitedReader(ctx context.Context, reader io.Reader, limiter *rate.Limiter) io.Reader {
-	if limiter == nil {
-		return reader
-	}
-
-	//nolint: contextcheck // we are not using user input here.
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	maxChunk := limiter.Burst()
-	if maxChunk <= 0 {
-		maxChunk = 64 * 1024
-	}
-
-	return &rateLimitedReader{
-		reader:   reader,
-		limiter:  limiter,
-		maxChunk: maxChunk,
-		wait: func(n int) error {
-			return limiter.WaitN(ctx, n)
-		},
-	}
-}
-
-func (r *rateLimitedReader) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-
-	if len(p) > r.maxChunk {
-		p = p[:r.maxChunk]
-	}
-
-	n, err := r.reader.Read(p)
-	if n > 0 && r.limiter != nil && r.wait != nil {
-		if waitErr := r.wait(n); waitErr != nil && err == nil {
-			err = waitErr
-		}
-	}
-
-	return n, err
 }

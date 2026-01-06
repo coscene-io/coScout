@@ -471,19 +471,20 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		}).DialContext,
 	}
 	defer transport.CloseIdleConnections()
+	limitedTransport := upload.NewRateLimitedTransport(uploadRateLimit, 0, transport)
 
 	mc, err := minio.New(generateSecurityTokenRes.GetEndpoint(), &minio.Options{
 		Creds:     credentials.NewStaticV4(generateSecurityTokenRes.GetAccessKeyId(), generateSecurityTokenRes.GetAccessKeySecret(), generateSecurityTokenRes.GetSessionToken()),
 		Secure:    true,
 		Region:    "",
-		Transport: transport,
+		Transport: limitedTransport,
 	})
 	if err != nil {
 		log.Errorf("unable to create minio client: %v", err)
 		return err
 	}
 
-	um, err := upload.NewUploadManager(mc, storage, constant.MultiPartUploadBucket, reqClient.GetNetworkChan(), uploadRateLimit)
+	um, err := upload.NewUploadManager(mc, storage, constant.MultiPartUploadBucket, reqClient.GetNetworkChan())
 	if err != nil {
 		log.Errorf("unable to create upload manager: %v", err)
 		return err
