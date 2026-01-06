@@ -108,18 +108,7 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 			absPath, filesize, minio.PutObjectOptions{UserTags: userTags, PartSize: uint64(partSize), NumThreads: numThreads})
 	} else {
 		progress := newUploadProgressReader(absPath, filesize, u.uploadProgressChan)
-		fileReader, openErr := os.Open(absPath)
-		if openErr != nil {
-			return openErr
-		}
-		defer func(fileReader *os.File) {
-			err := fileReader.Close()
-			if err != nil {
-				log.Errorf("Close file reader failed: %v", err)
-			}
-		}(fileReader)
-
-		_, err = u.client.PutObject(ctx, bucket, key, fileReader, filesize,
+		_, err = u.client.FPutObject(ctx, bucket, key, absPath,
 			minio.PutObjectOptions{Progress: progress, UserTags: userTags, NumThreads: numThreads})
 	}
 
