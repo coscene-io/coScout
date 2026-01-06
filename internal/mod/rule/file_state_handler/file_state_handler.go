@@ -588,7 +588,6 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 		return
 	}
 
-	log.Infof("Collecting file %s is modified, checking new state", absPath)
 	handler := f.GetFileHandler(absPath)
 	if handler == nil {
 		f.setFileState(absPath, FileState{
@@ -612,6 +611,8 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 			modTime := fileTimes.ModTime()
 			startTime = &birthTime
 			endTime = &modTime
+
+			log.Infof("collect file %s has birthTime, start time: %s, end time: %s", absPath, startTime.UTC().String(), endTime.UTC().String())
 		} else {
 			// Fallback to reading file content to get start and end time
 			startTime, endTime, err = handler.GetStartTimeEndTime(absPath)
@@ -633,6 +634,8 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 			EndTime:    endTime.Unix(),
 			ModifyTime: info.ModTime().Unix(),
 		}
+
+		log.Infof("Collecting file %s start time: %s, end time: %s", absPath, startTime.UTC().String(), endTime.UTC().String())
 	}
 
 	newState.IsCollecting = true
