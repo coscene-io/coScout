@@ -448,8 +448,8 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 
 		taskReq := &master.TaskRequest{
 			TaskID:              info.Id,
-			StartTime:           time.Unix(info.Cut.Start, 0),
-			EndTime:             time.Unix(info.Cut.End, 0),
+			StartTime:           info.Cut.Start,
+			EndTime:             info.Cut.End,
 			ScanFolders:         modConfig.CollectDirs,
 			AdditionalFiles:     info.Cut.ExtraFiles,
 			WhiteList:           info.Cut.WhiteList,

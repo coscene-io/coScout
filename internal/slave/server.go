@@ -118,7 +118,7 @@ func (s *Server) handleFileScan(w http.ResponseWriter, r *http.Request) {
 
 	log.Infof("Received file scan request: %+v", req)
 
-	files := s.scanFiles(req.ScanFolders, req.AdditionalFiles, req.StartTime, req.EndTime)
+	files := s.scanFiles(req.TaskID, req.ScanFolders, req.AdditionalFiles, req.StartTime, req.EndTime)
 	resp := master.TaskResponse{
 		TaskID:  req.TaskID,
 		Files:   files,
@@ -175,10 +175,10 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) scanFiles(scanFolders []string, additionalFiles []string, startTime time.Time, endTime time.Time) []master.SlaveFileInfo {
-	files, noPermissionFiles := upload.ComputeUploadFiles(scanFolders, additionalFiles, startTime, endTime)
+func (s *Server) scanFiles(taskID string, scanFolders []string, additionalFiles []string, startTime, endTime int64) []master.SlaveFileInfo {
+	files, noPermissionFiles := upload.ComputeUploadFiles(taskID, scanFolders, additionalFiles, startTime, endTime)
 	if len(noPermissionFiles) > 0 {
-		log.Warnf("Some files/folders are not readable: %v", noPermissionFiles)
+		log.WithField("taskName", taskID).Warnf("Some files/folders are not readable: %v", noPermissionFiles)
 	}
 
 	result := make([]master.SlaveFileInfo, 0)
@@ -225,7 +225,7 @@ func (s *Server) handleFileScanByContent(w http.ResponseWriter, r *http.Request)
 }
 
 // scanFilesByContent scans files based on their content time rather than modification time.
-func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []string, whiteList []string, recursivelyWalkDirs bool, startTime time.Time, endTime time.Time) []master.SlaveFileInfo {
+func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []string, whiteList []string, recursivelyWalkDirs bool, startTime, endTime int64) []master.SlaveFileInfo {
 	result := make([]master.SlaveFileInfo, 0)
 
 	if s.collectFileStateHandler == nil {
@@ -258,7 +258,7 @@ func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []stri
 	}
 	filters := []file_state_handler.FileFilter{
 		file_state_handler.FilterIsCollecting(),
-		file_state_handler.FilterTime(startTime.Unix(), endTime.Unix()),
+		file_state_handler.FilterTime(startTime, endTime),
 		uploadWhiteListFilter,
 	}
 	fileStates := s.collectFileStateHandler.Files(filters...)
@@ -291,7 +291,7 @@ func (s *Server) scanFilesByContent(scanFolders []string, additionalFiles []stri
 
 	localFiles := upload.ComputeRuleFileInfos(fileStates)
 	for _, file := range localFiles {
-		log.Infof("Slave found file matching content time range startTime: %s, endTime: %s, path: %s", startTime.UTC().String(), endTime.UTC().String(), file.Path)
+		log.Infof("Slave found file matching content time range startTime: %d, endTime: %d, path: %s", startTime, endTime, file.Path)
 
 		fileName := filepath.Join(s.filePrefix, file.FileName)
 		result = append(result, master.SlaveFileInfo{

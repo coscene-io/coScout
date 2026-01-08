@@ -19,7 +19,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
 	"github.com/coscene-io/coscout/internal/model"
@@ -28,26 +27,25 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTime time.Time, endTime time.Time) (map[string]model.FileInfo, []string) {
+func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles []string, startTime int64, endTime int64) (map[string]model.FileInfo, []string) {
 	files := make(map[string]model.FileInfo)
 	noPermissionFolders := make([]string, 0)
 
 	for _, folder := range scanFolders {
 		if !utils.CheckReadPath(folder) {
-			log.Warnf("Path %s is not readable, skip!", folder)
-
+			log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", folder)
 			noPermissionFolders = append(noPermissionFolders, folder)
 			continue
 		}
 
 		realPath, info, err := utils.GetRealFileInfo(folder)
 		if err != nil {
-			log.Errorf("Failed to get folder info: %v", err)
+			log.WithField("taskName", taskName).Errorf("Failed to get folder info: %v", err)
 			continue
 		}
 
 		if !utils.CheckReadPath(realPath) {
-			log.Warnf("Path %s is not readable, skip!", realPath)
+			log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", realPath)
 
 			noPermissionFolders = append(noPermissionFolders, realPath)
 			continue
@@ -69,44 +67,44 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 			MaxFiles:             99999,
 		})
 		if err != nil {
-			log.Errorf("Failed to get all file paths in folder %s: %v", folder, err)
+			log.WithField("taskName", taskName).Errorf("Failed to get all file paths in folder %s: %v", folder, err)
 			continue
 		}
 
-		for _, path := range filePaths {
-			if !utils.CheckReadPath(path) {
-				log.Warnf("Path %s is not readable, skip!", path)
+		for _, tmpFilePath := range filePaths {
+			if !utils.CheckReadPath(tmpFilePath) {
+				log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", tmpFilePath)
 				continue
 			}
 
-			realPath, info, err := utils.GetRealFileInfo(path)
+			realPath, info, err := utils.GetRealFileInfo(tmpFilePath)
 			if err != nil {
-				log.Errorf("Failed to get file info for %s: %v", path, err)
+				log.WithField("taskName", taskName).Errorf("Failed to get file info for %s: %v", tmpFilePath, err)
 				continue
 			}
 
 			if !utils.CheckReadPath(realPath) {
-				log.Warnf("Path %s is not readable, skip!", realPath)
+				log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", realPath)
 				continue
 			}
 
 			timeStat, err := times.Stat(realPath)
 			if err != nil {
-				log.Errorf("Failed to get file times for %s: %v", realPath, err)
+				log.WithField("taskName", taskName).Errorf("Failed to get file times for %s: %v", realPath, err)
 				continue
 			}
 
 			fileStartTime := info.ModTime()
 			fileEndTime := info.ModTime()
 			if timeStat.HasBirthTime() {
+				log.WithField("taskName", taskName).Infof("file path %s has birth time: %v", realPath, timeStat.BirthTime())
 				fileStartTime = timeStat.BirthTime()
 			}
-			log.Infof("file %s, start time: %s, end time: %s", realPath, fileStartTime.UTC().String(), fileEndTime.UTC().String())
 
-			if fileStartTime.Unix() <= endTime.Unix() && fileEndTime.Unix() >= startTime.Unix() {
+			if fileStartTime.Unix() <= endTime && fileEndTime.Unix() >= startTime {
 				filename, err := filepath.Rel(folder, realPath)
 				if err != nil {
-					log.Errorf("Failed to get relative path: %v", err)
+					log.WithField("taskName", taskName).Errorf("Failed to get relative path %s: %v", realPath, err)
 					filename = filepath.Base(realPath)
 				}
 
@@ -115,13 +113,17 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 					Size:     info.Size(),
 					Path:     realPath,
 				}
+
+				log.WithField("taskName", taskName).Infof("file %s matched time range, startTime: %d, endTime: %d", realPath, startTime, endTime)
+			} else {
+				log.WithField("taskName", taskName).Warnf("file %s not matched time range, required startTime: %d, endTime: %d, file startTime: %d, endTime: %d", realPath, startTime, endTime, fileStartTime.Unix(), fileEndTime.Unix())
 			}
 		}
 	}
 
 	for _, file := range additionalFiles {
 		if !utils.CheckReadPath(file) {
-			log.Warnf("Path %s is not readable, skip!", file)
+			log.WithField("taskName", taskName).Warnf("AdditionalFiles path %s is not readable, skip!", file)
 
 			noPermissionFolders = append(noPermissionFolders, file)
 			continue
@@ -129,12 +131,12 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 
 		realPath, info, err := utils.GetRealFileInfo(file)
 		if err != nil {
-			log.Errorf("Failed to get folder info: %v", err)
+			log.WithField("taskName", taskName).Errorf("AdditionalFiles failed to get folder info: %v", err)
 			continue
 		}
 
 		if !utils.CheckReadPath(realPath) {
-			log.Warnf("Path %s is not readable, skip!", realPath)
+			log.WithField("taskName", taskName).Warnf("AdditionalFiles Path %s is not readable, skip!", realPath)
 
 			noPermissionFolders = append(noPermissionFolders, realPath)
 			continue
@@ -159,30 +161,30 @@ func ComputeUploadFiles(scanFolders []string, additionalFiles []string, startTim
 			MaxFiles:             99999,
 		})
 		if err != nil {
-			log.Errorf("Failed to walk through folder %s: %v", realPath, err)
+			log.WithField("taskName", taskName).Errorf("AdditionalFiles Failed to walk through folder %s: %v", realPath, err)
 			continue
 		}
 
-		for _, path := range filePaths {
-			if !utils.CheckReadPath(path) {
-				log.Warnf("Path %s is not readable, skip!", path)
+		for _, tmpAddFilePath := range filePaths {
+			if !utils.CheckReadPath(tmpAddFilePath) {
+				log.WithField("taskName", taskName).Warnf("AdditionalFiles Path %s is not readable, skip!", tmpAddFilePath)
 				continue
 			}
 
-			realPath, info, err := utils.GetRealFileInfo(path)
+			realPath, info, err := utils.GetRealFileInfo(tmpAddFilePath)
 			if err != nil {
-				log.Errorf("Failed to get file info for %s: %v", path, err)
+				log.WithField("taskName", taskName).Errorf("AdditionalFiles Failed to get file info for %s: %v", tmpAddFilePath, err)
 				continue
 			}
 
 			if !utils.CheckReadPath(realPath) {
-				log.Warnf("Path %s is not readable, skip!", realPath)
+				log.WithField("taskName", taskName).Warnf("AdditionalFiles Path %s is not readable, skip!", realPath)
 				continue
 			}
 
 			filename, err := filepath.Rel(parentFolder, realPath)
 			if err != nil {
-				log.Errorf("Failed to get relative path: %v", err)
+				log.WithField("taskName", taskName).Errorf("AdditionalFiles Failed to get relative path: %v", err)
 				filename = filepath.Base(realPath)
 			}
 
