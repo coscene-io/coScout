@@ -207,21 +207,25 @@ func (c *CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.
 			continue
 		}
 
-		log.Infof("Starting handle upload task %s", task.GetName())
+		log.WithField("taskName", task.GetName()).Infof("Starting handle upload task")
 		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_PROCESSING.Enum())
 		if err != nil {
-			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
+			log.WithField("taskName", task.GetName()).Errorf("Failed to update task state: %v", err)
 			continue
 		}
 
 		if task.GetUploadTaskDetail() != nil {
 			c.handleUploadTask(task)
+		} else {
+			log.WithField("taskName", task.GetName()).Warnf("Upload task detail is nil, skip!")
 		}
+
+		log.WithField("taskName", task.GetName()).Infof("Finished handle upload task")
 	}
 }
 
 func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task) {
-	log.Infof("Handling upload task %s", task.GetName())
+	log.WithField("taskName", task.GetName()).Infof("Handling upload task")
 
 	taskDetail := task.GetUploadTaskDetail()
 	if taskDetail == nil {
@@ -233,11 +237,12 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 	taskFolders := taskDetail.GetScanFolders()
 	additionalFiles := taskDetail.GetAdditionalFiles()
 
-	log.Infof("UploadTask %s, start time: %s, end time: %s, folders: %v, additional files: %v",
-		task.GetName(), startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
+	log.WithField("taskName", task.GetName()).
+		Infof("UploadTask start time: %s, end time: %s, folders: %v, additional files: %v",
+			startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
 
 	// Get local files
-	localFiles, noPermissionFolders := upload.ComputeUploadFiles(taskFolders, additionalFiles, startTime.AsTime(), endTime.AsTime())
+	localFiles, noPermissionFolders := upload.ComputeUploadFiles(task.GetName(), taskFolders, additionalFiles, []string{}, true, startTime.AsTime().Unix(), endTime.AsTime().Unix())
 
 	// Get slave files if master-slave is enabled
 	allFiles := make(map[string]model.FileInfo)
@@ -252,8 +257,8 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 
 		taskReq := &master.TaskRequest{
 			TaskID:          task.GetName(),
-			StartTime:       startTime.AsTime(),
-			EndTime:         endTime.AsTime(),
+			StartTime:       startTime.AsTime().Unix(),
+			EndTime:         endTime.AsTime().Unix(),
 			ScanFolders:     taskFolders,
 			AdditionalFiles: additionalFiles,
 		}
@@ -261,7 +266,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		responses := c.masterClient.RequestAllSlaveFiles(ctx, c.slaveRegistry, taskReq)
 		for slaveID, response := range responses {
 			if response != nil && response.Success {
-				log.Infof("Slave %s returned %d files for task %s", slaveID, len(response.Files), task.GetName())
+				log.WithField("taskName", task.GetName()).Infof("Slave %s returned %d files", slaveID, len(response.Files))
 				for _, file := range response.Files {
 					remotePath := file.GetRemotePath()
 					if remotePath == "" {
@@ -275,12 +280,11 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			}
 		}
 	}
-	log.Infof("Total files for task %s: %d (local: %d, slave: %d)", task.GetName(), len(allFiles), len(localFiles), slaveFileCount)
-
+	log.WithField("taskName", task.GetName()).Infof("Total files: %d (local: %d, slave: %d)", len(allFiles), len(localFiles), slaveFileCount)
 	if len(allFiles) == 0 {
 		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum())
 		if err != nil {
-			log.Errorf("Failed to update task state %s: %v", task.GetName(), err)
+			log.WithField("taskName", task.GetName()).Errorf("Failed to update task state: %v", err)
 		}
 
 		if len(noPermissionFolders) > 0 {
@@ -290,6 +294,8 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			if err != nil {
 				log.Errorf("Failed to add task tags: %v", err)
 			}
+
+			log.WithField("taskName", task.GetName()).Warnf("UploadTask has %d no permission files", len(noPermissionFolders))
 		}
 
 		return
@@ -313,16 +319,18 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		return
 	}
 
-	log.Infof("Record cache saved for task %s", task.GetName())
+	log.WithField("taskName", task.GetName()).Infof("Record cache saved for task")
 	tags := make(map[string]string)
 	tags["totalFiles"] = strconv.Itoa(len(allFiles))
 	if len(noPermissionFolders) > 0 {
 		tags["noPermissionFiles"] = strings.Join(noPermissionFolders, ",")
+
+		log.WithField("taskName", task.GetName()).Warnf("UploadTask has %d no permission files", len(noPermissionFolders))
 	}
 
 	_, err = c.reqClient.AddTaskTags(task.GetName(), tags)
 	if err != nil {
-		log.Errorf("Failed to add task tags: %v", err)
+		log.WithField("taskName", task.GetName()).Errorf("Failed to add task tags: %v", err)
 	}
 
 	msg := gcmessage.NewMessage(watermill.NewUUID(), []byte(task.GetName()))

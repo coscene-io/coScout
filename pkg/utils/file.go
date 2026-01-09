@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/djherbis/times"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -154,4 +155,23 @@ func GetRealFileInfo(path string) (string, os.FileInfo, error) {
 		return "", nil, errors.Wrapf(err, "stat real path: %s", path)
 	}
 	return path, info, nil
+}
+
+func HasBirthTime(paths []string) bool {
+	for _, tmpPath := range paths {
+		canRead := CheckReadPath(tmpPath)
+		if !canRead {
+			continue
+		}
+
+		stat, err := times.Stat(tmpPath)
+		if err != nil {
+			continue
+		}
+
+		if stat.HasBirthTime() {
+			return true
+		}
+	}
+	return false
 }
