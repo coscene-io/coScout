@@ -242,7 +242,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
 
 	// Get local files
-	localFiles, noPermissionFolders := upload.ComputeUploadFiles(task.GetName(), taskFolders, additionalFiles, startTime.AsTime().Unix(), endTime.AsTime().Unix())
+	localFiles, noPermissionFolders := upload.ComputeUploadFiles(task.GetName(), taskFolders, additionalFiles, []string{}, true, startTime.AsTime().Unix(), endTime.AsTime().Unix())
 
 	// Get slave files if master-slave is enabled
 	allFiles := make(map[string]model.FileInfo)

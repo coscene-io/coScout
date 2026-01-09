@@ -16,10 +16,13 @@ package upload
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
 	"github.com/coscene-io/coscout/internal/model"
 	"github.com/coscene-io/coscout/pkg/utils"
@@ -27,9 +30,22 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles []string, startTime int64, endTime int64) (map[string]model.FileInfo, []string) {
+func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles []string, whiteList []string, recursivelyWalkDirs bool, startTime int64, endTime int64) (map[string]model.FileInfo, []string) {
 	files := make(map[string]model.FileInfo)
 	noPermissionFolders := make([]string, 0)
+
+	matchesWhitelist := func(filename string) bool {
+		if len(whiteList) == 0 {
+			return true
+		}
+		for _, pattern := range whiteList {
+			matched, err := doublestar.PathMatch(pattern, filename)
+			if err == nil && matched {
+				return true
+			}
+		}
+		return false
+	}
 
 	for _, folder := range scanFolders {
 		if !utils.CheckReadPath(folder) {
@@ -52,6 +68,10 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 		}
 
 		if !info.IsDir() {
+			if !matchesWhitelist(realPath) {
+				log.WithField("taskName", taskName).Warnf("Path %s does not match whitelist, skip!", realPath)
+				continue
+			}
 			files[realPath] = model.FileInfo{
 				FileName: filepath.Base(realPath),
 				Size:     info.Size(),
@@ -60,63 +80,104 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 			continue
 		}
 
-		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
-			FollowSymlinks:       true,
-			SkipPermissionErrors: true,
-			SkipEmptyFiles:       true,
-			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.WithField("taskName", taskName).Errorf("Failed to get all file paths in folder %s: %v", folder, err)
-			continue
-		}
-
-		for _, tmpFilePath := range filePaths {
-			if !utils.CheckReadPath(tmpFilePath) {
-				log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", tmpFilePath)
-				continue
+		processFile := func(root, filePath string, info os.FileInfo) {
+			if !matchesWhitelist(filePath) {
+				log.WithField("taskName", taskName).Warnf("file path %s does not match whitelist, skip!", filePath)
+				return
 			}
-
-			realPath, info, err := utils.GetRealFileInfo(tmpFilePath)
+			timeStat, err := times.Stat(filePath)
 			if err != nil {
-				log.WithField("taskName", taskName).Errorf("Failed to get file info for %s: %v", tmpFilePath, err)
-				continue
-			}
-
-			if !utils.CheckReadPath(realPath) {
-				log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", realPath)
-				continue
-			}
-
-			timeStat, err := times.Stat(realPath)
-			if err != nil {
-				log.WithField("taskName", taskName).Errorf("Failed to get file times for %s: %v", realPath, err)
-				continue
+				log.WithField("taskName", taskName).Errorf("Failed to get file times for %s: %v", filePath, err)
+				return
 			}
 
 			fileStartTime := info.ModTime()
 			fileEndTime := info.ModTime()
 			if timeStat.HasBirthTime() {
-				log.WithField("taskName", taskName).Infof("file path %s has birth time: %v", realPath, timeStat.BirthTime())
+				log.WithField("taskName", taskName).Infof("file path %s has birth time: %v", filePath, timeStat.BirthTime())
 				fileStartTime = timeStat.BirthTime()
 			}
 
 			if fileStartTime.Unix() <= endTime && fileEndTime.Unix() >= startTime {
-				filename, err := filepath.Rel(folder, realPath)
+				filename, err := filepath.Rel(root, filePath)
 				if err != nil {
-					log.WithField("taskName", taskName).Errorf("Failed to get relative path %s: %v", realPath, err)
-					filename = filepath.Base(realPath)
+					log.WithField("taskName", taskName).Errorf("Failed to get relative path %s: %v", filePath, err)
+					filename = filepath.Base(filePath)
 				}
 
-				files[realPath] = model.FileInfo{
+				files[filePath] = model.FileInfo{
 					FileName: filename,
 					Size:     info.Size(),
-					Path:     realPath,
+					Path:     filePath,
 				}
 
-				log.WithField("taskName", taskName).Infof("file %s matched time range, startTime: %d, endTime: %d", realPath, startTime, endTime)
+				log.WithField("taskName", taskName).Infof("file %s matched time range, file:(%s - %s)", filePath, time.Unix(startTime, 0).UTC().String(), time.Unix(endTime, 0).UTC().String())
 			} else {
-				log.WithField("taskName", taskName).Warnf("file %s not matched time range, required startTime: %d, endTime: %d, file startTime: %d, endTime: %d", realPath, startTime, endTime, fileStartTime.Unix(), fileEndTime.Unix())
+				log.WithField("taskName", taskName).Warnf("file %s mismatched time range, required: (%s - %s), file: (%s - %s)", filePath, time.Unix(startTime, 0).UTC().String(), time.Unix(endTime, 0).UTC().String(), fileStartTime.UTC().String(), fileEndTime.UTC().String())
+			}
+		}
+
+		rootDir := realPath
+		//nolint: nestif // nested if is acceptable here for clarity.
+		if recursivelyWalkDirs {
+			filePaths, err := utils.GetAllFilePaths(rootDir, &utils.SymWalkOptions{
+				FollowSymlinks:       true,
+				SkipPermissionErrors: true,
+				SkipEmptyFiles:       true,
+				MaxFiles:             99999,
+			})
+			if err != nil {
+				log.WithField("taskName", taskName).Errorf("Failed to get all file paths in folder %s: %v", folder, err)
+				continue
+			}
+
+			for _, tmpFilePath := range filePaths {
+				if !utils.CheckReadPath(tmpFilePath) {
+					log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", tmpFilePath)
+					continue
+				}
+
+				fileAbs, info, err := utils.GetRealFileInfo(tmpFilePath)
+				if err != nil {
+					log.WithField("taskName", taskName).Errorf("Failed to get file info for %s: %v", tmpFilePath, err)
+					continue
+				}
+
+				if !utils.CheckReadPath(fileAbs) {
+					log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", fileAbs)
+					continue
+				}
+
+				if info.IsDir() {
+					continue
+				}
+
+				processFile(rootDir, fileAbs, info)
+			}
+		} else {
+			entries, err := os.ReadDir(rootDir)
+			if err != nil {
+				log.WithField("taskName", taskName).Errorf("Failed to read directory %s: %v", rootDir, err)
+				continue
+			}
+
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				joined := filepath.Join(rootDir, entry.Name())
+				if !utils.CheckReadPath(joined) {
+					log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", joined)
+					continue
+				}
+
+				info, err := entry.Info()
+				if err != nil {
+					log.WithField("taskName", taskName).Errorf("Failed to get file info for %s: %v", joined, err)
+					continue
+				}
+
+				processFile(realPath, joined, info)
 			}
 		}
 	}

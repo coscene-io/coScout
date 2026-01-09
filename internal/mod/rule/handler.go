@@ -369,7 +369,7 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 
 		// Skip early checks
 		if collectInfo.Skip {
-			log.Infof("Skipping collect info: %v, cleaning", collectInfo.Id)
+			log.WithField("collectID", collectInfo.Id).Infof("Skipping collect info: %v, cleaning", collectInfo.Id)
 			collectInfo.Clean()
 			continue
 		}
@@ -381,18 +381,11 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 		}
 
 		if time.Unix(collectInfo.Cut.End, 0).After(time.Now()) {
-			log.Infof("Collect info is not reached: %v", collectInfo.Id)
+			log.WithField("collectID", collectInfo.Id).Infof("Collect info end time is not reached, skip!")
 			continue
 		}
 
-		err := c.collectFileStateHandler.UpdateCollectDirs(collectInfo.Cut.WhiteList, *modConfig)
-		if err != nil {
-			log.Errorf("file state handler update collect dirs: %v", err)
-			c.errChan <- errors.Wrap(err, "file state handler update collect dirs")
-			return
-		}
-
-		log.Infof("Found collect info: %v", collectInfo.Id)
+		log.WithField("collectID", collectInfo.Id).Infof("Found collect info to handle")
 		c.handleCollectInfo(*collectInfo, *modConfig)
 	}
 	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
@@ -401,44 +394,69 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 // handleCollectInfo handles a single the collect info.
 func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig config.DefaultModConfConfig) {
 	if info.Skip {
-		log.Infof("Skipping collect info: %v, cleaning", info.Id)
+		log.WithField("collectID", info.Id).Infof("Skipping collect info, cleaning")
 		info.Clean()
 		return
 	}
 
 	if info.Cut == nil {
-		log.Errorf("Collect info cut is nil: %v", info.Id)
+		log.WithField("collectID", info.Id).Errorf("Collect info cut is nil, cleaning")
 		info.Clean()
 		return
 	}
 
 	if time.Unix(info.Cut.End, 0).After(time.Now()) {
-		log.Infof("Collect info is not reached: %v", info.Id)
+		log.WithField("collectID", info.Id).Infof("Collect info is not reached, skip!")
 		return
 	}
 
-	log.Infof("Collecting for files start: %v, end: %v", info.Cut.Start, info.Cut.End)
-
+	log.WithField("collectID", info.Id).Infof("Collecting for files start: %v, end: %v", info.Cut.Start, info.Cut.End)
 	recordTitle, _ := info.Record["title"].(string)
 
-	// Get local files
-	uploadWhiteListFilter := func(filename string, _ file_state_handler.FileState) bool {
-		if len(info.Cut.WhiteList) == 0 {
-			return true
+	uploadFileStates := make([]file_state_handler.FileState, 0)
+	hasBirthTime := utils.HasBirthTime(modConfig.CollectDirs)
+	//nolint: nestif // nested if is more readable here.
+	if hasBirthTime {
+		log.WithField("collectID", info.Id).Infof("At least one collect dir has birth time support")
+
+		uploadFiles, noPermissionFiles := upload.ComputeUploadFiles(info.Id, modConfig.CollectDirs, []string{}, info.Cut.WhiteList, modConfig.RecursivelyWalkDirs, info.Cut.Start, info.Cut.End)
+		if len(noPermissionFiles) > 0 {
+			log.WithField("collectID", info.Id).Infof("Found no permission files: %v", noPermissionFiles)
 		}
-		for _, pattern := range info.Cut.WhiteList {
-			matched, err := doublestar.PathMatch(pattern, filename)
-			if err == nil && matched {
+		for _, file := range uploadFiles {
+			uploadFileStates = append(uploadFileStates, file_state_handler.FileState{
+				Size:     file.Size,
+				Pathname: file.Path,
+				IsDir:    false,
+			})
+		}
+	} else {
+		log.WithField("collectID", info.Id).Infof("No collect dir has birth time support")
+
+		err := c.collectFileStateHandler.UpdateCollectDirs(info.Cut.WhiteList, modConfig)
+		if err != nil {
+			log.WithField("collectID", info.Id).Errorf("file state handler update collect dirs: %v", err)
+			return
+		}
+		// Get local files
+		uploadWhiteListFilter := func(filename string, _ file_state_handler.FileState) bool {
+			if len(info.Cut.WhiteList) == 0 {
 				return true
 			}
+			for _, pattern := range info.Cut.WhiteList {
+				matched, err := doublestar.PathMatch(pattern, filename)
+				if err == nil && matched {
+					return true
+				}
+			}
+			return false
 		}
-		return false
+		uploadFileStates = c.collectFileStateHandler.Files(
+			file_state_handler.FilterIsCollecting(),
+			file_state_handler.FilterTime(info.Cut.Start, info.Cut.End),
+			uploadWhiteListFilter,
+		)
 	}
-	uploadFileStates := c.collectFileStateHandler.Files(
-		file_state_handler.FilterIsCollecting(),
-		file_state_handler.FilterTime(info.Cut.Start, info.Cut.End),
-		uploadWhiteListFilter,
-	)
 
 	// Get slave files if master-slave is enabled
 	var slaveFiles []master.SlaveFileInfo
@@ -459,28 +477,28 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 		responses := c.masterClient.RequestAllSlaveFilesByContent(ctx, c.slaveRegistry, taskReq)
 		for slaveID, response := range responses {
 			if response != nil && response.Success {
-				log.Infof("Slave %s returned %d files for rule collection", slaveID, len(response.Files))
+				log.WithField("collectID", info.Id).Infof("Slave %s returned %d files for rule collection", slaveID, len(response.Files))
 				slaveFiles = append(slaveFiles, response.Files...)
 			}
 		}
-		log.Infof("Total slave files collected for rule: %d", len(slaveFiles))
+		log.WithField("collectID", info.Id).Infof("Total slave files collected for rule: %d", len(slaveFiles))
 	}
 
 	for _, extraFileRaw := range info.Cut.ExtraFiles {
 		extraFileAbs, err := filepath.Abs(extraFileRaw)
 		if err != nil {
-			log.Errorf("get abs path for extra file: %v", err)
+			log.WithField("collectID", info.Id).Errorf("AdditionalFiles get abs path for extra file: %v", err)
 			continue
 		}
 
 		if !utils.CheckReadPath(extraFileAbs) {
-			log.Warnf("Path %s is not readable, skip!", extraFileAbs)
+			log.WithField("collectID", info.Id).Warnf("AdditionalFiles Path %s is not readable, skip!", extraFileAbs)
 			continue
 		}
 
 		realPath, fileInfo, err := utils.GetRealFileInfo(extraFileAbs)
 		if err != nil {
-			log.Errorf("get real file info for extra file: %v", err)
+			log.WithField("collectID", info.Id).Errorf("AdditionalFiles get real file info for extra file: %v", err)
 			continue
 		}
 
@@ -497,25 +515,25 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 
 	// Add local files
 	for p, fileInfo := range localFiles {
-		log.Infof("Collecting local file: %s for startTime %d, endTime: %d", p, info.Cut.Start, info.Cut.End)
 		allFiles[p] = fileInfo
+		log.WithField("collectID", info.Id).Infof("Collecting local file: %s for startTime %d, endTime: %d", p, info.Cut.Start, info.Cut.End)
 	}
 
 	// Add slave files
 	for _, slaveFileInfo := range slaveFiles {
 		remotePath := slaveFileInfo.GetRemotePath()
 		if remotePath == "" {
-			log.Warnf("slave file has empty remote path: %s, skip!", slaveFileInfo.Path)
+			log.WithField("collectID", info.Id).Warnf("slave file has empty remote path: %s, skip!", slaveFileInfo.Path)
 			continue
 		}
 		// use slave file path as key to avoid duplication
 		slaveFileInfo.FileInfo.Path = remotePath
 		allFiles[remotePath] = slaveFileInfo.FileInfo
 
-		log.Infof("Collecting slave file: %s for startTime %d, endTime: %d", remotePath, info.Cut.Start, info.Cut.End)
+		log.WithField("collectID", info.Id).Infof("Collecting slave file: %s for startTime %d, endTime: %d", remotePath, info.Cut.Start, info.Cut.End)
 	}
 
-	log.Infof("finish collecting for files start: %v, end: %v, total files: %d (local: %d, slave: %d)",
+	log.WithField("collectID", info.Id).Infof("finish collecting for files start: %v, end: %v, total files: %d (local: %d, slave: %d)",
 		info.Cut.Start, info.Cut.End, len(allFiles), len(localFiles), len(slaveFiles))
 
 	rc := model.RecordCache{
