@@ -227,6 +227,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			fileInfo.Path = filePath
 		}
 		toUploadFiles = append(toUploadFiles, fileInfo)
+		log.WithField("recordName", recordName).Infof("uploadList: %s", filePath)
 	}
 	sort.Slice(toUploadFiles, func(i, j int) bool {
 		return toUploadFiles[i].Size < toUploadFiles[j].Size
