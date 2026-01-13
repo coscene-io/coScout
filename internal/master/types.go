@@ -191,13 +191,13 @@ func FormatSlaveFilePath(slaveID, filePath string) string {
 
 // TaskRequest task request structure.
 type TaskRequest struct {
-	TaskID              string    `json:"task_id"`
-	StartTime           time.Time `json:"start_time"`
-	EndTime             time.Time `json:"end_time"`
-	ScanFolders         []string  `json:"scan_folders"`
-	AdditionalFiles     []string  `json:"additional_files"`
-	WhiteList           []string  `json:"whitelist,omitempty"`
-	RecursivelyWalkDirs bool      `json:"recursively_walk_dirs,omitempty"`
+	TaskID              string   `json:"task_id"`
+	StartTime           int64    `json:"start_time"`
+	EndTime             int64    `json:"end_time"`
+	ScanFolders         []string `json:"scan_folders"`
+	AdditionalFiles     []string `json:"additional_files"`
+	WhiteList           []string `json:"whitelist,omitempty"`
+	RecursivelyWalkDirs bool     `json:"recursively_walk_dirs,omitempty"`
 }
 
 // TaskResponse task response structure.
