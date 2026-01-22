@@ -47,6 +47,7 @@ import (
 )
 
 var ErrNetworkIssue = errors.New("network issue")
+var ErrCacheInsufficient = errors.New("cache insufficient")
 
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager) {
 	log.Infof("Start upload goroutine")
@@ -275,11 +276,16 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			return errors.New("upload is manually disabled, skipping upload")
 		}
 
+		//nolint: nestif // keep it flat.
 		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
 			allCompleted = false
 
 			if errors.Is(err, ErrNetworkIssue) {
 				log.Warnf("network issue detected, stop current upload loop for record %s: %v", recordName, err)
+				return err
+			}
+			if errors.Is(err, ErrCacheInsufficient) {
+				log.Warnf("[cache-insufficient] stop current upload loop for record %s: %v", recordName, err)
 				return err
 			}
 			log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
@@ -766,6 +772,11 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		sizeLimitBytes = int64(appConfig.MasterSlave.FileSizeLimitMB) * 1024 * 1024
 	}
 
+	cacheLimitBytes := int64(0)
+	if appConfig != nil && appConfig.MasterSlave.CacheSizeLimitMB > 0 {
+		cacheLimitBytes = int64(appConfig.MasterSlave.CacheSizeLimitMB) * 1024 * 1024
+	}
+
 	// Generate local cache file path in configured cache directory
 	localCachePath := getSlaveFileCachePath(cacheRoot, recordName, fileInfo.Path)
 
@@ -784,6 +795,24 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 			return nil
 		} else {
 			log.Infof("Cached file size mismatch (cached: %d, expected: %d), re-downloading", cachedSize, fileInfo.Size)
+		}
+	}
+
+	// Check cache capacity before download
+	//nolint: nestif // keep it flat.
+	if cacheLimitBytes > 0 && fileInfo.Size > 0 {
+		usedBytes := int64(0)
+		if utils.CheckReadPath(cacheRoot) {
+			calculated, err := calcDirSize(cacheRoot)
+			if err != nil {
+				log.Warnf("failed to calculate cache dir size, continue: %v", err)
+			} else {
+				usedBytes = calculated
+			}
+		}
+		if usedBytes+fileInfo.Size > cacheLimitBytes {
+			log.Warnf("cache space insufficient: used=%d need=%d limit=%d record=%s file=%s", usedBytes, fileInfo.Size, cacheLimitBytes, recordName, fileInfo.Path)
+			return errors.Wrap(ErrCacheInsufficient, "cache space insufficient")
 		}
 	}
 
@@ -925,6 +954,25 @@ func cleanSlaveCacheDir(appConfig *config.AppConfig, recordCacheFolder, recordNa
 	} else {
 		log.Warnf("Failed to remove slave cache directory: %s", cacheDir)
 	}
+}
+
+func calcDirSize(root string) (int64, error) {
+	var size int64
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		size += info.Size()
+		return nil
+	})
+	return size, err
 }
 
 func isNetworkError(err error) bool {

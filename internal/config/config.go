@@ -113,4 +113,6 @@ type MasterSlaveConfig struct {
 	CacheDir string `koanf:"cache_dir" yaml:"cache_dir" json:"cache_dir"`
 	// file size limit in MB for download from a slave
 	FileSizeLimitMB int `koanf:"file_size_limit_mb" yaml:"file_size_limit_mb" json:"file_size_limit_mb"`
+	// cache size limit in MB for master
+	CacheSizeLimitMB int `koanf:"cache_size_limit_mb" yaml:"cache_size_limit_mb" json:"cache_size_limit_mb"`
 }
