@@ -43,8 +43,13 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/shirou/gopsutil/v4/disk"
 	log "github.com/sirupsen/logrus"
 )
+
+var ErrNetworkIssue = errors.New("network issue")
+var ErrCacheInsufficient = errors.New("cache insufficient")
+var ErrDiskInsufficient = errors.New("disk space insufficient")
 
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager) {
 	log.Infof("Start upload goroutine")
@@ -273,10 +278,23 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			return errors.New("upload is manually disabled, skipping upload")
 		}
 
+		//nolint: nestif // keep it flat.
 		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
-			log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
-
 			allCompleted = false
+
+			if errors.Is(err, ErrNetworkIssue) {
+				log.Warnf("network issue detected, stop current upload loop for record %s: %v", recordName, err)
+				return err
+			}
+			if errors.Is(err, ErrCacheInsufficient) {
+				log.Warnf("[cache-insufficient] stop current upload loop for record %s: %v", recordName, err)
+				return err
+			}
+			if errors.Is(err, ErrDiskInsufficient) {
+				log.Warnf("[disk-insufficient] stop current upload loop for record %s: %v", recordName, err)
+				return err
+			}
+			log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 			continue
 		} else {
 			log.Infof("upload file %s successfully", fileInfo.Path)
@@ -376,6 +394,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		log.Infof("record upload finished: %s", recordName)
 		rcPath := recordCache.Clean()
 		log.Infof("record cache finished, clean up: %s", rcPath)
+		cleanSlaveCacheDir(appConfig, recordCache.GetBaseFolder(), recordName)
 	}
 	return nil
 }
@@ -440,6 +459,9 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	generateSecurityTokenRes, err := reqClient.GenerateSecurityToken(projectName)
 	if err != nil {
 		log.Errorf("unable to generate security token: %v", err)
+		if isNetworkError(err) {
+			return errors.Wrap(ErrNetworkIssue, err.Error())
+		}
 		return err
 	}
 	if generateSecurityTokenRes == nil {
@@ -740,8 +762,37 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		return errors.New("FileManager not available for slave file upload")
 	}
 
-	// Generate local cache file path in recordCache directory
-	localCachePath := getSlaveFileCachePath(cacheFolder, fileInfo.Path)
+	cacheRoot := cacheFolder
+	//nolint: nestif // keep it flat.
+	if appConfig != nil {
+		if configuredCacheDir := strings.TrimSpace(appConfig.MasterSlave.CacheDir); configuredCacheDir != "" {
+			if utils.CheckReadPath(configuredCacheDir) {
+				cacheRoot = configuredCacheDir
+			} else {
+				if err := os.MkdirAll(configuredCacheDir, 0755); err != nil {
+					log.Errorf("Cache dir %s is not accessible and creation failed, using default %s: %v", configuredCacheDir, cacheRoot, err)
+				} else {
+					log.Infof("Created cache dir %s, switching cache root from %s", configuredCacheDir, cacheRoot)
+					cacheRoot = configuredCacheDir
+				}
+			}
+		} else {
+			log.Infof("MasterSlave.CacheDir not configured, using default cache root %s", cacheRoot)
+		}
+	}
+
+	sizeLimitBytes := int64(0)
+	if appConfig != nil && appConfig.MasterSlave.FileSizeLimitMB > 0 {
+		sizeLimitBytes = int64(appConfig.MasterSlave.FileSizeLimitMB) * 1024 * 1024
+	}
+
+	cacheLimitBytes := int64(0)
+	if appConfig != nil && appConfig.MasterSlave.CacheSizeLimitMB > 0 {
+		cacheLimitBytes = int64(appConfig.MasterSlave.CacheSizeLimitMB) * 1024 * 1024
+	}
+
+	// Generate local cache file path in configured cache directory
+	localCachePath := getSlaveFileCachePath(cacheRoot, recordName, fileInfo.Path)
 
 	// Check if local cache file exists and size matches
 	if utils.CheckReadPath(localCachePath) {
@@ -751,15 +802,68 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 			// Update fileInfo to point to local cache file
 			fileInfo.Path = localCachePath
 			// Continue with standard upload logic
-			return uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo)
+			if err := uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+				return err
+			}
+			cleanSlaveCacheFile(localCachePath)
+			return nil
 		} else {
 			log.Infof("Cached file size mismatch (cached: %d, expected: %d), re-downloading", cachedSize, fileInfo.Size)
 		}
 	}
 
+	// Check cache capacity before download
+	//nolint: nestif // keep it flat.
+	if cacheLimitBytes > 0 && fileInfo.Size > 0 {
+		usedBytes := int64(0)
+		if utils.CheckReadPath(cacheRoot) {
+			calculated, err := calcDirSize(cacheRoot)
+			if err != nil {
+				log.Warnf("failed to calculate cache dir size, continue: %v", err)
+			} else {
+				usedBytes = calculated
+			}
+		}
+		if usedBytes+fileInfo.Size > cacheLimitBytes {
+			log.Warnf("cache space insufficient: used=%d need=%d limit=%d record=%s file=%s", usedBytes, fileInfo.Size, cacheLimitBytes, recordName, fileInfo.Path)
+			return errors.Wrap(ErrCacheInsufficient, "cache space insufficient")
+		}
+	}
+
+	// Check disk-free space before download
+	//nolint: nestif // keep it flat.
+	if fileInfo.Size > 0 {
+		if utils.CheckReadPath(cacheRoot) {
+			usage, err := disk.Usage(cacheRoot)
+			if err != nil {
+				log.Warnf("failed to get disk usage for %s, continue: %v", cacheRoot, err)
+			} else {
+				need := fileInfo.Size
+				if need < 0 {
+					need = 0
+				}
+
+				free64 := int64(math.Min(float64(usage.Free), float64(math.MaxInt64)))
+				if free64 <= need {
+					log.Warnf("disk space insufficient: free=%d need=%d path=%s record=%s file=%s", free64, need, cacheRoot, recordName, fileInfo.Path)
+					return errors.Wrap(ErrDiskInsufficient, "disk space insufficient")
+				}
+			}
+		} else {
+			log.Warnf("cache root %s not accessible, skip disk free check", cacheRoot)
+		}
+	}
+
 	// Download slave file to local cache
 	log.Infof("Downloading slave file to local cache: %s", localCachePath)
-	if err := downloadSlaveFileToLocal(fileManager, fileInfo, localCachePath); err != nil {
+	if err := downloadSlaveFileToLocal(fileManager, fileInfo, localCachePath, sizeLimitBytes); err != nil {
+		if errors.Is(err, master.ErrSlaveFileTooLarge) {
+			return nil
+		}
+		if errors.Is(err, master.ErrSlaveFileUnavailable) {
+			log.Warnf("slave file %s unavailable, skip: %v", fileInfo.Path, err)
+			return nil
+		}
 		return errors.Wrap(err, "failed to download slave file to local cache")
 	}
 
@@ -776,11 +880,15 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	}
 
 	// Continue with standard upload logic
-	return uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo)
+	if err := uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+		return err
+	}
+	cleanSlaveCacheFile(localCachePath)
+	return nil
 }
 
 // getSlaveFileCachePath generates local cache path for slave files.
-func getSlaveFileCachePath(cacheFolder, slaveFilePath string) string {
+func getSlaveFileCachePath(cacheFolder, recordName, slaveFilePath string) string {
 	// Parse slave file path to get slave ID and original path
 	slaveID, originalPath, err := master.ParseSlaveFilePath(slaveFilePath)
 	if err != nil {
@@ -790,8 +898,8 @@ func getSlaveFileCachePath(cacheFolder, slaveFilePath string) string {
 		originalPath = slaveFilePath
 	}
 
-	// Create cache directory structure: recordCache/projectName/recordName/slave_files/slaveID/
-	cacheDir := filepath.Join(cacheFolder, "slave_files", slaveID)
+	// Create cache directory structure: cacheRoot/recordName/slave_files/slaveID/
+	cacheDir := filepath.Join(cacheFolder, recordName, "slave_files", slaveID)
 
 	// Ensure directory exists
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
@@ -808,12 +916,12 @@ func getSlaveFileCachePath(cacheFolder, slaveFilePath string) string {
 }
 
 // downloadSlaveFileToLocal downloads slave file to local cache.
-func downloadSlaveFileToLocal(fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string) error {
+func downloadSlaveFileToLocal(fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string, maxSize int64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	// Get file reader from FileManager (without size limit for complete file copy)
-	reader, err := fileManager.GetFileReader(ctx, *fileInfo)
+	// Get file reader from FileManager (with optional size limit)
+	reader, err := fileManager.GetFileReader(ctx, *fileInfo, maxSize)
 	if err != nil {
 		return errors.Wrap(err, "failed to get slave file reader")
 	}
@@ -849,4 +957,81 @@ func downloadSlaveFileToLocal(fileManager *master.FileManager, fileInfo *model.F
 
 	log.Infof("Successfully downloaded slave file to local cache: %s (copied %d bytes)", localPath, bytesCopied)
 	return nil
+}
+
+func cleanSlaveCacheFile(localCachePath string) {
+	if localCachePath == "" {
+		return
+	}
+	if err := os.Remove(localCachePath); err != nil && !os.IsNotExist(err) {
+		log.Warnf("Failed to remove slave cache file %s: %v", localCachePath, err)
+		return
+	}
+	log.Infof("Removed slave cache file: %s", localCachePath)
+}
+
+func cleanSlaveCacheDir(appConfig *config.AppConfig, recordCacheFolder, recordName string) {
+	if recordName == "" {
+		return
+	}
+	cacheRoot := recordCacheFolder
+	if appConfig != nil {
+		if configuredCacheDir := strings.TrimSpace(appConfig.MasterSlave.CacheDir); configuredCacheDir != "" {
+			cacheRoot = configuredCacheDir
+		}
+	}
+	if cacheRoot == "" {
+		return
+	}
+	cacheDir := filepath.Join(cacheRoot, recordName)
+	if !utils.CheckReadPath(cacheDir) {
+		return
+	}
+	if utils.DeleteDir(cacheDir) {
+		log.Infof("Removed slave cache directory: %s", cacheDir)
+	} else {
+		log.Warnf("Failed to remove slave cache directory: %s", cacheDir)
+	}
+}
+
+func calcDirSize(root string) (int64, error) {
+	var size int64
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		size += info.Size()
+		return nil
+	})
+	return size, err
+}
+
+func isNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "connection reset"),
+		strings.Contains(msg, "tls handshake timeout"),
+		strings.Contains(msg, "i/o timeout"),
+		strings.Contains(msg, "timeout"):
+		return true
+	}
+	return false
 }

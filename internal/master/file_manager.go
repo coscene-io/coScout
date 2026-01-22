@@ -84,13 +84,14 @@ func NewFileManager(client *Client, registry *SlaveRegistry) *FileManager {
 }
 
 // GetFileReader gets file reader, automatically handles local/remote files.
-func (fm *FileManager) GetFileReader(ctx context.Context, fileInfo model.FileInfo) (io.ReadCloser, error) {
+// maxSize only applies to slave files; 0 means no limit.
+func (fm *FileManager) GetFileReader(ctx context.Context, fileInfo model.FileInfo, maxSize int64) (io.ReadCloser, error) {
 	var reader io.ReadCloser
 	var err error
 
 	// Check if it's a slave file (path format: slave://slaveID/absolutePath)
 	if IsSlaveFile(fileInfo.Path) {
-		reader, err = fm.getSlaveFileReader(ctx, fileInfo)
+		reader, err = fm.getSlaveFileReaderWithSize(ctx, fileInfo, maxSize)
 	} else {
 		// Local file
 		reader, err = fm.getLocalFileReader(fileInfo.Path)
@@ -177,8 +178,8 @@ func (fm *FileManager) getLocalFileReader(filePath string) (io.ReadCloser, error
 	return file, nil
 }
 
-// getSlaveFileReader gets slave file reader.
-func (fm *FileManager) getSlaveFileReader(ctx context.Context, fileInfo model.FileInfo) (io.ReadCloser, error) {
+// getSlaveFileReaderWithSize gets slave file reader with a size limit (0 means no limit).
+func (fm *FileManager) getSlaveFileReaderWithSize(ctx context.Context, fileInfo model.FileInfo, maxSize int64) (io.ReadCloser, error) {
 	// Parse slave file path: slave://slaveID/absolutePath
 	slaveID, remotePath, err := ParseSlaveFilePath(fileInfo.Path)
 	if err != nil {
@@ -195,7 +196,11 @@ func (fm *FileManager) getSlaveFileReader(ctx context.Context, fileInfo model.Fi
 		return nil, errors.Wrapf(ErrSlaveNotOnline, "slave ID: %s", slaveID)
 	}
 
-	// Direct streaming from slave (no size limit for complete file copy)
+	// Direct streaming from slave
+	if maxSize > 0 {
+		log.Infof("Streaming file %s from slave %s with limit %d bytes", remotePath, slave.ID, maxSize)
+		return fm.client.DownloadSlaveFileWithSize(ctx, slave, remotePath, maxSize)
+	}
 	log.Infof("Streaming file %s from slave %s", remotePath, slave.ID)
 	return fm.client.DownloadSlaveFileWithSize(ctx, slave, remotePath, 0) // 0 means no size limit
 }

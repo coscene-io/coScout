@@ -29,8 +29,10 @@ import (
 
 // Static errors for better error handling.
 var (
-	ErrSlaveRequestFailed = errors.New("slave request failed")
-	ErrSlaveHealthFailed  = errors.New("slave health check failed")
+	ErrSlaveRequestFailed   = errors.New("slave request failed")
+	ErrSlaveHealthFailed    = errors.New("slave health check failed")
+	ErrSlaveFileTooLarge    = errors.New("slave file exceeds size limit")
+	ErrSlaveFileUnavailable = errors.New("slave file unavailable")
 )
 
 // Client master to slave client.
@@ -160,6 +162,14 @@ func (c *Client) DownloadSlaveFileWithSize(ctx context.Context, slave *SlaveInfo
 		return nil, fmt.Errorf("send download request to slave %s: %w", slave.ID, err)
 	}
 
+	if resp.StatusCode == http.StatusNoContent {
+		resp.Body.Close()
+		return nil, errors.Wrapf(ErrSlaveFileTooLarge, "slave %s skipped file %s", slave.ID, filePath)
+	}
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+		resp.Body.Close()
+		return nil, errors.Wrapf(ErrSlaveFileUnavailable, "slave %s unavailable file %s", slave.ID, filePath)
+	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)

@@ -211,6 +211,10 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 		// check if record cache is expired
 		if checkRecordCacheExpired(config.Collector.DeleteAfterIntervalInHours, rc.Timestamp, record) {
 			log.Infof("Record cache %s is expired, delete it", record)
+			if rcName, ok := rc.Record["name"].(string); ok {
+				cleanSlaveCacheDir(config, rc.GetBaseFolder(), rcName)
+			}
+
 			continue
 		}
 

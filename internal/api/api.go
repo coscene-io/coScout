@@ -541,7 +541,7 @@ func (r *RequestClient) GenerateSecurityToken(project string) (*openStorV1alpha1
 	apiRes, err := r.securityTokenCli.GenerateSecurityToken(ctx, apiReq)
 	if err != nil {
 		log.Errorf("unable to generate security token: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("unable to generate security token"))
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return apiRes.Msg, nil
 }

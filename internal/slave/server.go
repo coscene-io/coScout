@@ -142,32 +142,47 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 
 	log.Infof("Received file download request for %s", req.FilePath)
 	if !utils.CheckReadPath(req.FilePath) {
+		log.Warnf("[FileNoPermission] Slave file %s no permission", req.FilePath)
 		http.Error(w, "File no permission: "+req.FilePath, http.StatusBadRequest)
 		return
 	}
 
 	realPath, err := filepath.EvalSymlinks(req.FilePath)
 	if err != nil {
+		log.Warnf("[FileNotFound] Slave file %s not found: %v", req.FilePath, err)
 		http.Error(w, "File not found: "+req.FilePath, http.StatusNotFound)
 		return
 	}
 
 	if !utils.CheckReadPath(realPath) {
+		log.Warnf("[FileNoPermission] Slave file %s no permission", req.FilePath)
 		http.Error(w, "File no permission: "+req.FilePath, http.StatusBadRequest)
 		return
 	}
 
+	if req.MaxSize > 0 {
+		stat, err := os.Stat(realPath)
+		if err != nil {
+			http.Error(w, "Could not stat file: "+realPath, http.StatusInternalServerError)
+			return
+		}
+		if stat.Size() > req.MaxSize {
+			log.Warnf("[FileTooLarge] Slave file %s size %d exceeds limit %d, skip", realPath, stat.Size(), req.MaxSize)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+
 	file, err := os.Open(realPath)
 	if err != nil {
+		log.Warnf("[FileOpenError] Slave file %s could not open: %v", realPath, err)
 		http.Error(w, "Could not open file: "+realPath, http.StatusInternalServerError)
 		return
 	}
 	defer file.Close()
 
 	var reader io.Reader = file
-	if req.MaxSize > 0 {
-		reader = io.LimitReader(file, req.MaxSize)
-	}
+	// If MaxSize is set, size was already validated above.
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if _, err := io.Copy(w, reader); err != nil {

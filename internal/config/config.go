@@ -109,4 +109,10 @@ type NetworkRule struct {
 type MasterSlaveConfig struct {
 	// Whether to enable master mode (default false)
 	Enabled bool `koanf:"enabled" yaml:"enabled" json:"enabled"`
+	// cache directory for master
+	CacheDir string `koanf:"cache_dir" yaml:"cache_dir" json:"cache_dir"`
+	// file size limit in MB for download from a slave
+	FileSizeLimitMB int `koanf:"file_size_limit_mb" yaml:"file_size_limit_mb" json:"file_size_limit_mb"`
+	// cache size limit in MB for master
+	CacheSizeLimitMB int `koanf:"cache_size_limit_mb" yaml:"cache_size_limit_mb" json:"cache_size_limit_mb"`
 }
