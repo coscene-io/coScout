@@ -43,11 +43,13 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
+	"github.com/shirou/gopsutil/v4/disk"
 	log "github.com/sirupsen/logrus"
 )
 
 var ErrNetworkIssue = errors.New("network issue")
 var ErrCacheInsufficient = errors.New("cache insufficient")
+var ErrDiskInsufficient = errors.New("disk space insufficient")
 
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager) {
 	log.Infof("Start upload goroutine")
@@ -286,6 +288,10 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			}
 			if errors.Is(err, ErrCacheInsufficient) {
 				log.Warnf("[cache-insufficient] stop current upload loop for record %s: %v", recordName, err)
+				return err
+			}
+			if errors.Is(err, ErrDiskInsufficient) {
+				log.Warnf("[disk-insufficient] stop current upload loop for record %s: %v", recordName, err)
 				return err
 			}
 			log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
@@ -757,13 +763,21 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	}
 
 	cacheRoot := cacheFolder
+	//nolint: nestif // keep it flat.
 	if appConfig != nil {
 		if configuredCacheDir := strings.TrimSpace(appConfig.MasterSlave.CacheDir); configuredCacheDir != "" {
 			if utils.CheckReadPath(configuredCacheDir) {
 				cacheRoot = configuredCacheDir
 			} else {
-				log.Errorf("Cache dir %s does not exist or is not readable, using default cache folder %s", configuredCacheDir, cacheRoot)
+				if err := os.MkdirAll(configuredCacheDir, 0755); err != nil {
+					log.Errorf("Cache dir %s is not accessible and creation failed, using default %s: %v", configuredCacheDir, cacheRoot, err)
+				} else {
+					log.Infof("Created cache dir %s, switching cache root from %s", configuredCacheDir, cacheRoot)
+					cacheRoot = configuredCacheDir
+				}
 			}
+		} else {
+			log.Infof("MasterSlave.CacheDir not configured, using default cache root %s", cacheRoot)
 		}
 	}
 
@@ -813,6 +827,30 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		if usedBytes+fileInfo.Size > cacheLimitBytes {
 			log.Warnf("cache space insufficient: used=%d need=%d limit=%d record=%s file=%s", usedBytes, fileInfo.Size, cacheLimitBytes, recordName, fileInfo.Path)
 			return errors.Wrap(ErrCacheInsufficient, "cache space insufficient")
+		}
+	}
+
+	// Check disk-free space before download
+	//nolint: nestif // keep it flat.
+	if fileInfo.Size > 0 {
+		if utils.CheckReadPath(cacheRoot) {
+			usage, err := disk.Usage(cacheRoot)
+			if err != nil {
+				log.Warnf("failed to get disk usage for %s, continue: %v", cacheRoot, err)
+			} else {
+				need := fileInfo.Size
+				if need < 0 {
+					need = 0
+				}
+
+				free64 := int64(math.Min(float64(usage.Free), float64(math.MaxInt64)))
+				if free64 <= need {
+					log.Warnf("disk space insufficient: free=%d need=%d path=%s record=%s file=%s", free64, need, cacheRoot, recordName, fileInfo.Path)
+					return errors.Wrap(ErrDiskInsufficient, "disk space insufficient")
+				}
+			}
+		} else {
+			log.Warnf("cache root %s not accessible, skip disk free check", cacheRoot)
 		}
 	}
 
