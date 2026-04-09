@@ -45,6 +45,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/shirou/gopsutil/v4/disk"
 	log "github.com/sirupsen/logrus"
+	"github.com/google/uuid"
 )
 
 var ErrNetworkIssue = errors.New("network issue")
@@ -430,11 +431,14 @@ func uploadFile(ctx context.Context, reqClient *api.RequestClient, appConfig *co
 		return err
 	}
 
-	log.Infof("prepare to upload file %s", fileInfo.Path)
 	if fileInfo.Path == "" {
 		log.Warn("file path is empty")
 		return errors.New("file path is empty")
 	}
+
+	uploadSessionID := uuid.NewString()
+	logger := log.WithField("uploadSessionID", uploadSessionID)
+	logger.Infof("prepare to upload file %s", fileInfo.Path)
 
 	fileName := fileInfo.FileName
 	if fileName == "" || fileName == "." {
@@ -452,26 +456,28 @@ func uploadFile(ctx context.Context, reqClient *api.RequestClient, appConfig *co
 
 	// Check if it's a slave file
 	if isSlaveFile(fileInfo.Path) {
-		return uploadSlaveFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, cacheFolder, fileManager)
+		return uploadSlaveFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, cacheFolder, fileManager, uploadSessionID)
 	}
 
 	// Handle local files with existing logic
-	return uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo)
+	return uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, uploadSessionID)
 }
 
 // uploadLocalFile handles local file upload with standard logic.
-func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
+func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, uploadSessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
+	logger := log.WithField("uploadSessionID", uploadSessionID)
+
 	fileInfo, cleanUploadCache, err := getFileInfoFromCacheOrFile(storage, fileInfo)
 	if err != nil {
-		log.Errorf("failed to get file info from cache or file: %v", err)
+		logger.Errorf("failed to get file info from cache or file: %v", err)
 		return err
 	}
 	if cleanUploadCache {
-		log.Infof("clean upload cache for file %s", fileInfo.Path)
+		logger.Infof("clean upload cache for file %s", fileInfo.Path)
 		deleteCacheFileInfo(storage, fileInfo.Path)
 	}
 
@@ -561,15 +567,15 @@ func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 		return err
 	}
 
-	log.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
+	logger.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
 	tags := map[string]string{}
 	bucket := constant.UploadBucket
 	if generateSecurityTokenRes.GetBucket() != "" {
 		bucket = generateSecurityTokenRes.GetBucket()
 	}
-	err = um.FPutObject(ctx, fileInfo.Path, bucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
+	err = um.FPutObject(ctx, uploadSessionID, fileInfo.Path, bucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
 	if err != nil {
-		log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
+		logger.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 		return err
 	}
 
@@ -802,12 +808,13 @@ func parseUploadRateLimitBytes(appConfig *config.AppConfig) int64 {
 }
 
 // uploadSlaveFile downloads slave file to local cache and then uploads using standard logic.
-func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
+func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager, uploadSessionID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	log.Infof("Processing slave file: %s", fileInfo.Path)
+	logger := log.WithField("uploadSessionID", uploadSessionID)
+	logger.Infof("Processing slave file: %s", fileInfo.Path)
 
 	// Check if FileManager is available
 	if fileManager == nil {
@@ -854,7 +861,7 @@ func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 			// Update fileInfo to point to local cache file
 			fileInfo.Path = localCachePath
 			// Continue with standard upload logic
-			if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+			if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, uploadSessionID); err != nil {
 				return err
 			}
 			cleanSlaveCacheFile(localCachePath)
@@ -907,7 +914,7 @@ func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 	}
 
 	// Download slave file to local cache
-	log.Infof("Downloading slave file to local cache: %s", localCachePath)
+	logger.Infof("Downloading slave file to local cache: %s", localCachePath)
 	if err := downloadSlaveFileToLocal(ctx, fileManager, fileInfo, localCachePath, sizeLimitBytes); err != nil {
 		if errors.Is(err, master.ErrSlaveFileTooLarge) {
 			return nil
@@ -932,7 +939,7 @@ func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 	}
 
 	// Continue with standard upload logic
-	if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+	if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, uploadSessionID); err != nil {
 		return err
 	}
 	cleanSlaveCacheFile(localCachePath)
