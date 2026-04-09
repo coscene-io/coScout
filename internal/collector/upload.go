@@ -50,6 +50,7 @@ import (
 var ErrNetworkIssue = errors.New("network issue")
 var ErrCacheInsufficient = errors.New("cache insufficient")
 var ErrDiskInsufficient = errors.New("disk space insufficient")
+var ErrUploadInFlight = errors.New("upload already in flight")
 
 func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager) {
 	log.Infof("Start upload goroutine")
@@ -290,6 +291,10 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 		if err := uploadFile(ctx, reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
 			allCompleted = false
 
+			if errors.Is(err, ErrUploadInFlight) {
+				log.Infof("upload already in flight for file %s, skip current attempt", fileInfo.Path)
+				continue
+			}
 			if errors.Is(err, ErrNetworkIssue) {
 				log.Warnf("network issue detected, stop current upload loop for record %s: %v", recordName, err)
 				return err
@@ -417,6 +422,20 @@ func uploadFile(ctx context.Context, reqClient *api.RequestClient, appConfig *co
 		log.Warn("file path is empty")
 		return errors.New("file path is empty")
 	}
+
+	fileName := fileInfo.FileName
+	if fileName == "" || fileName == "." {
+		fileName = filepath.Base(fileInfo.Path)
+	}
+	objectKey := (&name.FileResourceName{
+		RecordName: recordName,
+		FileName:   fileName,
+	}).String()
+	lockKey := recordName + "|" + objectKey + "|" + fileInfo.Path
+	if !inFlightUploadLocks.TryAcquire(lockKey) {
+		return errors.Wrapf(ErrUploadInFlight, "lock key: %s", lockKey)
+	}
+	defer inFlightUploadLocks.Release(lockKey)
 
 	// Check if it's a slave file
 	if isSlaveFile(fileInfo.Path) {
