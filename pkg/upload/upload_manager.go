@@ -76,7 +76,7 @@ func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucke
 
 // FPutObject uploads a file to a bucket with a key and sha256.
 // If the file size is larger than minPartSize, it will use multipart upload.
-func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize int64, userTags map[string]string, cleanCache bool) error {
+func (u *Manager) FPutObject(parentCtx context.Context, absPath string, bucket string, key string, filesize int64, userTags map[string]string, cleanCache bool) error {
 	log.Infof("Start uploading file: %s, size: %d", absPath, filesize)
 	defer func() {
 		log.Infof("Finished uploading file: %s", absPath)
@@ -85,7 +85,7 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 	var err error
 	numThreads := uint(2)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Minute)
 	defer cancel()
 
 	if cleanCache {

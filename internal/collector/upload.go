@@ -163,7 +163,7 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 					}
 
 					log.Infof("start to upload record %s", rcPath)
-					err = uploadFiles(reqClient, confManager, &rc, fileManager)
+					err = uploadFiles(ctx, reqClient, confManager, &rc, fileManager)
 					if err != nil {
 						select {
 						case errorChan <- err:
@@ -205,7 +205,11 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 	}
 }
 
-func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, recordCache *model.RecordCache, fileManager *master.FileManager) error {
+func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, recordCache *model.RecordCache, fileManager *master.FileManager) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	allCompleted := true
 	appConfig := confManager.LoadWithRemote()
 	getStorage := confManager.GetStorage()
@@ -239,6 +243,10 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	})
 
 	for _, fileInfo := range toUploadFiles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		filePath := fileInfo.Path
 
 		recordCache, err := recordCache.Reload()
@@ -279,7 +287,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		}
 
 		//nolint: nestif // keep it flat.
-		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
+		if err := uploadFile(ctx, reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
 			allCompleted = false
 
 			if errors.Is(err, ErrNetworkIssue) {
@@ -399,7 +407,11 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	return nil
 }
 
-func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
+func uploadFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	log.Infof("prepare to upload file %s", fileInfo.Path)
 	if fileInfo.Path == "" {
 		log.Warn("file path is empty")
@@ -408,15 +420,19 @@ func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, stora
 
 	// Check if it's a slave file
 	if isSlaveFile(fileInfo.Path) {
-		return uploadSlaveFile(reqClient, appConfig, storage, projectName, recordName, fileInfo, cacheFolder, fileManager)
+		return uploadSlaveFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, cacheFolder, fileManager)
 	}
 
 	// Handle local files with existing logic
-	return uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo)
+	return uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo)
 }
 
 // uploadLocalFile handles local file upload with standard logic.
-func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
+func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	fileInfo, cleanUploadCache, err := getFileInfoFromCacheOrFile(storage, fileInfo)
 	if err != nil {
 		log.Errorf("failed to get file info from cache or file: %v", err)
@@ -519,7 +535,7 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	if generateSecurityTokenRes.GetBucket() != "" {
 		bucket = generateSecurityTokenRes.GetBucket()
 	}
-	err = um.FPutObject(fileInfo.Path, bucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
+	err = um.FPutObject(ctx, fileInfo.Path, bucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
 	if err != nil {
 		log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 		return err
@@ -754,7 +770,11 @@ func parseUploadRateLimitBytes(appConfig *config.AppConfig) int64 {
 }
 
 // uploadSlaveFile downloads slave file to local cache and then uploads using standard logic.
-func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
+func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	log.Infof("Processing slave file: %s", fileInfo.Path)
 
 	// Check if FileManager is available
@@ -802,7 +822,7 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 			// Update fileInfo to point to local cache file
 			fileInfo.Path = localCachePath
 			// Continue with standard upload logic
-			if err := uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+			if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
 				return err
 			}
 			cleanSlaveCacheFile(localCachePath)
@@ -856,7 +876,7 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 
 	// Download slave file to local cache
 	log.Infof("Downloading slave file to local cache: %s", localCachePath)
-	if err := downloadSlaveFileToLocal(fileManager, fileInfo, localCachePath, sizeLimitBytes); err != nil {
+	if err := downloadSlaveFileToLocal(ctx, fileManager, fileInfo, localCachePath, sizeLimitBytes); err != nil {
 		if errors.Is(err, master.ErrSlaveFileTooLarge) {
 			return nil
 		}
@@ -880,7 +900,7 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	}
 
 	// Continue with standard upload logic
-	if err := uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+	if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
 		return err
 	}
 	cleanSlaveCacheFile(localCachePath)
@@ -916,8 +936,8 @@ func getSlaveFileCachePath(cacheFolder, recordName, slaveFilePath string) string
 }
 
 // downloadSlaveFileToLocal downloads slave file to local cache.
-func downloadSlaveFileToLocal(fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string, maxSize int64) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+func downloadSlaveFileToLocal(parentCtx context.Context, fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string, maxSize int64) error {
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Minute)
 	defer cancel()
 
 	// Get file reader from FileManager (with optional size limit)
