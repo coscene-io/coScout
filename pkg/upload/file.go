@@ -15,6 +15,8 @@
 package upload
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -336,13 +338,38 @@ func ComputeRuleFileInfos(fileStates []file_state_handler.FileState) map[string]
 }
 
 func GetUploadIdKey(absPath string) string {
-	return fmt.Sprintf(uploadIdKeyTemplate, absPath)
+	return fmt.Sprintf(uploadIdKeyTemplate, buildMultipartCacheScope(absPath, "", ""))
 }
 
 func GetUploadedSizeKey(absPath string) string {
-	return fmt.Sprintf(uploadedSizeKeyTemplate, absPath)
+	return fmt.Sprintf(uploadedSizeKeyTemplate, buildMultipartCacheScope(absPath, "", ""))
 }
 
 func GetUploadPartsKey(absPath string) string {
-	return fmt.Sprintf(partsKeyTemplate, absPath)
+	return fmt.Sprintf(partsKeyTemplate, buildMultipartCacheScope(absPath, "", ""))
+}
+
+func GetScopedUploadIdKey(bucket string, objectKey string, absPath string) string {
+	return fmt.Sprintf(uploadIdKeyTemplate, buildMultipartCacheScope(absPath, bucket, objectKey))
+}
+
+func GetScopedUploadedSizeKey(bucket string, objectKey string, absPath string) string {
+	return fmt.Sprintf(uploadedSizeKeyTemplate, buildMultipartCacheScope(absPath, bucket, objectKey))
+}
+
+func GetScopedUploadPartsKey(bucket string, objectKey string, absPath string) string {
+	return fmt.Sprintf(partsKeyTemplate, buildMultipartCacheScope(absPath, bucket, objectKey))
+}
+
+func buildMultipartCacheScope(absPath string, bucket string, objectKey string) string {
+	cleanPath := filepath.Clean(strings.TrimSpace(absPath))
+	cleanBucket := strings.TrimSpace(bucket)
+	cleanObjectKey := strings.TrimSpace(objectKey)
+
+	if cleanBucket == "" && cleanObjectKey == "" {
+		return cleanPath
+	}
+
+	sum := sha256.Sum256([]byte(cleanBucket + "\n" + cleanObjectKey + "\n" + cleanPath))
+	return "scoped:" + hex.EncodeToString(sum[:])
 }
