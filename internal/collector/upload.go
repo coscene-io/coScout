@@ -52,7 +52,7 @@ var ErrCacheInsufficient = errors.New("cache insufficient")
 var ErrDiskInsufficient = errors.New("disk space insufficient")
 var ErrUploadInFlight = errors.New("upload already in flight")
 
-func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager) {
+func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager, recordSet *recordRegistry) {
 	log.Infof("Start upload goroutine")
 	queue := upload.NewDedupQueue(8)
 
@@ -114,16 +114,21 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 						return
 					}
 
-					log.Infof("upload queue size: %d", queue.Size())
-					rcPath, isPop := queue.Pop()
-					if !isPop || rcPath == "" {
-						log.Infof("upload queue is empty or invalid pop")
-						return
-					}
+						log.Infof("upload queue size: %d", queue.Size())
+						rcPath, isPop := queue.Pop()
+						if !isPop || rcPath == "" {
+							log.Infof("upload queue is empty or invalid pop")
+							return
+						}
+						defer func() {
+							if recordSet != nil {
+								recordSet.Release(rcPath)
+							}
+						}()
 
-					if !utils.CheckReadPath(rcPath) {
-						log.Warnf("record cache %s not exist", rcPath)
-						return
+						if !utils.CheckReadPath(rcPath) {
+							log.Warnf("record cache %s not exist", rcPath)
+							return
 					}
 
 					data, err := os.ReadFile(rcPath)
@@ -194,11 +199,19 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 			}
 
 			if queue.IsFull() {
+				if recordSet != nil {
+					recordSet.Release(recordCache)
+				}
 				log.Warn("upload queue is full, skip")
 				continue
 			}
 
-			queue.Push(recordCache)
+			if !queue.Push(recordCache) {
+				if recordSet != nil {
+					recordSet.Release(recordCache)
+				}
+				log.Infof("record cache %s is already queued, skip", recordCache)
+			}
 		case <-ctx.Done():
 			log.Info("upload goroutine done")
 			return
