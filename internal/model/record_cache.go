@@ -114,13 +114,16 @@ func (rc *RecordCache) Save() error {
 
 	baseFolder := rc.getBaseFolder()
 	dirPath := filepath.Join(baseFolder, ".cos")
+	file := filepath.Join(dirPath, "state.json")
+	unlock := recordCacheFileLocks.Lock(file)
+	defer unlock()
+
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
 			return errors.Wrap(err, "create cache directory failed")
 		}
 	}
 
-	file := filepath.Join(dirPath, "state.json")
 	data, err := json.MarshalIndent(rc, "", "  ")
 	if err != nil {
 		return errors.Wrap(err, "marshal record cache failed")
@@ -141,6 +144,9 @@ func (rc *RecordCache) Reload() (*RecordCache, error) {
 
 	baseFolder := rc.getBaseFolder()
 	file := filepath.Join(baseFolder, ".cos", "state.json")
+	unlock := recordCacheFileLocks.Lock(file)
+	defer unlock()
+
 	if _, err := os.Stat(file); os.IsNotExist(err) {
 		return nil, errors.Wrap(err, "record cache file not exist")
 	}
@@ -163,6 +169,10 @@ func (rc *RecordCache) Clean() string {
 	defer rc.mu.RUnlock()
 
 	baseFolder := rc.getBaseFolder()
+	file := filepath.Join(baseFolder, ".cos", "state.json")
+	unlock := recordCacheFileLocks.Lock(file)
+	defer unlock()
+
 	if utils.CheckReadPath(baseFolder) {
 		if utils.DeleteDir(baseFolder) {
 			return baseFolder

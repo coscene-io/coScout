@@ -224,9 +224,6 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 			continue
 		}
 
-		// create related resources
-		createRelatedRecordResources(deviceInfo, &rc, reqClient, config.Device)
-
 		if rcPath := rc.GetRecordCachePath(); rcPath != "" {
 			if recordSet == nil {
 				log.Warn("record registry is nil, skip collecting")
@@ -237,6 +234,9 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 				continue
 			}
 		}
+
+		// create related resources
+		createRelatedRecordResources(deviceInfo, &rc, reqClient, config.Device)
 
 		if rcName, ok := rc.Record["name"].(string); ok && rcName != "" {
 			select {
