@@ -283,6 +283,22 @@ func TestDedupQueue_ZeroCapacity(t *testing.T) {
 	assert.Nil(t, queue, "Queue should be nil for negative capacity")
 }
 
+func TestDedupQueue_Clear(t *testing.T) {
+	t.Parallel()
+	queue := NewDedupQueue(3)
+
+	queue.Push("item1")
+	queue.Push("item2")
+	queue.Clear()
+
+	if !queue.IsEmpty() {
+		t.Errorf("queue should be empty after clear, got size %d", queue.Size())
+	}
+	if !queue.Push("item1") {
+		t.Error("queue should accept an item after clear")
+	}
+}
+
 func TestDedupQueue_NegativeCapacity(t *testing.T) {
 	t.Parallel()
 	// Test that negative capacity is handled gracefully

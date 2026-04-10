@@ -103,4 +103,6 @@ func (dq *DedupQueue) IsEmpty() bool {
 func (dq *DedupQueue) Clear() {
 	dq.mu.Lock()
 	defer dq.mu.Unlock()
+
+	dq.elements = dq.elements[:0]
 }
