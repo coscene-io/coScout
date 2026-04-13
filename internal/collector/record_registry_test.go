@@ -17,6 +17,8 @@ package collector
 import "testing"
 
 func TestRecordRegistryTryAcquireAndRelease(t *testing.T) {
+	t.Parallel()
+
 	registry := newRecordRegistry()
 	key := "/tmp/record/.cos/state.json"
 

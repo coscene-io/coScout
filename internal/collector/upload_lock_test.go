@@ -17,6 +17,8 @@ package collector
 import "testing"
 
 func TestUploadLockRegistryTryAcquireAndRelease(t *testing.T) {
+	t.Parallel()
+
 	registry := newUploadLockRegistry()
 	key := "record/files/file.tar.gz|/tmp/file.tar.gz"
 

@@ -92,7 +92,6 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 				default:
 				}
 
-				//nolint: contextcheck // context is checked in the parent goroutine
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
@@ -345,6 +344,7 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 				tags := make(map[string]string)
 				tags["uploadedFiles"] = strconv.Itoa(len(lo.Uniq(recordCache.UploadedFilePaths)))
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err := reqClient.AddTaskTags(uploadTaskName, tags)
 				if err != nil {
 					log.Errorf("failed to add task tags: %v", err)
@@ -359,6 +359,7 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 				tags := make(map[string]string)
 				tags["uploadedFiles"] = strconv.Itoa(len(lo.Uniq(recordCache.UploadedFilePaths)))
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err := reqClient.AddTaskTags(diagnosisTaskName, tags)
 				if err != nil {
 					log.Errorf("failed to add task tags: %v", err)
@@ -376,6 +377,7 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 		labels = append(labels, recordCache.Labels...)
 		labels = append(labels, constant.LabelUploadSuccess)
 
+		//nolint:contextcheck // API method manages its own context/timeout internally
 		_, err := reqClient.UpdateRecordLabels(recordCache.ProjectName, recordName, labels)
 		if err != nil {
 			log.Errorf("failed to update record labels: %v", err)
@@ -389,11 +391,13 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 				tags["totalFiles"] = strconv.Itoa(len(recordCache.OriginalFiles))
 				tags["recordName"] = recordName
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err := reqClient.AddTaskTags(uploadTaskName, tags)
 				if err != nil {
 					log.Errorf("failed to add task tags: %v", err)
 				}
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err = reqClient.UpdateTaskState(uploadTaskName, enums.TaskStateEnum_SUCCEEDED.Enum())
 				if err != nil {
 					log.Errorf("failed to update task state: %v", err)
@@ -404,6 +408,7 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 		if recordCache.DiagnosisTask != nil {
 			diagnosisTaskName, ok := recordCache.DiagnosisTask["name"].(string)
 			if ok && len(diagnosisTaskName) > 0 {
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err = reqClient.UpdateTaskState(diagnosisTaskName, enums.TaskStateEnum_SUCCEEDED.Enum())
 				if err != nil {
 					log.Errorf("failed to update task state: %v", err)
@@ -503,6 +508,7 @@ func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 		FileName:   fileInfo.FileName,
 	}
 	if !appConfig.Collector.SkipCheckSameFile {
+		//nolint:contextcheck // API method manages its own context/timeout internally
 		if reqClient.CheckCloneFile(recordName, fileResourceName.String(), fileInfo.Sha256) {
 			log.Infof("file %s has been cloned, skip", fileInfo.Path)
 			return nil
@@ -510,6 +516,7 @@ func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 	}
 
 	// create minio client and upload manager first.
+	//nolint:contextcheck // API method manages its own context/timeout internally
 	generateSecurityTokenRes, err := reqClient.GenerateSecurityToken(projectName)
 	if err != nil {
 		log.Errorf("unable to generate security token: %v", err)

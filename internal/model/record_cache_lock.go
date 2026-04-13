@@ -49,4 +49,4 @@ func (r *keyedMutexRegistry) Lock(key string) func() {
 	return lock.Unlock
 }
 
-var recordCacheFileLocks = newKeyedMutexRegistry()
+var recordCacheFileLocks = newKeyedMutexRegistry() //nolint:gochecknoglobals // package-level singleton registry for record cache file locking

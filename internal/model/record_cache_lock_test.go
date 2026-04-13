@@ -20,6 +20,8 @@ import (
 )
 
 func TestKeyedMutexRegistrySerializesSameKey(t *testing.T) {
+	t.Parallel()
+
 	registry := newKeyedMutexRegistry()
 	unlock := registry.Lock("/tmp/record/.cos/state.json")
 

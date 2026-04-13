@@ -56,4 +56,4 @@ func (r *uploadLockRegistry) Release(key string) {
 	delete(r.active, key)
 }
 
-var inFlightUploadLocks = newUploadLockRegistry()
+var inFlightUploadLocks = newUploadLockRegistry() //nolint:gochecknoglobals // package-level singleton registry for in-flight upload dedup

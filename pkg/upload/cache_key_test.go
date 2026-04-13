@@ -17,6 +17,8 @@ package upload
 import "testing"
 
 func TestScopedMultipartCacheKeysDifferByObjectScope(t *testing.T) {
+	t.Parallel()
+
 	absPath := "/tmp/bag.tar.gz"
 
 	keyA := GetScopedUploadIdKey("bucket-a", "record-a/files/bag.tar.gz", absPath)
@@ -32,6 +34,8 @@ func TestScopedMultipartCacheKeysDifferByObjectScope(t *testing.T) {
 }
 
 func TestLegacyMultipartCacheKeyRemainsPathBased(t *testing.T) {
+	t.Parallel()
+
 	absPath := "/tmp/bag.tar.gz"
 
 	legacyA := GetUploadIdKey(absPath)
