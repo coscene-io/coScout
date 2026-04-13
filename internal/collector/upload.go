@@ -39,13 +39,13 @@ import (
 	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/dustin/go-humanize"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pkg/errors"
 	"github.com/samber/lo"
 	"github.com/shirou/gopsutil/v4/disk"
 	log "github.com/sirupsen/logrus"
-	"github.com/google/uuid"
 )
 
 var ErrNetworkIssue = errors.New("network issue")
@@ -115,21 +115,21 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 						return
 					}
 
-						log.Infof("upload queue size: %d", queue.Size())
-						rcPath, isPop := queue.Pop()
-						if !isPop || rcPath == "" {
-							log.Infof("upload queue is empty or invalid pop")
-							return
+					log.Infof("upload queue size: %d", queue.Size())
+					rcPath, isPop := queue.Pop()
+					if !isPop || rcPath == "" {
+						log.Infof("upload queue is empty or invalid pop")
+						return
+					}
+					defer func() {
+						if recordSet != nil {
+							recordSet.Release(rcPath)
 						}
-						defer func() {
-							if recordSet != nil {
-								recordSet.Release(rcPath)
-							}
-						}()
+					}()
 
-						if !utils.CheckReadPath(rcPath) {
-							log.Warnf("record cache %s not exist", rcPath)
-							return
+					if !utils.CheckReadPath(rcPath) {
+						log.Warnf("record cache %s not exist", rcPath)
+						return
 					}
 
 					data, err := os.ReadFile(rcPath)
