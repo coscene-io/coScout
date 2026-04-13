@@ -28,7 +28,7 @@ require (
 	github.com/samber/lo v1.53.0
 	github.com/shirou/gopsutil/v4 v4.25.12
 	github.com/sirupsen/logrus v1.9.4
-	github.com/sosodev/duration v1.3.1
+	github.com/sosodev/duration v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
