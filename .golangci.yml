@@ -53,7 +53,7 @@ linters:
     - tagliatelle
     - mnd
     - gocyclo
-    - exportloopref     # deprecated, replaced by copyloopvar
+    - tenv              # deprecated, replaced by usetesting
 issues:
   exclude-rules:
     - linters:

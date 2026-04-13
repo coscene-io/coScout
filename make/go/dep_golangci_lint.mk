@@ -7,9 +7,9 @@ $(call _assert_var,CACHE_VERSIONS)
 $(call _assert_var,CACHE_BIN)
 
 # Settable
-# https://github.com/golangci/golangci-lint/releases 20240320 checked 20240320
+# https://github.com/golangci/golangci-lint/releases 20250413 checked 20250413
 # Contrast golangci-lint configuration with the one in https://github.com/connectrpc/connect-go/blob/main/.golangci.yml when upgrading
-GOLANGCI_LINT_VERSION ?= v1.63.4
+GOLANGCI_LINT_VERSION ?= v1.64.8
 
 GOLANGCI_LINT := $(CACHE_VERSIONS)/golangci-lint/$(GOLANGCI_LINT_VERSION)
 $(GOLANGCI_LINT):
