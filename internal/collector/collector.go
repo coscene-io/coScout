@@ -77,8 +77,9 @@ func FindAllRecordCaches() []string {
 func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, fileManager *master.FileManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
 	uploadChan := make(chan string, 5)
 	triggerChan := make(chan struct{}, 1)
+	recordSet := newRecordRegistry()
 
-	go Upload(ctx, reqClient, confManager, uploadChan, errorChan, fileManager)
+	go Upload(ctx, reqClient, confManager, uploadChan, errorChan, fileManager, recordSet)
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -120,7 +121,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 					appConfig := confManager.LoadWithRemote()
 					getStorage := confManager.GetStorage()
 
-					err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
+					err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage, recordSet)
 					if err != nil {
 						select {
 						case errorChan <- err:
@@ -170,7 +171,7 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 	}
 }
 
-func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {
+func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage, recordSet *recordRegistry) error {
 	log.Infof("Start collecting record caches")
 
 	deviceInfo := core.GetDeviceInfo(storage)
@@ -223,6 +224,17 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 			continue
 		}
 
+		if rcPath := rc.GetRecordCachePath(); rcPath != "" {
+			if recordSet == nil {
+				log.Warn("record registry is nil, skip collecting")
+				continue
+			}
+			if !recordSet.TryAcquire(rcPath) {
+				log.Infof("Record cache %s is already queued or processing, skip re-enqueue", rcPath)
+				continue
+			}
+		}
+
 		// create related resources
 		createRelatedRecordResources(deviceInfo, &rc, reqClient, config.Device)
 
@@ -231,8 +243,11 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 			case uploadChan <- rc.GetRecordCachePath():
 				log.Infof("Record cache %s is ready to upload", rcName)
 			default:
+				recordSet.Release(rc.GetRecordCachePath())
 				log.Infof("Upload channel is full, skip uploading record cache %s", rcName)
 			}
+		} else {
+			recordSet.Release(rc.GetRecordCachePath())
 		}
 	}
 	log.Infof("Finish collecting record caches")

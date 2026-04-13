@@ -16,6 +16,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -66,6 +67,10 @@ func (c *CustomHttpHandler) Run(ctx context.Context) {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
+			if errors.Is(err, http.ErrServerClosed) {
+				log.Infof("HTTP server closed")
+				return
+			}
 			log.Errorf("Start HTTP server error: %v", err)
 			c.errChan <- err
 			return
