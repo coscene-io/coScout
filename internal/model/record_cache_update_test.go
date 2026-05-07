@@ -22,6 +22,8 @@ import (
 	"time"
 )
 
+var errStopRecordCacheUpdate = errors.New("stop update")
+
 func TestUpdateRecordCacheMergesLatestState(t *testing.T) {
 	t.Parallel()
 
@@ -80,11 +82,10 @@ func TestUpdateRecordCacheDoesNotWriteOnMutatorError(t *testing.T) {
 		t.Fatalf("write initial record cache: %v", err)
 	}
 
-	updateErr := errors.New("stop update")
 	if _, err := UpdateRecordCache(recordCachePath, func(rc *RecordCache) error {
 		rc.Uploaded = true
-		return updateErr
-	}); !errors.Is(err, updateErr) {
+		return errStopRecordCacheUpdate
+	}); !errors.Is(err, errStopRecordCacheUpdate) {
 		t.Fatalf("expected mutator error, got %v", err)
 	}
 

@@ -590,6 +590,7 @@ func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 		log.Errorf("unable to create upload manager: %v", err)
 		return err
 	}
+	defer um.Close()
 
 	logger.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
 	tags := map[string]string{}
@@ -1036,6 +1037,12 @@ func downloadSlaveFileToLocal(parentCtx context.Context, fileManager *master.Fil
 			return err
 		}
 		return errors.Wrap(err, "failed to copy slave file content")
+	}
+	if fileInfo.Size > 0 && bytesCopied != fileInfo.Size {
+		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+			log.Warnf("failed to remove incomplete slave cache file %s: %v", localPath, err)
+		}
+		return errors.Errorf("slave file size mismatch after download: path=%s copied=%d expected=%d", fileInfo.Path, bytesCopied, fileInfo.Size)
 	}
 
 	log.Infof("Successfully downloaded slave file to local cache: %s (copied %d bytes)", localPath, bytesCopied)

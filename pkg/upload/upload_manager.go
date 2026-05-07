@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"mime"
 	"os"
 	"path/filepath"
@@ -59,12 +60,15 @@ type Manager struct {
 	client             *minio.Client
 	uploadProgressChan chan FileUploadProgress
 	networkChan        chan *model.NetworkUsage
+	closeOnce          sync.Once
+	progressDone       chan struct{}
 }
 
 func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucket string, networkChan chan *model.NetworkUsage) (*Manager, error) {
 	u := &Manager{
 		networkChan:        networkChan,
 		uploadProgressChan: make(chan FileUploadProgress, 10),
+		progressDone:       make(chan struct{}),
 		storage:            storage,
 		cacheBucket:        cacheBucket,
 		client:             client,
@@ -72,6 +76,13 @@ func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucke
 
 	go u.handleUploadProgress()
 	return u, nil
+}
+
+func (u *Manager) Close() {
+	u.closeOnce.Do(func() {
+		close(u.uploadProgressChan)
+		<-u.progressDone
+	})
 }
 
 // FPutObject uploads a file to a bucket with a key and sha256.
@@ -112,8 +123,18 @@ func (u *Manager) FPutObject(parentCtx context.Context, uploadSessionID string, 
 		err = u.FMultipartPutObject(ctx, uploadSessionID, bucket, key,
 			absPath, filesize, minio.PutObjectOptions{UserTags: userTags, PartSize: uint64(partSize), NumThreads: numThreads})
 	} else {
+		fileReader, openErr := os.Open(absPath)
+		if openErr != nil {
+			return openErr
+		}
+		defer func(fileReader *os.File) {
+			if closeErr := fileReader.Close(); closeErr != nil {
+				log.Errorf("Close file reader failed: %v", closeErr)
+			}
+		}(fileReader)
+
 		progress := newUploadProgressReader(uploadSessionID, absPath, filesize, u.uploadProgressChan)
-		_, err = u.client.FPutObject(ctx, bucket, key, absPath,
+		_, err = u.client.PutObject(ctx, bucket, key, io.NewSectionReader(fileReader, 0, filesize), filesize,
 			minio.PutObjectOptions{Progress: progress, UserTags: userTags, NumThreads: numThreads})
 	}
 
@@ -121,6 +142,8 @@ func (u *Manager) FPutObject(parentCtx context.Context, uploadSessionID string, 
 }
 
 func (u *Manager) handleUploadProgress() {
+	defer close(u.progressDone)
+
 	fileInfos := make(map[string]int64)
 	progressMilestones := []float64{0, 10, 25, 35, 50, 60, 75, 90, 100}
 
@@ -135,7 +158,11 @@ func (u *Manager) handleUploadProgress() {
 			if diff > 0 {
 				nc := model.NetworkUsage{}
 				nc.AddSent(diff)
-				u.networkChan <- &nc
+				select {
+				case u.networkChan <- &nc:
+				default:
+					logger.Warnf("Network usage channel is full, skipping upload progress network usage update")
+				}
 			}
 
 			fileInfos[uploadKey] = progress.Uploaded
@@ -327,26 +354,6 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, uploadSessionID strin
 		}
 	}
 
-	// Declare a channel that sends the next part number to be uploaded.
-	uploadPartsCh := make(chan int)
-	// Declare a channel that sends back the response of a part upload.
-	uploadedPartsCh := make(chan uploadedPartRes, partsToUpload)
-	// Used for readability, lastPartNumber is always totalPartsCount.
-	lastPartNumber := totalPartsCount
-
-	// Send each part number to the channel to be processed.
-	go func() {
-		defer close(uploadPartsCh)
-		for p := 1; p <= totalPartsCount; p++ {
-			if slices.Contains(partNumbers, p) {
-				log.Debugf("Part: %d already uploaded", p)
-				continue
-			}
-			log.Debugf("Part: %d need to upload", p)
-			uploadPartsCh <- p
-		}
-	}()
-
 	if opts.NumThreads == 0 {
 		opts.NumThreads = 4
 	}
@@ -363,73 +370,121 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, uploadSessionID strin
 		}
 	}(fileReader)
 
-	// Starts parallel uploads.
-	// Receive the part number to upload from the uploadPartsCh channel.
+	uploadCtx, cancelUpload := context.WithCancel(ctx)
+	defer cancelUpload()
+
+	// Used for readability, lastPartNumber is always totalPartsCount.
+	lastPartNumber := totalPartsCount
+	if opts.NumThreads > math.MaxInt {
+		return errors.Errorf("num threads %d exceeds max int", opts.NumThreads)
+	}
+	workerCount := int(opts.NumThreads)
+	uploadPartsCh := make(chan int)
+	uploadedPartsCh := make(chan uploadedPartRes, workerCount)
+	var uploadWG sync.WaitGroup
+
+	uploadPart := func(partToUpload int) (res uploadedPartRes) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("upload part goroutine panic: %v", r)
+				res.Error = errors.Errorf("upload panic, recover: %v", r)
+			}
+		}()
+
+		// Calculate the offset and size for the part to be uploaded.
+		readOffset := int64(partToUpload-1) * partSize
+		curPartSize := partSize
+		if partToUpload == lastPartNumber {
+			curPartSize = lastPartSize
+		}
+
+		sectionReader := io.NewSectionReader(fileReader, readOffset, curPartSize)
+		log.Debugf("Uploading part: %d", partToUpload)
+		objPart, err := c.PutObjectPart(uploadCtx, bucket, key, uploadId, partToUpload, sectionReader, curPartSize, minio.PutObjectPartOptions{
+			SSE: opts.ServerSideEncryption,
+		})
+		if err != nil {
+			log.Errorf("Upload part: %d failed: %v", partToUpload, err)
+			return uploadedPartRes{Error: err}
+		}
+
+		log.Debugf("Upload part: %d success", partToUpload)
+		return uploadedPartRes{Part: objPart}
+	}
+
+	uploadWG.Add(1)
 	go func() {
-		semaphore := make(chan struct{}, opts.NumThreads)
-		var wg sync.WaitGroup
+		defer uploadWG.Done()
+		defer close(uploadPartsCh)
 
-		for {
+		for p := 1; p <= totalPartsCount; p++ {
+			if slices.Contains(partNumbers, p) {
+				log.Debugf("Part: %d already uploaded", p)
+				continue
+			}
+			log.Debugf("Part: %d need to upload", p)
 			select {
-			case partToUpload, ok := <-uploadPartsCh:
-				if !ok {
-					wg.Wait()
-					return
-				}
-
-				semaphore <- struct{}{}
-
-				wg.Add(1)
-				go func(partToUpload int) {
-					defer func() {
-						if r := recover(); r != nil {
-							log.Errorf("upload part goroutine panic: %v", r)
-							uploadedPartsCh <- uploadedPartRes{Error: errors.Wrapf(err, "upload panic, recover")}
-						}
-					}()
-
-					defer wg.Done()
-					defer func() { <-semaphore }() // release the semaphore
-
-					// Calculate the offset and size for the part to be uploaded.
-					readOffset := int64(partToUpload-1) * partSize
-					curPartSize := partSize
-					if partToUpload == lastPartNumber {
-						curPartSize = lastPartSize
-					}
-
-					sectionReader := io.NewSectionReader(fileReader, readOffset, curPartSize)
-					log.Debugf("Uploading part: %d", partToUpload)
-					objPart, err := c.PutObjectPart(ctx, bucket, key, uploadId, partToUpload, sectionReader, curPartSize, minio.PutObjectPartOptions{
-						SSE: opts.ServerSideEncryption,
-					})
-					if err != nil {
-						log.Errorf("Upload part: %d failed: %v", partToUpload, err)
-						uploadedPartsCh <- uploadedPartRes{
-							Error: err,
-						}
-					} else {
-						log.Debugf("Upload part: %d success", partToUpload)
-						uploadedPartsCh <- uploadedPartRes{
-							Part: objPart,
-						}
-					}
-				}(partToUpload)
-			case <-ctx.Done():
-				wg.Wait()
+			case uploadPartsCh <- p:
+			case <-uploadCtx.Done():
 				return
 			}
 		}
 	}()
 
+	for range workerCount {
+		uploadWG.Add(1)
+		go func() {
+			defer uploadWG.Done()
+
+			for {
+				select {
+				case <-uploadCtx.Done():
+					return
+				case partToUpload, ok := <-uploadPartsCh:
+					if !ok {
+						return
+					}
+
+					uploadRes := uploadPart(partToUpload)
+					select {
+					case uploadedPartsCh <- uploadRes:
+					case <-uploadCtx.Done():
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	uploadDone := make(chan struct{})
+	go func() {
+		uploadWG.Wait()
+		close(uploadedPartsCh)
+		close(uploadDone)
+	}()
+	defer func() {
+		cancelUpload()
+		<-uploadDone
+	}()
+
 	// Gather the responses as they occur and update any progress bar
 	numToUpload := totalPartsCount - len(partNumbers)
-	for m := 1; m <= numToUpload; m++ {
+	completedParts := 0
+	for completedParts < numToUpload {
 		select {
 		case <-ctx.Done():
+			cancelUpload()
 			return ctx.Err()
-		case uploadRes := <-uploadedPartsCh:
+		case uploadRes, ok := <-uploadedPartsCh:
+			if !ok {
+				if err := uploadCtx.Err(); err != nil {
+					return err
+				}
+				return errors.Errorf("multipart upload stopped before all parts completed: completed %d of %d", completedParts, numToUpload)
+			}
+			completedParts++
 			if uploadRes.Error != nil {
+				cancelUpload()
 				if strings.Contains(strings.ToLower(uploadRes.Error.Error()), strings.ToLower("Invalid upload id")) {
 					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 					u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)

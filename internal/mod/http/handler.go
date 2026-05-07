@@ -80,7 +80,7 @@ func (c *CustomHttpHandler) Run(ctx context.Context) {
 	log.Infof("HTTP server started at port %d", serverPort)
 	<-ctx.Done()
 
-	ct, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ct, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer func() {
 		cancel()
 	}()
