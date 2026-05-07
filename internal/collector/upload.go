@@ -131,15 +131,9 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 						return
 					}
 
-					data, err := os.ReadFile(rcPath)
+					rc, err := model.LoadRecordCache(rcPath)
 					if err != nil {
 						log.Errorf("read record cache failed: %v", err)
-						return
-					}
-
-					rc := model.RecordCache{}
-					if err := json.Unmarshal(data, &rc); err != nil {
-						log.Errorf("unmarshal record cache failed: %v", err)
 						return
 					}
 
@@ -169,7 +163,7 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 					}
 
 					log.Infof("start to upload record %s", rcPath)
-					err = uploadFiles(ctx, reqClient, confManager, &rc, fileManager)
+					err = uploadFiles(ctx, reqClient, confManager, rc, fileManager)
 					if err != nil {
 						select {
 						case errorChan <- err:
@@ -325,16 +319,20 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 		} else {
 			log.Infof("upload file %s successfully", fileInfo.Path)
 
-			recordCache, err = recordCache.Reload()
-			if err != nil {
-				log.Errorf("failed to reload record cache: %v", err)
-				return err
-			}
-			recordCache.UploadedFilePaths = lo.Uniq(append(recordCache.UploadedFilePaths, filePath))
-			err = recordCache.Save()
+			recordCache, err = recordCache.Update(func(latest *model.RecordCache) error {
+				if latest.Skipped || latest.Uploaded {
+					return nil
+				}
+				latest.UploadedFilePaths = lo.Uniq(append(latest.UploadedFilePaths, filePath))
+				return nil
+			})
 			if err != nil {
 				log.Errorf("failed to save record cache: %v", err)
 				return err
+			}
+			if recordCache.Skipped || recordCache.Uploaded {
+				log.Infof("record %s has been skipped or uploaded, stop updating progress", recordName)
+				return nil
 			}
 		}
 
@@ -372,6 +370,16 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 	//nolint: nestif // no need to nest if
 	if allCompleted {
 		log.Infof("upload all files successfully")
+
+		recordCache, err = recordCache.Reload()
+		if err != nil {
+			log.Errorf("failed to reload record cache: %v", err)
+			return err
+		}
+		if recordCache.Skipped || recordCache.Uploaded {
+			log.Infof("record %s has been skipped or uploaded, skip finalization", recordName)
+			return nil
+		}
 
 		var labels []string
 		labels = append(labels, recordCache.Labels...)
@@ -416,11 +424,20 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 			}
 		}
 
-		recordCache.Uploaded = true
-		err = recordCache.Save()
+		recordCache, err = recordCache.Update(func(latest *model.RecordCache) error {
+			if latest.Skipped {
+				return nil
+			}
+			latest.Uploaded = true
+			return nil
+		})
 		if err != nil {
 			log.Errorf("failed to save record cache: %v", err)
 			return err
+		}
+		if recordCache.Skipped {
+			log.Infof("record %s has been skipped, skip cache cleanup", recordName)
+			return nil
 		}
 
 		log.Infof("record upload finished: %s", recordName)

@@ -16,8 +16,6 @@ package task
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -135,16 +133,9 @@ func (c *CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resour
 			continue
 		}
 
-		bytes, err := os.ReadFile(rc)
+		cache, err := model.LoadRecordCache(rc)
 		if err != nil {
 			log.Errorf("Failed to read record cache %s: %v", rc, err)
-			continue
-		}
-
-		cache := model.RecordCache{}
-		err = json.Unmarshal(bytes, &cache)
-		if err != nil {
-			log.Errorf("Failed to unmarshal record cache %s: %v", rc, err)
 			continue
 		}
 
@@ -174,8 +165,10 @@ func (c *CustomTaskHandler) handleCancellingTasks(tasks []*openDpsV1alpha1Resour
 			}
 			log.Infof("Cancelling task %s", taskName)
 
-			cache.Skipped = true
-			err = cache.Save()
+			_, err = model.UpdateRecordCache(rc, func(latest *model.RecordCache) error {
+				latest.Skipped = true
+				return nil
+			})
 			if err != nil {
 				log.Errorf("Failed to save record cache %s: %v", rc, err)
 				continue
