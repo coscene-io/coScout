@@ -165,7 +165,12 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			}
 		}
 	}(configTicker)
-	<-modFirstUpdated
+	select {
+	case <-modFirstUpdated:
+	case <-ctx.Done():
+		log.Infof("Rule handler stopped before first rule update")
+		return
+	}
 
 	// start a periodic goroutine to search for files to be processed and send to listenChan
 	listenTicker := time.NewTicker(1 * time.Second)

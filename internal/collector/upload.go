@@ -39,6 +39,7 @@ import (
 	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
 	"github.com/dustin/go-humanize"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pkg/errors"
@@ -50,8 +51,9 @@ import (
 var ErrNetworkIssue = errors.New("network issue")
 var ErrCacheInsufficient = errors.New("cache insufficient")
 var ErrDiskInsufficient = errors.New("disk space insufficient")
+var ErrUploadInFlight = errors.New("upload already in flight")
 
-func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager) {
+func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, uploadChan chan string, errorChan chan error, fileManager *master.FileManager, recordSet *recordRegistry) {
 	log.Infof("Start upload goroutine")
 	queue := upload.NewDedupQueue(8)
 
@@ -90,7 +92,6 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 				default:
 				}
 
-				//nolint: contextcheck // context is checked in the parent goroutine
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
@@ -119,21 +120,20 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 						log.Infof("upload queue is empty or invalid pop")
 						return
 					}
+					defer func() {
+						if recordSet != nil {
+							recordSet.Release(rcPath)
+						}
+					}()
 
 					if !utils.CheckReadPath(rcPath) {
 						log.Warnf("record cache %s not exist", rcPath)
 						return
 					}
 
-					data, err := os.ReadFile(rcPath)
+					rc, err := model.LoadRecordCache(rcPath)
 					if err != nil {
 						log.Errorf("read record cache failed: %v", err)
-						return
-					}
-
-					rc := model.RecordCache{}
-					if err := json.Unmarshal(data, &rc); err != nil {
-						log.Errorf("unmarshal record cache failed: %v", err)
 						return
 					}
 
@@ -163,7 +163,7 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 					}
 
 					log.Infof("start to upload record %s", rcPath)
-					err = uploadFiles(reqClient, confManager, &rc, fileManager)
+					err = uploadFiles(ctx, reqClient, confManager, rc, fileManager)
 					if err != nil {
 						select {
 						case errorChan <- err:
@@ -193,11 +193,19 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 			}
 
 			if queue.IsFull() {
+				if recordSet != nil {
+					recordSet.Release(recordCache)
+				}
 				log.Warn("upload queue is full, skip")
 				continue
 			}
 
-			queue.Push(recordCache)
+			if !queue.Push(recordCache) {
+				if recordSet != nil {
+					recordSet.Release(recordCache)
+				}
+				log.Infof("record cache %s is already queued, skip", recordCache)
+			}
 		case <-ctx.Done():
 			log.Info("upload goroutine done")
 			return
@@ -205,7 +213,11 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 	}
 }
 
-func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, recordCache *model.RecordCache, fileManager *master.FileManager) error {
+func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, recordCache *model.RecordCache, fileManager *master.FileManager) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	allCompleted := true
 	appConfig := confManager.LoadWithRemote()
 	getStorage := confManager.GetStorage()
@@ -239,6 +251,10 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	})
 
 	for _, fileInfo := range toUploadFiles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		filePath := fileInfo.Path
 
 		recordCache, err := recordCache.Reload()
@@ -279,9 +295,13 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		}
 
 		//nolint: nestif // keep it flat.
-		if err := uploadFile(reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
+		if err := uploadFile(ctx, reqClient, appConfig, getStorage, recordCache.ProjectName, recordName, &fileInfo, recordCache.GetBaseFolder(), fileManager); err != nil {
 			allCompleted = false
 
+			if errors.Is(err, ErrUploadInFlight) {
+				log.Infof("upload already in flight for file %s, skip current attempt", fileInfo.Path)
+				continue
+			}
 			if errors.Is(err, ErrNetworkIssue) {
 				log.Warnf("network issue detected, stop current upload loop for record %s: %v", recordName, err)
 				return err
@@ -299,16 +319,20 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		} else {
 			log.Infof("upload file %s successfully", fileInfo.Path)
 
-			recordCache, err = recordCache.Reload()
-			if err != nil {
-				log.Errorf("failed to reload record cache: %v", err)
-				return err
-			}
-			recordCache.UploadedFilePaths = lo.Uniq(append(recordCache.UploadedFilePaths, filePath))
-			err = recordCache.Save()
+			recordCache, err = recordCache.Update(func(latest *model.RecordCache) error {
+				if latest.Skipped || latest.Uploaded {
+					return nil
+				}
+				latest.UploadedFilePaths = lo.Uniq(append(latest.UploadedFilePaths, filePath))
+				return nil
+			})
 			if err != nil {
 				log.Errorf("failed to save record cache: %v", err)
 				return err
+			}
+			if recordCache.Skipped || recordCache.Uploaded {
+				log.Infof("record %s has been skipped or uploaded, stop updating progress", recordName)
+				return nil
 			}
 		}
 
@@ -318,6 +342,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 				tags := make(map[string]string)
 				tags["uploadedFiles"] = strconv.Itoa(len(lo.Uniq(recordCache.UploadedFilePaths)))
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err := reqClient.AddTaskTags(uploadTaskName, tags)
 				if err != nil {
 					log.Errorf("failed to add task tags: %v", err)
@@ -332,6 +357,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 				tags := make(map[string]string)
 				tags["uploadedFiles"] = strconv.Itoa(len(lo.Uniq(recordCache.UploadedFilePaths)))
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err := reqClient.AddTaskTags(diagnosisTaskName, tags)
 				if err != nil {
 					log.Errorf("failed to add task tags: %v", err)
@@ -345,10 +371,21 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	if allCompleted {
 		log.Infof("upload all files successfully")
 
+		recordCache, err = recordCache.Reload()
+		if err != nil {
+			log.Errorf("failed to reload record cache: %v", err)
+			return err
+		}
+		if recordCache.Skipped || recordCache.Uploaded {
+			log.Infof("record %s has been skipped or uploaded, skip finalization", recordName)
+			return nil
+		}
+
 		var labels []string
 		labels = append(labels, recordCache.Labels...)
 		labels = append(labels, constant.LabelUploadSuccess)
 
+		//nolint:contextcheck // API method manages its own context/timeout internally
 		_, err := reqClient.UpdateRecordLabels(recordCache.ProjectName, recordName, labels)
 		if err != nil {
 			log.Errorf("failed to update record labels: %v", err)
@@ -362,11 +399,13 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 				tags["totalFiles"] = strconv.Itoa(len(recordCache.OriginalFiles))
 				tags["recordName"] = recordName
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err := reqClient.AddTaskTags(uploadTaskName, tags)
 				if err != nil {
 					log.Errorf("failed to add task tags: %v", err)
 				}
 
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err = reqClient.UpdateTaskState(uploadTaskName, enums.TaskStateEnum_SUCCEEDED.Enum())
 				if err != nil {
 					log.Errorf("failed to update task state: %v", err)
@@ -377,6 +416,7 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 		if recordCache.DiagnosisTask != nil {
 			diagnosisTaskName, ok := recordCache.DiagnosisTask["name"].(string)
 			if ok && len(diagnosisTaskName) > 0 {
+				//nolint:contextcheck // API method manages its own context/timeout internally
 				_, err = reqClient.UpdateTaskState(diagnosisTaskName, enums.TaskStateEnum_SUCCEEDED.Enum())
 				if err != nil {
 					log.Errorf("failed to update task state: %v", err)
@@ -384,11 +424,20 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 			}
 		}
 
-		recordCache.Uploaded = true
-		err = recordCache.Save()
+		recordCache, err = recordCache.Update(func(latest *model.RecordCache) error {
+			if latest.Skipped {
+				return nil
+			}
+			latest.Uploaded = true
+			return nil
+		})
 		if err != nil {
 			log.Errorf("failed to save record cache: %v", err)
 			return err
+		}
+		if recordCache.Skipped {
+			log.Infof("record %s has been skipped, skip cache cleanup", recordName)
+			return nil
 		}
 
 		log.Infof("record upload finished: %s", recordName)
@@ -399,31 +448,58 @@ func uploadFiles(reqClient *api.RequestClient, confManager *config.ConfManager, 
 	return nil
 }
 
-func uploadFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
-	log.Infof("prepare to upload file %s", fileInfo.Path)
+func uploadFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if fileInfo.Path == "" {
 		log.Warn("file path is empty")
 		return errors.New("file path is empty")
 	}
 
+	uploadSessionID := uuid.NewString()
+	logger := log.WithField("uploadSessionID", uploadSessionID)
+	logger.Infof("prepare to upload file %s", fileInfo.Path)
+
+	fileName := fileInfo.FileName
+	if fileName == "" || fileName == "." {
+		fileName = filepath.Base(fileInfo.Path)
+	}
+	objectKey := (&name.FileResourceName{
+		RecordName: recordName,
+		FileName:   fileName,
+	}).String()
+	lockKey := recordName + "|" + objectKey + "|" + fileInfo.Path
+	if !inFlightUploadLocks.TryAcquire(lockKey) {
+		return errors.Wrapf(ErrUploadInFlight, "lock key: %s", lockKey)
+	}
+	defer inFlightUploadLocks.Release(lockKey)
+
 	// Check if it's a slave file
 	if isSlaveFile(fileInfo.Path) {
-		return uploadSlaveFile(reqClient, appConfig, storage, projectName, recordName, fileInfo, cacheFolder, fileManager)
+		return uploadSlaveFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, cacheFolder, fileManager, uploadSessionID)
 	}
 
 	// Handle local files with existing logic
-	return uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo)
+	return uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, uploadSessionID)
 }
 
 // uploadLocalFile handles local file upload with standard logic.
-func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo) error {
+func uploadLocalFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, uploadSessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	logger := log.WithField("uploadSessionID", uploadSessionID)
+
 	fileInfo, cleanUploadCache, err := getFileInfoFromCacheOrFile(storage, fileInfo)
 	if err != nil {
-		log.Errorf("failed to get file info from cache or file: %v", err)
+		logger.Errorf("failed to get file info from cache or file: %v", err)
 		return err
 	}
 	if cleanUploadCache {
-		log.Infof("clean upload cache for file %s", fileInfo.Path)
+		logger.Infof("clean upload cache for file %s", fileInfo.Path)
 		deleteCacheFileInfo(storage, fileInfo.Path)
 	}
 
@@ -449,6 +525,7 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		FileName:   fileInfo.FileName,
 	}
 	if !appConfig.Collector.SkipCheckSameFile {
+		//nolint:contextcheck // API method manages its own context/timeout internally
 		if reqClient.CheckCloneFile(recordName, fileResourceName.String(), fileInfo.Sha256) {
 			log.Infof("file %s has been cloned, skip", fileInfo.Path)
 			return nil
@@ -456,6 +533,7 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	}
 
 	// create minio client and upload manager first.
+	//nolint:contextcheck // API method manages its own context/timeout internally
 	generateSecurityTokenRes, err := reqClient.GenerateSecurityToken(projectName)
 	if err != nil {
 		log.Errorf("unable to generate security token: %v", err)
@@ -512,16 +590,17 @@ func uploadLocalFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 		log.Errorf("unable to create upload manager: %v", err)
 		return err
 	}
+	defer um.Close()
 
-	log.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
+	logger.Infof("start to upload file %s, size: %d", fileInfo.Path, fileInfo.Size)
 	tags := map[string]string{}
 	bucket := constant.UploadBucket
 	if generateSecurityTokenRes.GetBucket() != "" {
 		bucket = generateSecurityTokenRes.GetBucket()
 	}
-	err = um.FPutObject(fileInfo.Path, bucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
+	err = um.FPutObject(ctx, uploadSessionID, fileInfo.Path, bucket, fileResourceName.String(), fileInfo.Size, tags, cleanUploadCache)
 	if err != nil {
-		log.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
+		logger.Errorf("failed to upload file %s: %v", fileInfo.Path, err)
 		return err
 	}
 
@@ -754,8 +833,13 @@ func parseUploadRateLimitBytes(appConfig *config.AppConfig) int64 {
 }
 
 // uploadSlaveFile downloads slave file to local cache and then uploads using standard logic.
-func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager) error {
-	log.Infof("Processing slave file: %s", fileInfo.Path)
+func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfig *config.AppConfig, storage *storage.Storage, projectName string, recordName string, fileInfo *model.FileInfo, cacheFolder string, fileManager *master.FileManager, uploadSessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	logger := log.WithField("uploadSessionID", uploadSessionID)
+	logger.Infof("Processing slave file: %s", fileInfo.Path)
 
 	// Check if FileManager is available
 	if fileManager == nil {
@@ -802,7 +886,7 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 			// Update fileInfo to point to local cache file
 			fileInfo.Path = localCachePath
 			// Continue with standard upload logic
-			if err := uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+			if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, uploadSessionID); err != nil {
 				return err
 			}
 			cleanSlaveCacheFile(localCachePath)
@@ -855,8 +939,8 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	}
 
 	// Download slave file to local cache
-	log.Infof("Downloading slave file to local cache: %s", localCachePath)
-	if err := downloadSlaveFileToLocal(fileManager, fileInfo, localCachePath, sizeLimitBytes); err != nil {
+	logger.Infof("Downloading slave file to local cache: %s", localCachePath)
+	if err := downloadSlaveFileToLocal(ctx, fileManager, fileInfo, localCachePath, sizeLimitBytes); err != nil {
 		if errors.Is(err, master.ErrSlaveFileTooLarge) {
 			return nil
 		}
@@ -880,7 +964,7 @@ func uploadSlaveFile(reqClient *api.RequestClient, appConfig *config.AppConfig, 
 	}
 
 	// Continue with standard upload logic
-	if err := uploadLocalFile(reqClient, appConfig, storage, projectName, recordName, fileInfo); err != nil {
+	if err := uploadLocalFile(ctx, reqClient, appConfig, storage, projectName, recordName, fileInfo, uploadSessionID); err != nil {
 		return err
 	}
 	cleanSlaveCacheFile(localCachePath)
@@ -916,8 +1000,8 @@ func getSlaveFileCachePath(cacheFolder, recordName, slaveFilePath string) string
 }
 
 // downloadSlaveFileToLocal downloads slave file to local cache.
-func downloadSlaveFileToLocal(fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string, maxSize int64) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+func downloadSlaveFileToLocal(parentCtx context.Context, fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string, maxSize int64) error {
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Minute)
 	defer cancel()
 
 	// Get file reader from FileManager (with optional size limit)
@@ -953,6 +1037,12 @@ func downloadSlaveFileToLocal(fileManager *master.FileManager, fileInfo *model.F
 			return err
 		}
 		return errors.Wrap(err, "failed to copy slave file content")
+	}
+	if fileInfo.Size > 0 && bytesCopied != fileInfo.Size {
+		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
+			log.Warnf("failed to remove incomplete slave cache file %s: %v", localPath, err)
+		}
+		return errors.Errorf("slave file size mismatch after download: path=%s copied=%d expected=%d", fileInfo.Path, bytesCopied, fileInfo.Size)
 	}
 
 	log.Infof("Successfully downloaded slave file to local cache: %s (copied %d bytes)", localPath, bytesCopied)

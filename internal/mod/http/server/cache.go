@@ -26,7 +26,9 @@ import (
 )
 
 type DeleteMultiUploadPartsRequest struct {
-	AbsPath string `json:"absPath"`
+	AbsPath   string `json:"absPath"`
+	Bucket    string `json:"bucket"`
+	ObjectKey string `json:"objectKey"`
 }
 
 func MultiUploadPartsHandler(confManager config.ConfManager) func(w http.ResponseWriter, r *http.Request) {
@@ -50,21 +52,19 @@ func MultiUploadPartsHandler(confManager config.ConfManager) func(w http.Respons
 			return
 		}
 
-		uploadIdKey := upload.GetUploadIdKey(req.AbsPath)
-		uploadedSizeKey := upload.GetUploadedSizeKey(req.AbsPath)
-		partsKey := upload.GetUploadPartsKey(req.AbsPath)
+		keys := []string{
+			upload.GetScopedUploadIdKey(req.Bucket, req.ObjectKey, req.AbsPath),
+			upload.GetScopedUploadPartsKey(req.Bucket, req.ObjectKey, req.AbsPath),
+			upload.GetScopedUploadedSizeKey(req.Bucket, req.ObjectKey, req.AbsPath),
+			upload.GetUploadIdKey(req.AbsPath),
+			upload.GetUploadPartsKey(req.AbsPath),
+			upload.GetUploadedSizeKey(req.AbsPath),
+		}
 
-		err := (*storage).Delete([]byte(constant.MultiPartUploadBucket), []byte(uploadIdKey))
-		if err != nil {
-			log.Errorf("Delete upload id failed: %v", err)
-		}
-		err = (*storage).Delete([]byte(constant.MultiPartUploadBucket), []byte(partsKey))
-		if err != nil {
-			log.Errorf("Delete parts failed: %v", err)
-		}
-		err = (*storage).Delete([]byte(constant.MultiPartUploadBucket), []byte(uploadedSizeKey))
-		if err != nil {
-			log.Errorf("Delete uploaded size failed: %v", err)
+		for _, key := range keys {
+			if err := (*storage).Delete([]byte(constant.MultiPartUploadBucket), []byte(key)); err != nil {
+				log.Errorf("Delete multipart cache key %s failed: %v", key, err)
+			}
 		}
 
 		bytes, err := json.Marshal(map[string]string{"status": "ok"})

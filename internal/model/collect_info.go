@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/pkg/utils"
@@ -61,6 +62,10 @@ func (ci *CollectInfo) GetFilePath() string {
 	return path.Join(config.GetCollectInfoFolder(), ci.Id+".json")
 }
 
+func (ci *CollectInfo) GetDraftFilePath() string {
+	return ci.GetFilePath() + ".draft"
+}
+
 func (ci *CollectInfo) Load(id string) error {
 	ci.Id = id
 	data, err := os.ReadFile(ci.GetFilePath())
@@ -75,20 +80,89 @@ func (ci *CollectInfo) Load(id string) error {
 	return nil
 }
 
+func (ci *CollectInfo) LoadDraft(id string) error {
+	ci.Id = id
+	return ci.loadFromFile(ci.GetDraftFilePath())
+}
+
 func (ci *CollectInfo) Save() error {
+	ci.ensureID()
+	return ci.saveToFile(ci.GetFilePath())
+}
+
+func (ci *CollectInfo) SaveDraft() error {
+	ci.ensureID()
+	return ci.saveToFile(ci.GetDraftFilePath())
+}
+
+func (ci *CollectInfo) ensureID() {
 	if ci.Id == "" {
 		ci.Id = uuid.New().String()
 	}
+}
 
+func (ci *CollectInfo) loadFromFile(filePath string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return errors.Wrap(err, "read collect info")
+	}
+
+	err = json.Unmarshal(data, ci)
+	if err != nil {
+		return errors.Wrap(err, "unmarshal collect info")
+	}
+	return nil
+}
+
+func (ci *CollectInfo) saveToFile(filePath string) error {
 	data, err := json.MarshalIndent(ci, "", "  ")
 	if err != nil {
 		return errors.Wrap(err, "marshal collect info")
 	}
 
-	//nolint: gosec // 0644 is the standard permission for files
-	err = os.WriteFile(ci.GetFilePath(), data, 0644)
+	dirPath := filepath.Dir(filePath)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			return errors.Wrap(err, "create collect info directory failed")
+		}
+	}
+
+	tmpFile, err := os.CreateTemp(dirPath, ".collect-info-*.tmp")
 	if err != nil {
-		return errors.Wrap(err, "write record cache")
+		return errors.Wrap(err, "create temporary collect info file failed")
+	}
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return errors.Wrap(err, "write collect info failed")
+	}
+	if err := tmpFile.Chmod(0600); err != nil {
+		_ = tmpFile.Close()
+		return errors.Wrap(err, "chmod collect info failed")
+	}
+	if err := tmpFile.Close(); err != nil {
+		return errors.Wrap(err, "close collect info failed")
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return errors.Wrap(err, "replace collect info failed")
+	}
+	return nil
+}
+
+func PublishCollectInfo(id string) error {
+	collectInfo := &CollectInfo{Id: id}
+	if err := collectInfo.LoadDraft(id); err != nil {
+		return err
+	}
+	if collectInfo.Cut == nil {
+		return errors.New("collect info cut is nil")
+	}
+	if err := os.Rename(collectInfo.GetDraftFilePath(), collectInfo.GetFilePath()); err != nil {
+		return errors.Wrap(err, "publish collect info")
 	}
 	return nil
 }

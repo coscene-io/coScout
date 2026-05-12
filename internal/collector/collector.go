@@ -16,7 +16,6 @@ package collector
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -77,8 +76,9 @@ func FindAllRecordCaches() []string {
 func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *config.ConfManager, fileManager *master.FileManager, pubSub *gochannel.GoChannel, errorChan chan error) error {
 	uploadChan := make(chan string, 5)
 	triggerChan := make(chan struct{}, 1)
+	recordSet := newRecordRegistry()
 
-	go Upload(ctx, reqClient, confManager, uploadChan, errorChan, fileManager)
+	go Upload(ctx, reqClient, confManager, uploadChan, errorChan, fileManager, recordSet)
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -120,7 +120,7 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 					appConfig := confManager.LoadWithRemote()
 					getStorage := confManager.GetStorage()
 
-					err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage)
+					err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage, recordSet)
 					if err != nil {
 						select {
 						case errorChan <- err:
@@ -170,7 +170,7 @@ func triggerUpload(ctx context.Context, pubSub *gochannel.GoChannel, triggerChan
 	}
 }
 
-func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage) error {
+func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, config *config.AppConfig, storage *storage.Storage, recordSet *recordRegistry) error {
 	log.Infof("Start collecting record caches")
 
 	deviceInfo := core.GetDeviceInfo(storage)
@@ -196,15 +196,9 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 			continue
 		}
 
-		data, err := os.ReadFile(record)
+		rc, err := model.LoadRecordCache(record)
 		if err != nil {
 			log.Errorf("read record cache failed: %v", err)
-			continue
-		}
-
-		rc := model.RecordCache{}
-		if err := json.Unmarshal(data, &rc); err != nil {
-			log.Errorf("unmarshal record cache failed: %v", err)
 			continue
 		}
 
@@ -223,23 +217,37 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 			continue
 		}
 
+		if rcPath := rc.GetRecordCachePath(); rcPath != "" {
+			if recordSet == nil {
+				log.Warn("record registry is nil, skip collecting")
+				continue
+			}
+			if !recordSet.TryAcquire(rcPath) {
+				log.Infof("Record cache %s is already queued or processing, skip re-enqueue", rcPath)
+				continue
+			}
+		}
+
 		// create related resources
-		createRelatedRecordResources(deviceInfo, &rc, reqClient, config.Device)
+		createRelatedRecordResources(deviceInfo, rc, reqClient, config.Device)
 
 		if rcName, ok := rc.Record["name"].(string); ok && rcName != "" {
 			select {
 			case uploadChan <- rc.GetRecordCachePath():
 				log.Infof("Record cache %s is ready to upload", rcName)
 			default:
+				recordSet.Release(rc.GetRecordCachePath())
 				log.Infof("Upload channel is full, skip uploading record cache %s", rcName)
 			}
+		} else {
+			recordSet.Release(rc.GetRecordCachePath())
 		}
 	}
 	log.Infof("Finish collecting record caches")
 	return nil
 }
 
-func obtainEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, moment *model.Moment, recordName, recordTitle string, reqClient *api.RequestClient) {
+func obtainEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc *model.RecordCache, moment *model.Moment, momentIndex int, recordName, recordTitle string, reqClient *api.RequestClient) {
 	if moment.Name == "" {
 		// displayname: moment.Title->recordTitle
 		// description: moment.Description->recordTitle
@@ -279,8 +287,15 @@ func obtainEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc *model
 			moment.IsNew = true
 		}
 
-		err = rc.Save()
-		if err != nil {
+		if _, err := rc.Update(func(latest *model.RecordCache) error {
+			if momentIndex < 0 || momentIndex >= len(latest.Moments) {
+				return nil
+			}
+			latest.Moments[momentIndex].Timestamp = moment.Timestamp
+			latest.Moments[momentIndex].Name = moment.Name
+			latest.Moments[momentIndex].IsNew = moment.IsNew
+			return nil
+		}); err != nil {
 			log.Errorf("save record cache failed: %v", err)
 		}
 	}
@@ -319,7 +334,7 @@ func triggerDeviceEventFromMoment(deviceInfo *openDpsV1alpha1Resource.Device, rc
 	}
 }
 
-func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, recordTitle string, reqClient *api.RequestClient) {
+func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, momentIndex int, recordTitle string, reqClient *api.RequestClient) {
 	if !moment.Task.ShouldCreate {
 		return
 	}
@@ -354,8 +369,13 @@ func upsertTaskFromMoment(rc *model.RecordCache, moment *model.Moment, recordTit
 		} else {
 			// Update moment's task name with created task name
 			moment.Task.Name = upsertedTask.GetName()
-			err = rc.Save()
-			if err != nil {
+			if _, err = rc.Update(func(latest *model.RecordCache) error {
+				if momentIndex < 0 || momentIndex >= len(latest.Moments) {
+					return nil
+				}
+				latest.Moments[momentIndex].Task.Name = moment.Task.Name
+				return nil
+			}); err != nil {
 				log.Errorf("save record cache failed: %v", err)
 			}
 			if moment.Task.Name != "" && moment.Task.SyncTask {
@@ -396,9 +416,9 @@ func createRecordRelatedMoments(deviceInfo *openDpsV1alpha1Resource.Device, rc *
 	}
 
 	for i := range rc.Moments {
-		obtainEventFromMoment(deviceInfo, rc, &rc.Moments[i], recordName, recordTitle, reqClient)
+		obtainEventFromMoment(deviceInfo, rc, &rc.Moments[i], i, recordName, recordTitle, reqClient)
 		triggerDeviceEventFromMoment(deviceInfo, rc, &rc.Moments[i], recordName, reqClient, &deviceConfig)
-		upsertTaskFromMoment(rc, &rc.Moments[i], recordTitle, reqClient)
+		upsertTaskFromMoment(rc, &rc.Moments[i], i, recordTitle, reqClient)
 	}
 }
 
@@ -477,9 +497,13 @@ func createRecordRelatedDiagnosisTasks(deviceInfo *openDpsV1alpha1Resource.Devic
 	if err != nil {
 		log.Errorf("create task failed: %v", err)
 	} else {
-		rc.DiagnosisTask["name"] = task.GetName()
-		err = rc.Save()
-		if err != nil {
+		if _, err = rc.Update(func(latest *model.RecordCache) error {
+			if latest.DiagnosisTask == nil {
+				latest.DiagnosisTask = map[string]interface{}{}
+			}
+			latest.DiagnosisTask["name"] = task.GetName()
+			return nil
+		}); err != nil {
 			log.Errorf("save record cache failed: %v", err)
 		}
 
@@ -569,8 +593,17 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 		"description": record.GetDescription(),
 	}
 
-	err = recordCache.Save()
-	if err != nil {
+	if _, err := recordCache.Update(func(latest *model.RecordCache) error {
+		if latest.Record == nil {
+			latest.Record = map[string]interface{}{}
+		}
+		if rcName, ok := latest.Record["name"].(string); ok && rcName != "" {
+			recordCache.Record = latest.Record
+			return nil
+		}
+		latest.Record = recordCache.Record
+		return nil
+	}); err != nil {
 		log.Errorf("save record cache failed: %v", err)
 	}
 }

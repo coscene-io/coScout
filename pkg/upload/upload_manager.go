@@ -17,8 +17,8 @@ package upload
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
+	"math"
 	"mime"
 	"os"
 	"path/filepath"
@@ -46,6 +46,7 @@ const (
 )
 
 type FileUploadProgress struct {
+	SessionID string
 	Name      string
 	Uploaded  int64
 	TotalSize int64
@@ -59,12 +60,15 @@ type Manager struct {
 	client             *minio.Client
 	uploadProgressChan chan FileUploadProgress
 	networkChan        chan *model.NetworkUsage
+	closeOnce          sync.Once
+	progressDone       chan struct{}
 }
 
 func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucket string, networkChan chan *model.NetworkUsage) (*Manager, error) {
 	u := &Manager{
 		networkChan:        networkChan,
 		uploadProgressChan: make(chan FileUploadProgress, 10),
+		progressDone:       make(chan struct{}),
 		storage:            storage,
 		cacheBucket:        cacheBucket,
 		client:             client,
@@ -74,26 +78,38 @@ func NewUploadManager(client *minio.Client, storage *storage.Storage, cacheBucke
 	return u, nil
 }
 
+func (u *Manager) Close() {
+	u.closeOnce.Do(func() {
+		close(u.uploadProgressChan)
+		<-u.progressDone
+	})
+}
+
 // FPutObject uploads a file to a bucket with a key and sha256.
 // If the file size is larger than minPartSize, it will use multipart upload.
-func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize int64, userTags map[string]string, cleanCache bool) error {
-	log.Infof("Start uploading file: %s, size: %d", absPath, filesize)
+func (u *Manager) FPutObject(parentCtx context.Context, uploadSessionID string, absPath string, bucket string, key string, filesize int64, userTags map[string]string, cleanCache bool) error {
+	logger := log.WithField("uploadSessionID", uploadSessionID)
+	logger.Infof("Start uploading file: %s, size: %d", absPath, filesize)
 	defer func() {
-		log.Infof("Finished uploading file: %s", absPath)
+		logger.Infof("Finished uploading file: %s", absPath)
 	}()
 
 	var err error
 	numThreads := uint(2)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Minute)
 	defer cancel()
 
-	if cleanCache {
-		uploadIdKey := fmt.Sprintf(uploadIdKeyTemplate, absPath)
-		uploadedSizeKey := fmt.Sprintf(uploadedSizeKeyTemplate, absPath)
-		partsKey := fmt.Sprintf(partsKeyTemplate, absPath)
+	uploadIdKey := GetScopedUploadIdKey(bucket, key, absPath)
+	uploadedSizeKey := GetScopedUploadedSizeKey(bucket, key, absPath)
+	partsKey := GetScopedUploadPartsKey(bucket, key, absPath)
+	legacyUploadIDKey := GetUploadIdKey(absPath)
+	legacyUploadedSizeKey := GetUploadedSizeKey(absPath)
+	legacyPartsKey := GetUploadPartsKey(absPath)
 
+	if cleanCache {
 		u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+		u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 	}
 
 	if filesize > int64(minPartSize) {
@@ -102,13 +118,23 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 			partSize = minPartSize
 		}
 
-		u.uploadProgressChan <- FileUploadProgress{Name: absPath, Uploaded: -1, TotalSize: filesize}
+		u.uploadProgressChan <- FileUploadProgress{SessionID: uploadSessionID, Name: absPath, Uploaded: -1, TotalSize: filesize}
 		//nolint: gosec // we are not using user input
-		err = u.FMultipartPutObject(ctx, bucket, key,
+		err = u.FMultipartPutObject(ctx, uploadSessionID, bucket, key,
 			absPath, filesize, minio.PutObjectOptions{UserTags: userTags, PartSize: uint64(partSize), NumThreads: numThreads})
 	} else {
-		progress := newUploadProgressReader(absPath, filesize, u.uploadProgressChan)
-		_, err = u.client.FPutObject(ctx, bucket, key, absPath,
+		fileReader, openErr := os.Open(absPath)
+		if openErr != nil {
+			return openErr
+		}
+		defer func(fileReader *os.File) {
+			if closeErr := fileReader.Close(); closeErr != nil {
+				log.Errorf("Close file reader failed: %v", closeErr)
+			}
+		}(fileReader)
+
+		progress := newUploadProgressReader(uploadSessionID, absPath, filesize, u.uploadProgressChan)
+		_, err = u.client.PutObject(ctx, bucket, key, io.NewSectionReader(fileReader, 0, filesize), filesize,
 			minio.PutObjectOptions{Progress: progress, UserTags: userTags, NumThreads: numThreads})
 	}
 
@@ -116,12 +142,15 @@ func (u *Manager) FPutObject(absPath string, bucket string, key string, filesize
 }
 
 func (u *Manager) handleUploadProgress() {
+	defer close(u.progressDone)
+
 	fileInfos := make(map[string]int64)
 	progressMilestones := []float64{0, 10, 25, 35, 50, 60, 75, 90, 100}
 
 	for progress := range u.uploadProgressChan {
-		uploadKey := "upload:" + progress.Name
-		totalKey := "total:" + progress.Name
+		uploadKey := "upload:" + progress.SessionID + ":" + progress.Name
+		totalKey := "total:" + progress.SessionID + ":" + progress.Name
+		logger := log.WithField("uploadSessionID", progress.SessionID)
 
 		prevPercent := float64(fileInfos[uploadKey]) / float64(fileInfos[totalKey]) * 100
 		if progress.Uploaded > 0 {
@@ -129,7 +158,11 @@ func (u *Manager) handleUploadProgress() {
 			if diff > 0 {
 				nc := model.NetworkUsage{}
 				nc.AddSent(diff)
-				u.networkChan <- &nc
+				select {
+				case u.networkChan <- &nc:
+				default:
+					logger.Warnf("Network usage channel is full, skipping upload progress network usage update")
+				}
 			}
 
 			fileInfos[uploadKey] = progress.Uploaded
@@ -140,14 +173,14 @@ func (u *Manager) handleUploadProgress() {
 		}
 
 		if fileInfos[totalKey] <= 0 {
-			log.Warnf("Missing file: %s total size, skip check upload progress", progress.Name)
+			logger.Warnf("Missing file: %s total size, skip check upload progress", progress.Name)
 			continue
 		}
 
 		uploadedPercent := float64(fileInfos[uploadKey]) / float64(fileInfos[totalKey]) * 100
 		for _, milestone := range progressMilestones {
 			if prevPercent < milestone && uploadedPercent >= milestone {
-				log.Infof("File: %s, uploaded: %d, total: %d, percent: %.1f", progress.Name, fileInfos[uploadKey], fileInfos[totalKey], uploadedPercent)
+				logger.Infof("File: %s, uploaded: %d, total: %d, percent: %.1f", progress.Name, fileInfos[uploadKey], fileInfos[totalKey], uploadedPercent)
 				break
 			}
 		}
@@ -156,14 +189,15 @@ func (u *Manager) handleUploadProgress() {
 			delete(fileInfos, uploadKey)
 			delete(fileInfos, totalKey)
 
-			log.Infof("File: %s uploaded", progress.Name)
+			logger.Infof("File: %s uploaded", progress.Name)
 			continue
 		}
 	}
 }
 
 // FMultipartPutObject uploads a file to a bucket with a key and sha256.
-func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key string, filePath string, fileSize int64, opts minio.PutObjectOptions) (err error) {
+func (u *Manager) FMultipartPutObject(ctx context.Context, uploadSessionID string, bucket string, key string, filePath string, fileSize int64, opts minio.PutObjectOptions) (err error) {
+	logger := log.WithField("uploadSessionID", uploadSessionID)
 	// Check for largest object size allowed.
 	if fileSize > int64(maxSinglePutObjectSize) {
 		return errors.Errorf("Your proposed upload size ' %s ' exceeds the maximum allowed object size ' %s ' for single PUT operation.", strconv.FormatInt(fileSize, 10), strconv.FormatInt(maxSinglePutObjectSize, 10))
@@ -176,13 +210,22 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	var uploadId string
 	var uploadedSize int64
 
-	uploadIdKey := fmt.Sprintf(uploadIdKeyTemplate, filePath)
-	uploadedSizeKey := fmt.Sprintf(uploadedSizeKeyTemplate, filePath)
-	partsKey := fmt.Sprintf(partsKeyTemplate, filePath)
+	uploadIdKey := GetScopedUploadIdKey(bucket, key, filePath)
+	uploadedSizeKey := GetScopedUploadedSizeKey(bucket, key, filePath)
+	partsKey := GetScopedUploadPartsKey(bucket, key, filePath)
+	legacyUploadIDKey := GetUploadIdKey(filePath)
+	legacyUploadedSizeKey := GetUploadedSizeKey(filePath)
+	legacyPartsKey := GetUploadPartsKey(filePath)
 
 	uploadedSizeBytes, err := (*u.storage).Get([]byte(u.cacheBucket), []byte(uploadedSizeKey))
 	if err != nil {
 		log.Debugf("Get uploaded size by: %s warn: %v", uploadedSizeKey, err)
+	}
+	if uploadedSizeBytes == nil && uploadedSizeKey != legacyUploadedSizeKey {
+		uploadedSizeBytes, err = (*u.storage).Get([]byte(u.cacheBucket), []byte(legacyUploadedSizeKey))
+		if err != nil {
+			log.Debugf("Get legacy uploaded size by: %s warn: %v", legacyUploadedSizeKey, err)
+		}
 	}
 	if uploadedSizeBytes != nil {
 		uploadedSize, err = strconv.ParseInt(string(uploadedSizeBytes), 10, 64)
@@ -196,6 +239,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 			// reset all cached info
 			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+			u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 		}
 	} else {
 		uploadedSize = 0
@@ -205,6 +249,12 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	uploadIdBytes, err := (*u.storage).Get([]byte(u.cacheBucket), []byte(uploadIdKey))
 	if err != nil {
 		log.Debugf("Get upload id by: %s warn: %v", uploadIdKey, err)
+	}
+	if uploadIdBytes == nil && uploadIdKey != legacyUploadIDKey {
+		uploadIdBytes, err = (*u.storage).Get([]byte(u.cacheBucket), []byte(legacyUploadIDKey))
+		if err != nil {
+			log.Debugf("Get legacy upload id by: %s warn: %v", legacyUploadIDKey, err)
+		}
 	}
 	if uploadIdBytes != nil {
 		uploadId = string(uploadIdBytes)
@@ -217,14 +267,20 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	}
 	log.Debugf("Get upload id: %s by: %s", uploadId, uploadIdKey)
 
-	u.uploadProgressChan <- FileUploadProgress{Name: filePath, Uploaded: uploadedSize, TotalSize: -1}
-	log.Debugf("Get uploaded size: %d by: %s", uploadedSize, uploadedSizeKey)
+	u.uploadProgressChan <- FileUploadProgress{SessionID: uploadSessionID, Name: filePath, Uploaded: uploadedSize, TotalSize: -1}
+	logger.Debugf("Get uploaded size: %d by: %s", uploadedSize, uploadedSizeKey)
 
 	// Fetch uploaded parts
 	var parts []minio.CompletePart
 	partsBytes, err := (*u.storage).Get([]byte(u.cacheBucket), []byte(partsKey))
 	if err != nil {
 		log.Debugf("Get uploaded parts by: %s warn: %v", partsKey, err)
+	}
+	if partsBytes == nil && partsKey != legacyPartsKey {
+		partsBytes, err = (*u.storage).Get([]byte(u.cacheBucket), []byte(legacyPartsKey))
+		if err != nil {
+			log.Debugf("Get legacy uploaded parts by: %s warn: %v", legacyPartsKey, err)
+		}
 	}
 	if partsBytes != nil {
 		err = json.Unmarshal(partsBytes, &parts)
@@ -265,7 +321,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	if partsToUpload <= 0 {
 		if totalPartsCount == len(partNumbers) && uploadedSize == fileSize {
 			// All parts are uploaded and size matches - complete the upload
-			log.Infof("File: %s, all parts already uploaded, completing multipart upload", filePath)
+			logger.Infof("File: %s, all parts already uploaded, completing multipart upload", filePath)
 
 			// Sort all completed parts.
 			slices.SortFunc(parts, func(i, j minio.CompletePart) int {
@@ -274,46 +330,29 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 			_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 			if err != nil {
-				log.Errorf("Complete multipart upload failed: %v", err)
+				logger.Errorf("Complete multipart upload failed: %v", err)
 				if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) ||
 					strings.Contains(strings.ToLower(err.Error()), strings.ToLower("The specified multipart upload does not exist")) {
 					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+					u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 				}
 
 				return errors.Wrapf(err, "Complete multipart upload failed")
 			}
 
 			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+			u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 			return nil
 		} else {
 			// Parts count or size mismatch - need to re-upload
-			log.Warnf("File: %s, parts/size mismatch (total parts: %d, uploaded parts: %d, uploaded size: %d, file size: %d), clearing cache",
+			logger.Warnf("File: %s, parts/size mismatch (total parts: %d, uploaded parts: %d, uploaded size: %d, file size: %d), clearing cache",
 				filePath, totalPartsCount, len(partNumbers), uploadedSize, fileSize)
 
 			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+			u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 			return errors.New("File parts/size mismatch, need to re-upload all parts")
 		}
 	}
-
-	// Declare a channel that sends the next part number to be uploaded.
-	uploadPartsCh := make(chan int)
-	// Declare a channel that sends back the response of a part upload.
-	uploadedPartsCh := make(chan uploadedPartRes, partsToUpload)
-	// Used for readability, lastPartNumber is always totalPartsCount.
-	lastPartNumber := totalPartsCount
-
-	// Send each part number to the channel to be processed.
-	go func() {
-		defer close(uploadPartsCh)
-		for p := 1; p <= totalPartsCount; p++ {
-			if slices.Contains(partNumbers, p) {
-				log.Debugf("Part: %d already uploaded", p)
-				continue
-			}
-			log.Debugf("Part: %d need to upload", p)
-			uploadPartsCh <- p
-		}
-	}()
 
 	if opts.NumThreads == 0 {
 		opts.NumThreads = 4
@@ -331,75 +370,124 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 		}
 	}(fileReader)
 
-	// Starts parallel uploads.
-	// Receive the part number to upload from the uploadPartsCh channel.
+	uploadCtx, cancelUpload := context.WithCancel(ctx)
+	defer cancelUpload()
+
+	// Used for readability, lastPartNumber is always totalPartsCount.
+	lastPartNumber := totalPartsCount
+	if opts.NumThreads > math.MaxInt {
+		return errors.Errorf("num threads %d exceeds max int", opts.NumThreads)
+	}
+	workerCount := int(opts.NumThreads)
+	uploadPartsCh := make(chan int)
+	uploadedPartsCh := make(chan uploadedPartRes, workerCount)
+	var uploadWG sync.WaitGroup
+
+	uploadPart := func(partToUpload int) (res uploadedPartRes) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("upload part goroutine panic: %v", r)
+				res.Error = errors.Errorf("upload panic, recover: %v", r)
+			}
+		}()
+
+		// Calculate the offset and size for the part to be uploaded.
+		readOffset := int64(partToUpload-1) * partSize
+		curPartSize := partSize
+		if partToUpload == lastPartNumber {
+			curPartSize = lastPartSize
+		}
+
+		sectionReader := io.NewSectionReader(fileReader, readOffset, curPartSize)
+		log.Debugf("Uploading part: %d", partToUpload)
+		objPart, err := c.PutObjectPart(uploadCtx, bucket, key, uploadId, partToUpload, sectionReader, curPartSize, minio.PutObjectPartOptions{
+			SSE: opts.ServerSideEncryption,
+		})
+		if err != nil {
+			log.Errorf("Upload part: %d failed: %v", partToUpload, err)
+			return uploadedPartRes{Error: err}
+		}
+
+		log.Debugf("Upload part: %d success", partToUpload)
+		return uploadedPartRes{Part: objPart}
+	}
+
+	uploadWG.Add(1)
 	go func() {
-		semaphore := make(chan struct{}, opts.NumThreads)
-		var wg sync.WaitGroup
+		defer uploadWG.Done()
+		defer close(uploadPartsCh)
 
-		for {
+		for p := 1; p <= totalPartsCount; p++ {
+			if slices.Contains(partNumbers, p) {
+				log.Debugf("Part: %d already uploaded", p)
+				continue
+			}
+			log.Debugf("Part: %d need to upload", p)
 			select {
-			case partToUpload, ok := <-uploadPartsCh:
-				if !ok {
-					wg.Wait()
-					return
-				}
-
-				semaphore <- struct{}{}
-
-				wg.Add(1)
-				go func(partToUpload int) {
-					defer func() {
-						if r := recover(); r != nil {
-							log.Errorf("upload part goroutine panic: %v", r)
-							uploadedPartsCh <- uploadedPartRes{Error: errors.Wrapf(err, "upload panic, recover")}
-						}
-					}()
-
-					defer wg.Done()
-					defer func() { <-semaphore }() // release the semaphore
-
-					// Calculate the offset and size for the part to be uploaded.
-					readOffset := int64(partToUpload-1) * partSize
-					curPartSize := partSize
-					if partToUpload == lastPartNumber {
-						curPartSize = lastPartSize
-					}
-
-					sectionReader := io.NewSectionReader(fileReader, readOffset, curPartSize)
-					log.Debugf("Uploading part: %d", partToUpload)
-					objPart, err := c.PutObjectPart(ctx, bucket, key, uploadId, partToUpload, sectionReader, curPartSize, minio.PutObjectPartOptions{
-						SSE: opts.ServerSideEncryption,
-					})
-					if err != nil {
-						log.Errorf("Upload part: %d failed: %v", partToUpload, err)
-						uploadedPartsCh <- uploadedPartRes{
-							Error: err,
-						}
-					} else {
-						log.Debugf("Upload part: %d success", partToUpload)
-						uploadedPartsCh <- uploadedPartRes{
-							Part: objPart,
-						}
-					}
-				}(partToUpload)
-			case <-ctx.Done():
-				wg.Wait()
+			case uploadPartsCh <- p:
+			case <-uploadCtx.Done():
 				return
 			}
 		}
 	}()
 
+	for range workerCount {
+		uploadWG.Add(1)
+		go func() {
+			defer uploadWG.Done()
+
+			for {
+				select {
+				case <-uploadCtx.Done():
+					return
+				case partToUpload, ok := <-uploadPartsCh:
+					if !ok {
+						return
+					}
+
+					uploadRes := uploadPart(partToUpload)
+					select {
+					case uploadedPartsCh <- uploadRes:
+					case <-uploadCtx.Done():
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	uploadDone := make(chan struct{})
+	go func() {
+		uploadWG.Wait()
+		close(uploadedPartsCh)
+		close(uploadDone)
+	}()
+	defer func() {
+		cancelUpload()
+		<-uploadDone
+	}()
+
 	// Gather the responses as they occur and update any progress bar
 	numToUpload := totalPartsCount - len(partNumbers)
-	for m := 1; m <= numToUpload; m++ {
+	completedParts := 0
+	for completedParts < numToUpload {
 		select {
 		case <-ctx.Done():
+			cancelUpload()
 			return ctx.Err()
-		case uploadRes := <-uploadedPartsCh:
+		case uploadRes, ok := <-uploadedPartsCh:
+			if !ok {
+				if err := uploadCtx.Err(); err != nil {
+					return err
+				}
+				return errors.Errorf("multipart upload stopped before all parts completed: completed %d of %d", completedParts, numToUpload)
+			}
+			completedParts++
 			if uploadRes.Error != nil {
+				cancelUpload()
 				if strings.Contains(strings.ToLower(uploadRes.Error.Error()), strings.ToLower("Invalid upload id")) {
 					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+					u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 				}
 				return uploadRes.Error
 			}
@@ -433,13 +521,13 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 				log.Errorf("Store uploaded size err: %v", err)
 			}
 
-			u.uploadProgressChan <- FileUploadProgress{Name: filePath, Uploaded: uploadedSize, TotalSize: -1}
+			u.uploadProgressChan <- FileUploadProgress{SessionID: uploadSessionID, Name: filePath, Uploaded: uploadedSize, TotalSize: -1}
 		}
 	}
 
 	// Verify if we uploaded all the data.
 	if uploadedSize != fileSize {
-		log.Errorf("Uploaded size: %d, file size: %d, does not match", uploadedSize, fileSize)
+		logger.Errorf("Uploaded size: %d, file size: %d, does not match", uploadedSize, fileSize)
 		return errors.Wrapf(err, "Uploaded size: %d, file size: %d, does not match", uploadedSize, fileSize)
 	}
 
@@ -450,10 +538,11 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 
 	_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 	if err != nil {
-		log.Errorf("Complete multipart upload failed: %v", err)
+		logger.Errorf("Complete multipart upload failed: %v", err)
 		if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) ||
 			strings.Contains(strings.ToLower(err.Error()), strings.ToLower("The specified multipart upload does not exist")) {
 			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+			u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 			return errors.Wrapf(err, "Complete multipart upload failed with invalid upload id, cache cleared")
 		}
 
@@ -461,6 +550,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, bucket string, key st
 	}
 
 	u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
+	u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 	return nil
 }
 
@@ -481,6 +571,7 @@ func (u *Manager) cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey string
 }
 
 type uploadProgressReader struct {
+	sessionID          string
 	absPath            string
 	total              int64
 	uploaded           int64
@@ -488,9 +579,9 @@ type uploadProgressReader struct {
 	mu                 sync.Mutex
 }
 
-func newUploadProgressReader(absPath string, total int64, uploadProgressChan chan FileUploadProgress) *uploadProgressReader {
-	uploadProgressChan <- FileUploadProgress{Name: absPath, Uploaded: -1, TotalSize: total}
-	return &uploadProgressReader{absPath: absPath, total: total, uploaded: 0, uploadProgressChan: uploadProgressChan}
+func newUploadProgressReader(sessionID string, absPath string, total int64, uploadProgressChan chan FileUploadProgress) *uploadProgressReader {
+	uploadProgressChan <- FileUploadProgress{SessionID: sessionID, Name: absPath, Uploaded: -1, TotalSize: total}
+	return &uploadProgressReader{sessionID: sessionID, absPath: absPath, total: total, uploaded: 0, uploadProgressChan: uploadProgressChan}
 }
 
 func (r *uploadProgressReader) Read(b []byte) (int, error) {
@@ -508,9 +599,9 @@ func (r *uploadProgressReader) Read(b []byte) (int, error) {
 	r.mu.Unlock()
 
 	select {
-	case r.uploadProgressChan <- FileUploadProgress{Name: r.absPath, Uploaded: uploaded, TotalSize: r.total}:
+	case r.uploadProgressChan <- FileUploadProgress{SessionID: r.sessionID, Name: r.absPath, Uploaded: uploaded, TotalSize: r.total}:
 	default:
-		log.Warnf("Upload progress channel is full, skipping progress update")
+		log.WithField("uploadSessionID", r.sessionID).Warnf("Upload progress channel is full, skipping progress update")
 	}
 
 	return n, nil

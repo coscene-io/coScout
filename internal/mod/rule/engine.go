@@ -54,8 +54,9 @@ type Engine struct {
 // UpdateRules updates the rules in the rule engine.
 func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics []string) {
 	var (
-		rules        []*rule_engine.Rule
-		activeTopics = mapset.NewSet[string]()
+		rules                []*rule_engine.Rule
+		activeTopics         = mapset.NewSet[string]()
+		hasWildcardTopicRule bool
 	)
 	configTopics = append(configTopics, "/external_log")
 
@@ -113,8 +114,8 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 			rules = append(rules, validatedRule)
 
 			if validatedRule.Topics.Cardinality() == 0 {
-				activeTopics = mapset.NewSet[string]()
-			} else if validatedRule.Topics.Cardinality() > 0 {
+				hasWildcardTopicRule = true
+			} else {
 				activeTopics = activeTopics.Union(validatedRule.Topics)
 			}
 		}
@@ -122,7 +123,11 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 	e.rules = rules
 
 	configTopicSet := mapset.NewSet(configTopics...)
-	e.activeTopics = activeTopics.Intersect(configTopicSet)
+	if hasWildcardTopicRule {
+		e.activeTopics = mapset.NewSet[string]()
+	} else {
+		e.activeTopics = activeTopics.Intersect(configTopicSet)
+	}
 
 	log.Infof("Updated %d valid rules", len(rules))
 }
@@ -151,15 +156,15 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 		}
 
 		var prevActivationTime *time.Time
-		ruleName, ruleOk := rule.Metadata["rule_name"].(string)
-		if ruleOk && len(ruleName) > 0 {
-			prevActivationTime = e.ruleDebounceTime[ruleName]
+		debounceKey := debounceKeyForRule(rule)
+		if debounceKey != "" {
+			prevActivationTime = e.ruleDebounceTime[debounceKey]
 		}
 
 		msgTs := utils.TimeFromFloat(item.Ts)
 		isActive, activationTime := rule.EvalConditions(curActivation, prevActivationTime, msgTs)
-		if ruleOk && len(ruleName) > 0 {
-			e.ruleDebounceTime[ruleName] = activationTime
+		if debounceKey != "" {
+			e.ruleDebounceTime[debounceKey] = activationTime
 		}
 
 		log.Debugf("rule %s: isActive: %v, preActivationTime: %v, msgTs: %v", rule.Metadata["rule_display_name"], isActive, prevActivationTime, msgTs)
@@ -178,10 +183,36 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 					log.Errorf("failed to run action %s: %v", action.Name, err)
 				}
 			}
+			if err := model.PublishCollectInfo(collectInfoId); err != nil {
+				log.Errorf("failed to publish collect info %s: %v", collectInfoId, err)
+			}
 		}
 	}
 
 	e.cleanupDebounceTime()
+}
+
+func debounceKeyForRule(rule *rule_engine.Rule) string {
+	if rule == nil {
+		return ""
+	}
+
+	ruleName, ok := rule.Metadata["rule_name"].(string)
+	if !ok || ruleName == "" {
+		return ""
+	}
+
+	if len(rule.Scope) == 0 {
+		return ruleName
+	}
+
+	scopeBytes, err := json.Marshal(rule.Scope)
+	if err != nil {
+		log.Errorf("failed to marshal rule scope for debounce key: %v", err)
+		return ruleName
+	}
+
+	return ruleName + "|" + string(scopeBytes)
 }
 
 func (e *Engine) cleanupDebounceTime() {
@@ -305,7 +336,7 @@ func (e *Engine) uploadActionImpl(kwargs map[string]interface{}) error {
 
 	// Create collect info
 	collectInfo := &model.CollectInfo{Id: collectInfoId}
-	if err := collectInfo.Load(collectInfoId); err != nil {
+	if err := collectInfo.LoadDraft(collectInfoId); err != nil {
 		*collectInfo = model.CollectInfo{Id: collectInfoId}
 	}
 
@@ -331,7 +362,7 @@ func (e *Engine) uploadActionImpl(kwargs map[string]interface{}) error {
 	collectInfo.Skip = !canUpload
 
 	// Save the collect info
-	if err = collectInfo.Save(); err != nil {
+	if err = collectInfo.SaveDraft(); err != nil {
 		return errors.Wrap(err, "failed to save collect info")
 	}
 	log.Infof("saved collect info %s", collectInfoId)
@@ -436,25 +467,23 @@ func createMomentActionImpl(kwargs map[string]interface{}) error {
 
 	// Create collect info
 	collectInfo := &model.CollectInfo{Id: collectInfoId}
-	if err := collectInfo.Load(collectInfoId); err != nil {
+	if err := collectInfo.LoadDraft(collectInfoId); err != nil {
 		*collectInfo = model.CollectInfo{Id: collectInfoId}
 	}
-	collectInfo.Moments = []model.CollectInfoMoment{
-		{
-			Title:        title,
-			Description:  description,
-			Timestamp:    utils.FloatSecFromTime(triggerTs),
-			StartTime:    utils.FloatSecFromTime(triggerTs),
-			CustomFields: customFieldsString,
-			Code:         ruleCode,
-			CreateTask:   createTask,
-			SyncTask:     syncTask,
-			AssignTo:     assignee,
-		},
-	}
+	collectInfo.Moments = append(collectInfo.Moments, model.CollectInfoMoment{
+		Title:        title,
+		Description:  description,
+		Timestamp:    utils.FloatSecFromTime(triggerTs),
+		StartTime:    utils.FloatSecFromTime(triggerTs),
+		CustomFields: customFieldsString,
+		Code:         ruleCode,
+		CreateTask:   createTask,
+		SyncTask:     syncTask,
+		AssignTo:     assignee,
+	})
 
 	// Save the collect info
-	if err = collectInfo.Save(); err != nil {
+	if err = collectInfo.SaveDraft(); err != nil {
 		return errors.Wrap(err, "failed to save collect info")
 	}
 	log.Infof("saved collect info %s", collectInfoId)
