@@ -403,14 +403,15 @@ func (r *RequestClient) CreateRecord(parent string, rc *openDpsV1alpha1Resource.
 
 	// record's labels may have not been ensured
 	recordLabels := rc.GetLabels()
+	ensuredLabels := make([]*openDpsV1alpha1Resource.Label, 0, len(recordLabels))
 	for _, label := range recordLabels {
 		l, err := r.ensureLabel(parent, label.GetDisplayName())
 		if err != nil {
 			return nil, err
 		}
-		recordLabels = append(recordLabels, l)
+		ensuredLabels = append(ensuredLabels, l)
 	}
-	rc.SetLabels(recordLabels)
+	rc.SetLabels(ensuredLabels)
 
 	req := openDpsV1alpha1Service.CreateRecordRequest{
 		Parent: parent,

@@ -19,13 +19,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"sync/atomic"
 
 	"github.com/ThreeDotsLabs/watermill"
 	gcmessage "github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/pubsub/gochannel"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
-	mapset "github.com/deckarep/golang-set/v2"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 )
@@ -106,7 +106,9 @@ func RulesHandler(pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *ht
 }
 
 func ActiveTopicsHandler(ctx context.Context, pubSub *gochannel.GoChannel) func(w http.ResponseWriter, r *http.Request) {
-	activeTopics := mapset.NewSet[string]()
+	var activeTopics atomic.Value
+	activeTopics.Store([]string{})
+
 	go func() {
 		msg, err := pubSub.Subscribe(ctx, constant.TopicConfigTopicsMsg)
 		if err != nil {
@@ -131,14 +133,15 @@ func ActiveTopicsHandler(ctx context.Context, pubSub *gochannel.GoChannel) func(
 					continue
 				}
 				log.Infof("Received active topics: %v", topics)
-				activeTopics = mapset.NewSet(topics...)
+				activeTopics.Store(topics)
 			}
 		}
 	}()
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		topics := activeTopics.Load().([]string)
 		res := ActiveTopicsResponse{
-			Topics: activeTopics.ToSlice(),
+			Topics: topics,
 		}
 		bytes, err := json.Marshal(res)
 		if err != nil {
