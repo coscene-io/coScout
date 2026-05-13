@@ -139,7 +139,11 @@ func ActiveTopicsHandler(ctx context.Context, pubSub *gochannel.GoChannel) func(
 	}()
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		topics := activeTopics.Load().([]string)
+		topics, ok := activeTopics.Load().([]string)
+		if !ok {
+			log.Errorf("Unexpected active topics value type")
+			topics = []string{}
+		}
 		res := ActiveTopicsResponse{
 			Topics: topics,
 		}
