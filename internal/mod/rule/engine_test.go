@@ -15,6 +15,7 @@
 package rule
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestUpdateRulesKeepsAllTopicsActiveWhenAnyRuleHasNoTopic(t *testing.T) {
 			engine := Engine{}
 			engine.UpdateRules(tc.rules, []string{"/foo", "/bar"})
 
-			if got := engine.ActiveTopics().Cardinality(); got != 0 {
+			if got := len(engine.ActiveTopics()); got != 0 {
 				t.Fatalf("active topics cardinality = %d, want 0 so file readers do not prefilter topics", got)
 			}
 		})
@@ -68,10 +69,10 @@ func TestUpdateRulesFiltersConfiguredActiveTopics(t *testing.T) {
 	}, []string{"/foo"})
 
 	activeTopics := engine.ActiveTopics()
-	if got := activeTopics.Cardinality(); got != 1 {
+	if got := len(activeTopics); got != 1 {
 		t.Fatalf("active topics cardinality = %d, want 1", got)
 	}
-	if !activeTopics.Contains("/foo") {
+	if !slices.Contains(activeTopics, "/foo") {
 		t.Fatalf("active topics = %v, want /foo", activeTopics)
 	}
 }

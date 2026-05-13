@@ -234,10 +234,18 @@ func handleRecordCaches(uploadChan chan string, reqClient *api.RequestClient, co
 		if rcName, ok := rc.Record["name"].(string); ok && rcName != "" {
 			select {
 			case uploadChan <- rc.GetRecordCachePath():
-				log.Infof("Record cache %s is ready to upload", rcName)
+				log.WithFields(log.Fields{
+					"recordCache": rc.GetRecordCachePath(),
+					"recordName":  rcName,
+					"project":     rc.ProjectName,
+				}).Infof("record cache is ready to upload")
 			default:
 				recordSet.Release(rc.GetRecordCachePath())
-				log.Infof("Upload channel is full, skip uploading record cache %s", rcName)
+				log.WithFields(log.Fields{
+					"recordCache": rc.GetRecordCachePath(),
+					"recordName":  rcName,
+					"project":     rc.ProjectName,
+				}).Infof("upload channel is full, skip enqueueing record cache")
 			}
 		} else {
 			recordSet.Release(rc.GetRecordCachePath())
@@ -552,6 +560,17 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 
 	title := getRecordTitle(recordCache)
 	description := getRecordDescription(recordCache)
+	ruleName, _ := recordCache.DiagnosisTask["rule_name"].(string)
+	ruleDisplayName, _ := recordCache.DiagnosisTask["rule_display_name"].(string)
+	recordLog := log.WithFields(log.Fields{
+		"recordCache":     recordCache.GetRecordCachePath(),
+		"project":         recordCache.ProjectName,
+		"title":           title,
+		"ruleName":        ruleName,
+		"ruleDisplayName": ruleDisplayName,
+		"device":          deviceInfo.GetName(),
+		"totalFiles":      len(recordCache.OriginalFiles),
+	})
 
 	labels := make([]*openDpsV1alpha1Resource.Label, 0)
 	for _, label := range recordCache.Labels {
@@ -573,8 +592,7 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 		Device:      deviceInfo,
 		Metadata:    metadata,
 	}
-	ruleName, ok := recordCache.DiagnosisTask["rule_name"].(string)
-	if ok {
+	if ruleName != "" {
 		record.Rules = []*openDpsV1alpha1Resource.DiagnosisRule{
 			{
 				Name: ruleName,
@@ -582,9 +600,10 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 		}
 	}
 
+	recordLog.Infof("creating cloud record")
 	record, err := reqClient.CreateRecord(recordCache.ProjectName, record)
 	if err != nil {
-		log.Errorf("create record failed: %v", err)
+		recordLog.Errorf("create record failed: %v", err)
 		return
 	}
 	recordCache.Record = map[string]interface{}{
@@ -604,7 +623,9 @@ func createRecord(deviceInfo *openDpsV1alpha1Resource.Device, recordCache *model
 		latest.Record = recordCache.Record
 		return nil
 	}); err != nil {
-		log.Errorf("save record cache failed: %v", err)
+		recordLog.WithField("recordName", record.GetName()).Errorf("save record cache failed after record creation: %v", err)
+	} else {
+		recordLog.WithField("recordName", record.GetName()).Infof("created cloud record and saved record cache")
 	}
 }
 

@@ -96,7 +96,7 @@ func (dq *DedupQueue) IsEmpty() bool {
 	dq.mu.RLock()
 	defer dq.mu.RUnlock()
 
-	return dq.Size() == 0
+	return len(dq.elements) == 0
 }
 
 // Clear removes all elements from the queue.
