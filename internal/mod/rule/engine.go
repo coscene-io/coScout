@@ -17,6 +17,7 @@ package rule
 import (
 	"encoding/json"
 	"strconv"
+	"sync"
 	"time"
 
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
@@ -42,9 +43,10 @@ const (
 
 // Engine represents the rule engine that processes messages against rules.
 type Engine struct {
-	reqClient  api.RequestClient
-	deviceName string
+	reqClient api.RequestClient
 
+	mu           sync.RWMutex
+	deviceName   string
 	rules        []*rule_engine.Rule
 	activeTopics mapset.Set[string]
 
@@ -120,28 +122,62 @@ func (e *Engine) UpdateRules(apiRules []*resources.DiagnosisRule, configTopics [
 			}
 		}
 	}
-	e.rules = rules
-
 	configTopicSet := mapset.NewSet(configTopics...)
+	var newActiveTopics mapset.Set[string]
 	if hasWildcardTopicRule {
-		e.activeTopics = mapset.NewSet[string]()
+		newActiveTopics = mapset.NewSet[string]()
 	} else {
-		e.activeTopics = activeTopics.Intersect(configTopicSet)
+		newActiveTopics = activeTopics.Intersect(configTopicSet)
 	}
+
+	e.mu.Lock()
+	e.rules = rules
+	e.activeTopics = newActiveTopics
+	e.mu.Unlock()
 
 	log.Infof("Updated %d valid rules", len(rules))
 }
 
 // ActiveTopics returns all the active topics in the rule engine.
-func (e *Engine) ActiveTopics() mapset.Set[string] {
-	return e.activeTopics
+func (e *Engine) ActiveTopics() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.activeTopics == nil {
+		return []string{}
+	}
+	return e.activeTopics.ToSlice()
+}
+
+func (e *Engine) activeTopicSet() mapset.Set[string] {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.activeTopics == nil {
+		return mapset.NewSet[string]()
+	}
+	return e.activeTopics.Clone()
+}
+
+func (e *Engine) SetDeviceName(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.deviceName = name
+}
+
+func (e *Engine) getDeviceName() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.deviceName
 }
 
 // ConsumeNext shows how to process a message through the rule engine.
 func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 	log.Debugf("consuming message: %+v", item)
 
-	for _, rule := range e.rules {
+	e.mu.RLock()
+	rules := e.rules
+	e.mu.RUnlock()
+
+	for _, rule := range rules {
 		if rule.Topics.Cardinality() > 0 && !rule.Topics.Contains(item.Topic) {
 			log.Debugf("rule %s topics %v does not match topic %s, skipping", rule.Metadata["rule_display_name"], rule.Topics, item.Topic)
 			continue
@@ -169,9 +205,17 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 
 		log.Debugf("rule %s: isActive: %v, preActivationTime: %v, msgTs: %v", rule.Metadata["rule_display_name"], isActive, prevActivationTime, msgTs)
 		if isActive {
-			log.Infof("rule %s met, save collect info", rule.Metadata["rule_display_name"])
-
 			collectInfoId := uuid.New().String()
+			ruleLog := log.WithFields(log.Fields{
+				"collectID":       collectInfoId,
+				"ruleName":        rule.Metadata["rule_name"],
+				"ruleDisplayName": rule.Metadata["rule_display_name"],
+				"topic":           item.Topic,
+				"source":          item.Source,
+				"ts":              item.Ts,
+			})
+			ruleLog.Infof("rule met, save collect info")
+
 			additionalArgs := map[string]interface{}{}
 			for k, v := range rule.Metadata {
 				additionalArgs[k] = v
@@ -180,11 +224,13 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 
 			for _, action := range rule.Actions {
 				if err := action.Run(curActivation, additionalArgs); err != nil {
-					log.Errorf("failed to run action %s: %v", action.Name, err)
+					ruleLog.WithField("action", action.Name).Errorf("failed to run action: %v", err)
 				}
 			}
 			if err := model.PublishCollectInfo(collectInfoId); err != nil {
-				log.Errorf("failed to publish collect info %s: %v", collectInfoId, err)
+				ruleLog.Errorf("failed to publish collect info: %v", err)
+			} else {
+				ruleLog.Infof("published collect info")
 			}
 		}
 	}
@@ -239,8 +285,6 @@ func (e *Engine) cleanupDebounceTime() {
 // uploadActionImpl is the implementation of "upload" function,
 // it stores the collect info in the database.
 func (e *Engine) uploadActionImpl(kwargs map[string]interface{}) error {
-	log.Infof("triggered saving collect info")
-
 	// Extract required fields with type assertions
 	beforeStr, ok := kwargs["before"].(string)
 	if !ok {
@@ -325,9 +369,20 @@ func (e *Engine) uploadActionImpl(kwargs map[string]interface{}) error {
 		return errors.Errorf("rule must be a DiagnosisRule object")
 	}
 
-	canUpload := e.canUpload(uploadLimit, rule)
-	if err := e.reqClient.HitDiagnosisRule(rule, e.deviceName, canUpload); err != nil {
-		return errors.Wrap(err, "failed to hit diagnosis rule")
+	deviceName := e.getDeviceName()
+	actionLog := log.WithFields(log.Fields{
+		"collectID":       collectInfoId,
+		"ruleName":        ruleName,
+		"ruleDisplayName": ruleDisplayName,
+		"project":         projectName,
+		"device":          deviceName,
+		"triggerTs":       triggerTsFloat,
+	})
+	actionLog.Infof("triggered saving collect info")
+
+	canUpload := e.canUpload(uploadLimit, rule, deviceName)
+	if err := e.reqClient.HitDiagnosisRule(rule, deviceName, canUpload); err != nil {
+		actionLog.Errorf("failed to hit diagnosis rule, continuing with save: %v", err)
 	}
 
 	// Calculate start and end times
@@ -360,28 +415,55 @@ func (e *Engine) uploadActionImpl(kwargs map[string]interface{}) error {
 		WhiteList:  whiteList,
 	}
 	collectInfo.Skip = !canUpload
+	actionLog.WithFields(log.Fields{
+		"canUpload": canUpload,
+		"start":     collectInfo.Cut.Start,
+		"end":       collectInfo.Cut.End,
+		"labels":    labels,
+	}).Infof("prepared collect info")
 
 	// Save the collect info
 	if err = collectInfo.SaveDraft(); err != nil {
 		return errors.Wrap(err, "failed to save collect info")
 	}
-	log.Infof("saved collect info %s", collectInfoId)
+	actionLog.Infof("saved collect info draft")
 
 	return nil
 }
 
-func (e *Engine) canUpload(uploadLimit *resources.UploadLimit, rule *resources.DiagnosisRule) bool {
+func (e *Engine) canUpload(uploadLimit *resources.UploadLimit, rule *resources.DiagnosisRule, deviceName string) bool {
+	ruleName := rule.GetName()
+	ruleDisplayName := rule.GetDisplayName()
 	if uploadLimit.HasDevice() {
-		count, err := e.reqClient.CountDiagnosisRuleHits(rule, e.deviceName)
+		count, err := e.reqClient.CountDiagnosisRuleHits(rule, deviceName)
 		if err != nil {
-			log.Errorf("failed to count diagnosis rule hits: %v, skipping", err)
-			return false
+			log.WithFields(log.Fields{
+				"ruleName":        ruleName,
+				"ruleDisplayName": ruleDisplayName,
+				"device":          deviceName,
+				"scope":           "device",
+			}).Errorf("failed to count diagnosis rule hits, defaulting to allow upload: %v", err)
+			return true
 		}
 
-		log.Infof("device count: %d, limit: %d", count, uploadLimit.GetDevice().GetTimes())
+		log.WithFields(log.Fields{
+			"ruleName":        ruleName,
+			"ruleDisplayName": ruleDisplayName,
+			"device":          deviceName,
+			"scope":           "device",
+			"count":           count,
+			"limit":           uploadLimit.GetDevice().GetTimes(),
+		}).Infof("checked diagnosis rule upload limit")
 
 		if count >= uploadLimit.GetDevice().GetTimes() {
-			log.Infof("device count %d exceeds limit %d, skipping", count, uploadLimit.GetDevice().GetTimes())
+			log.WithFields(log.Fields{
+				"ruleName":        ruleName,
+				"ruleDisplayName": ruleDisplayName,
+				"device":          deviceName,
+				"scope":           "device",
+				"count":           count,
+				"limit":           uploadLimit.GetDevice().GetTimes(),
+			}).Infof("diagnosis rule upload limit reached, skipping upload")
 			return false
 		}
 	}
@@ -389,14 +471,30 @@ func (e *Engine) canUpload(uploadLimit *resources.UploadLimit, rule *resources.D
 	if uploadLimit.HasGlobal() {
 		count, err := e.reqClient.CountDiagnosisRuleHits(rule, "")
 		if err != nil {
-			log.Errorf("failed to count diagnosis rule hits: %v, skipping", err)
-			return false
+			log.WithFields(log.Fields{
+				"ruleName":        ruleName,
+				"ruleDisplayName": ruleDisplayName,
+				"scope":           "global",
+			}).Errorf("failed to count diagnosis rule hits, defaulting to allow upload: %v", err)
+			return true
 		}
 
-		log.Infof("global count: %d, limit: %d", count, uploadLimit.GetGlobal().GetTimes())
+		log.WithFields(log.Fields{
+			"ruleName":        ruleName,
+			"ruleDisplayName": ruleDisplayName,
+			"scope":           "global",
+			"count":           count,
+			"limit":           uploadLimit.GetGlobal().GetTimes(),
+		}).Infof("checked diagnosis rule upload limit")
 
 		if count >= uploadLimit.GetGlobal().GetTimes() {
-			log.Infof("global count %d exceeds limit %d, skipping", count, uploadLimit.GetGlobal().GetTimes())
+			log.WithFields(log.Fields{
+				"ruleName":        ruleName,
+				"ruleDisplayName": ruleDisplayName,
+				"scope":           "global",
+				"count":           count,
+				"limit":           uploadLimit.GetGlobal().GetTimes(),
+			}).Infof("diagnosis rule upload limit reached, skipping upload")
 			return false
 		}
 	}
