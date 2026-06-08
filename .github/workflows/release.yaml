@@ -55,7 +55,7 @@ jobs:
           check-latest: true
           cache: true
       - name: Set up CD tools
-        uses: coscene-io/setup-cd-tools@v2.0.1
+        uses: coscene-io/setup-cd-tools@v2.1.0
         env:
           ACTIONS_ALLOW_UNSECURE_COMMANDS: "true"
       - name: Set up buf netrc
