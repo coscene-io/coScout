@@ -32,6 +32,13 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+var (
+	errInvalidUploadID         = errors.New("invalid upload id")
+	errMultipartUploadNotFound = errors.New("the specified multipart upload does not exist")
+	errMultipartPartsMissing   = errors.New("we encountered an internal error, please try again.: cause(not read all parts, current: 2)")
+	errUnrelatedInternal       = errors.New("we encountered an internal error, please try again")
+)
+
 func TestUploadManagerCloseStopsProgressHandler(t *testing.T) {
 	t.Parallel()
 
@@ -97,10 +104,10 @@ func TestShouldResetMultipartUpload(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{name: "invalid upload ID", err: errors.New("Invalid upload id"), want: true},
-		{name: "missing multipart upload", err: errors.New("The specified multipart upload does not exist"), want: true},
-		{name: "server did not receive all parts", err: errors.New("We encountered an internal error, please try again.: cause(not read all parts, current: 2)"), want: true},
-		{name: "unrelated internal error", err: errors.New("We encountered an internal error, please try again"), want: false},
+		{name: "invalid upload ID", err: errInvalidUploadID, want: true},
+		{name: "missing multipart upload", err: errMultipartUploadNotFound, want: true},
+		{name: "server did not receive all parts", err: errMultipartPartsMissing, want: true},
+		{name: "unrelated internal error", err: errUnrelatedInternal, want: false},
 		{name: "no error", err: nil, want: false},
 	}
 
