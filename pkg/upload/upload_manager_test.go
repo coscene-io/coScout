@@ -32,6 +32,13 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+var (
+	errInvalidUploadID         = errors.New("invalid upload id")
+	errMultipartUploadNotFound = errors.New("the specified multipart upload does not exist")
+	errMultipartPartsMissing   = errors.New("we encountered an internal error, please try again.: cause(not read all parts, current: 2)")
+	errUnrelatedInternal       = errors.New("we encountered an internal error, please try again")
+)
+
 func TestUploadManagerCloseStopsProgressHandler(t *testing.T) {
 	t.Parallel()
 
@@ -86,6 +93,31 @@ func TestUploadManagerCloseDoesNotBlockWhenNetworkChannelIsFull(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("upload manager close blocked on network usage channel")
+	}
+}
+
+func TestShouldResetMultipartUpload(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "invalid upload ID", err: errInvalidUploadID, want: true},
+		{name: "missing multipart upload", err: errMultipartUploadNotFound, want: true},
+		{name: "server did not receive all parts", err: errMultipartPartsMissing, want: true},
+		{name: "unrelated internal error", err: errUnrelatedInternal, want: false},
+		{name: "no error", err: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shouldResetMultipartUpload(tt.err); got != tt.want {
+				t.Fatalf("shouldResetMultipartUpload() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
