@@ -52,6 +52,17 @@ type FileUploadProgress struct {
 	TotalSize int64
 }
 
+func shouldResetMultipartUpload(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "invalid upload id") ||
+		strings.Contains(message, "the specified multipart upload does not exist") ||
+		strings.Contains(message, "not read all parts")
+}
+
 // Manager is a manager for uploading files through minio client.
 // Note that it's user's responsibility to check the Errs field after Wait() to see if there's any error.
 type Manager struct {
@@ -331,8 +342,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, uploadSessionID strin
 			_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 			if err != nil {
 				logger.Errorf("Complete multipart upload failed: %v", err)
-				if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) ||
-					strings.Contains(strings.ToLower(err.Error()), strings.ToLower("The specified multipart upload does not exist")) {
+				if shouldResetMultipartUpload(err) {
 					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 					u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 				}
@@ -485,7 +495,7 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, uploadSessionID strin
 			completedParts++
 			if uploadRes.Error != nil {
 				cancelUpload()
-				if strings.Contains(strings.ToLower(uploadRes.Error.Error()), strings.ToLower("Invalid upload id")) {
+				if shouldResetMultipartUpload(uploadRes.Error) {
 					u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 					u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
 				}
@@ -539,11 +549,10 @@ func (u *Manager) FMultipartPutObject(ctx context.Context, uploadSessionID strin
 	_, err = c.CompleteMultipartUpload(ctx, bucket, key, uploadId, parts, opts)
 	if err != nil {
 		logger.Errorf("Complete multipart upload failed: %v", err)
-		if strings.Contains(strings.ToLower(err.Error()), strings.ToLower("Invalid upload id")) ||
-			strings.Contains(strings.ToLower(err.Error()), strings.ToLower("The specified multipart upload does not exist")) {
+		if shouldResetMultipartUpload(err) {
 			u.cleanUploadCache(uploadIdKey, partsKey, uploadedSizeKey)
 			u.cleanUploadCache(legacyUploadIDKey, legacyPartsKey, legacyUploadedSizeKey)
-			return errors.Wrapf(err, "Complete multipart upload failed with invalid upload id, cache cleared")
+			return errors.Wrapf(err, "Complete multipart upload failed with stale multipart state, cache cleared")
 		}
 
 		return errors.Wrapf(err, "Complete multipart upload failed")
