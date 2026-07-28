@@ -202,10 +202,35 @@ type TaskRequest struct {
 
 // TaskResponse task response structure.
 type TaskResponse struct {
-	TaskID  string          `json:"task_id"`
-	Files   []SlaveFileInfo `json:"files"`
-	Success bool            `json:"success"`
-	Error   string          `json:"error,omitempty"`
+	TaskID    string          `json:"task_id"`
+	Files     []SlaveFileInfo `json:"files"`
+	Success   bool            `json:"success"`
+	ErrorCode string          `json:"error_code,omitempty"`
+	Error     string          `json:"error,omitempty"`
+}
+
+const (
+	TaskErrorCodeInvalidTimeWindow  = "INVALID_TIME_WINDOW"
+	TaskErrorCodeTimeWindowNotReady = "TIME_WINDOW_NOT_READY"
+)
+
+// TaskResponsesTimeWindowErrorCode returns the strongest time-window status
+// reported by any slave. Permanent invalidity takes precedence over a
+// retryable not-ready result.
+func TaskResponsesTimeWindowErrorCode(responses map[string]*TaskResponse) string {
+	result := ""
+	for _, response := range responses {
+		if response == nil || response.Success {
+			continue
+		}
+		switch response.ErrorCode {
+		case TaskErrorCodeInvalidTimeWindow:
+			return TaskErrorCodeInvalidTimeWindow
+		case TaskErrorCodeTimeWindowNotReady:
+			result = TaskErrorCodeTimeWindowNotReady
+		}
+	}
+	return result
 }
 
 // HeartbeatRequest heartbeat request structure.

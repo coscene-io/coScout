@@ -32,9 +32,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles []string, whiteList []string, recursivelyWalkDirs bool, startTime int64, endTime int64) (map[string]model.FileInfo, []string) {
+func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles []string, whiteList []string, recursivelyWalkDirs bool, startTime int64, endTime int64) (map[string]model.FileInfo, []string, error) {
 	files := make(map[string]model.FileInfo)
 	noPermissionFolders := make([]string, 0)
+	if err := ValidateTimeWindow(startTime, endTime); err != nil {
+		return files, noPermissionFolders, err
+	}
 
 	matchesWhitelist := func(filename string) bool {
 		if len(whiteList) == 0 {
@@ -82,7 +85,7 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 			continue
 		}
 
-		processFile := func(root, filePath string, info os.FileInfo) {
+		processFile := func(target map[string]model.FileInfo, root, filePath string, info os.FileInfo) {
 			if !matchesWhitelist(filePath) {
 				log.WithField("taskName", taskName).Warnf("file path %s does not match whitelist, skip!", filePath)
 				return
@@ -107,7 +110,7 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 					filename = filepath.Base(filePath)
 				}
 
-				files[filePath] = model.FileInfo{
+				target[filePath] = model.FileInfo{
 					FileName: filename,
 					Size:     info.Size(),
 					Path:     filePath,
@@ -122,39 +125,42 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 		rootDir := realPath
 		//nolint: nestif // nested if is acceptable here for clarity.
 		if recursivelyWalkDirs {
-			filePaths, err := utils.GetAllFilePaths(rootDir, &utils.SymWalkOptions{
+			folderFiles := make(map[string]model.FileInfo)
+			err := utils.WalkFilePaths(rootDir, &utils.SymWalkOptions{
 				FollowSymlinks:       true,
 				SkipPermissionErrors: true,
 				SkipEmptyFiles:       true,
 				MaxFiles:             99999,
-			})
-			if err != nil {
-				log.WithField("taskName", taskName).Errorf("Failed to get all file paths in folder %s: %v", folder, err)
-				continue
-			}
-
-			for _, tmpFilePath := range filePaths {
+			}, func(tmpFilePath string) error {
 				if !utils.CheckReadPath(tmpFilePath) {
 					log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", tmpFilePath)
-					continue
+					return nil
 				}
 
 				fileAbs, info, err := utils.GetRealFileInfo(tmpFilePath)
 				if err != nil {
 					log.WithField("taskName", taskName).Errorf("Failed to get file info for %s: %v", tmpFilePath, err)
-					continue
+					return nil
 				}
 
 				if !utils.CheckReadPath(fileAbs) {
 					log.WithField("taskName", taskName).Warnf("Path %s is not readable, skip!", fileAbs)
-					continue
+					return nil
 				}
 
 				if info.IsDir() {
-					continue
+					return nil
 				}
 
-				processFile(rootDir, fileAbs, info)
+				processFile(folderFiles, rootDir, fileAbs, info)
+				return nil
+			})
+			if err != nil {
+				log.WithField("taskName", taskName).Errorf("Failed to walk files in folder %s: %v", folder, err)
+				continue
+			}
+			for filePath, fileInfo := range folderFiles {
+				files[filePath] = fileInfo
 			}
 		} else {
 			entries, err := os.ReadDir(rootDir)
@@ -179,7 +185,7 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 					continue
 				}
 
-				processFile(realPath, joined, info)
+				processFile(files, realPath, joined, info)
 			}
 		}
 	}
@@ -217,32 +223,27 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 		// Clean the file path to handle trailing slashes correctly
 		cleanFile := filepath.Clean(realPath)
 		parentFolder := filepath.Dir(cleanFile)
-		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
+		additionalFolderFiles := make(map[string]model.FileInfo)
+		err = utils.WalkFilePaths(realPath, &utils.SymWalkOptions{
 			FollowSymlinks:       true,
 			SkipPermissionErrors: true,
 			SkipEmptyFiles:       true,
 			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.WithField("taskName", taskName).Errorf("AdditionalFiles Failed to walk through folder %s: %v", realPath, err)
-			continue
-		}
-
-		for _, tmpAddFilePath := range filePaths {
+		}, func(tmpAddFilePath string) error {
 			if !utils.CheckReadPath(tmpAddFilePath) {
 				log.WithField("taskName", taskName).Warnf("AdditionalFiles Path %s is not readable, skip!", tmpAddFilePath)
-				continue
+				return nil
 			}
 
 			realPath, info, err := utils.GetRealFileInfo(tmpAddFilePath)
 			if err != nil {
 				log.WithField("taskName", taskName).Errorf("AdditionalFiles Failed to get file info for %s: %v", tmpAddFilePath, err)
-				continue
+				return nil
 			}
 
 			if !utils.CheckReadPath(realPath) {
 				log.WithField("taskName", taskName).Warnf("AdditionalFiles Path %s is not readable, skip!", realPath)
-				continue
+				return nil
 			}
 
 			filename, err := filepath.Rel(parentFolder, realPath)
@@ -251,15 +252,23 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 				filename = filepath.Base(realPath)
 			}
 
-			files[realPath] = model.FileInfo{
+			additionalFolderFiles[realPath] = model.FileInfo{
 				FileName: filename,
 				Size:     info.Size(),
 				Path:     realPath,
 			}
+			return nil
+		})
+		if err != nil {
+			log.WithField("taskName", taskName).Errorf("AdditionalFiles Failed to walk through folder %s: %v", realPath, err)
+			continue
+		}
+		for filePath, fileInfo := range additionalFolderFiles {
+			files[filePath] = fileInfo
 		}
 	}
 
-	return files, noPermissionFolders
+	return files, noPermissionFolders, nil
 }
 
 func ComputeRuleFileInfos(fileStates []file_state_handler.FileState) map[string]model.FileInfo {
@@ -298,26 +307,21 @@ func ComputeRuleFileInfos(fileStates []file_state_handler.FileState) map[string]
 			continue
 		}
 		baseDir := filepath.Dir(realPath)
-		filePaths, err := utils.GetAllFilePaths(realPath, &utils.SymWalkOptions{
+		directoryFiles := make(map[string]model.FileInfo)
+		err = utils.WalkFilePaths(realPath, &utils.SymWalkOptions{
 			FollowSymlinks:       true,
 			SkipPermissionErrors: true,
 			SkipEmptyFiles:       true,
 			MaxFiles:             99999,
-		})
-		if err != nil {
-			log.Errorf("failed to get all file paths: %v", err)
-			continue
-		}
-
-		for _, filePath := range filePaths {
+		}, func(filePath string) error {
 			realPath, info, err := utils.GetRealFileInfo(filePath)
 			if err != nil {
 				log.Errorf("failed to stat file %s: %v", realPath, err)
-				continue
+				return nil
 			}
 
 			if info.IsDir() {
-				continue
+				return nil
 			}
 
 			filename, err := filepath.Rel(baseDir, realPath)
@@ -326,11 +330,19 @@ func ComputeRuleFileInfos(fileStates []file_state_handler.FileState) map[string]
 				filename = filepath.Base(realPath)
 			}
 
-			files[realPath] = model.FileInfo{
+			directoryFiles[realPath] = model.FileInfo{
 				FileName: filename,
 				Size:     info.Size(),
 				Path:     realPath,
 			}
+			return nil
+		})
+		if err != nil {
+			log.Errorf("failed to walk file paths: %v", err)
+			continue
+		}
+		for filePath, fileInfo := range directoryFiles {
+			files[filePath] = fileInfo
 		}
 	}
 

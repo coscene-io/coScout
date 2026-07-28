@@ -16,6 +16,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -35,23 +36,34 @@ import (
 	"github.com/coscene-io/coscout/pkg/upload"
 	"github.com/coscene-io/coscout/pkg/utils"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+type requestClient interface {
+	ListDeviceTasks(deviceName string, state *enums.TaskStateEnum_TaskState, category string) ([]*openDpsV1alpha1Resource.Task, error)
+	UpdateTaskState(name string, state *enums.TaskStateEnum_TaskState) (*openDpsV1alpha1Resource.Task, error)
+	AddTaskTags(task string, tags map[string]string) (*emptypb.Empty, error)
+}
+
+type slaveFileRequester interface {
+	RequestAllSlaveFiles(context.Context, *master.SlaveRegistry, *master.TaskRequest) map[string]*master.TaskResponse
+}
+
 type CustomTaskHandler struct {
-	reqClient   api.RequestClient
+	reqClient   requestClient
 	confManager config.ConfManager
 	errChan     chan error
 	pubSub      *gochannel.GoChannel
 
 	// Master-slave components (optional)
 	slaveRegistry *master.SlaveRegistry
-	masterClient  *master.Client
+	masterClient  slaveFileRequester
 	masterConfig  *config.MasterConfig
 }
 
 func NewTaskHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomTaskHandler {
 	return &CustomTaskHandler{
-		reqClient:   reqClient,
+		reqClient:   &reqClient,
 		confManager: confManager,
 		errChan:     errChan,
 		pubSub:      pubSub,
@@ -86,27 +98,22 @@ func (c *CustomTaskHandler) run(_ context.Context) {
 		return
 	}
 
-	//nolint: contextcheck // context is checked in the parent goroutine
 	cancellingUploadTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_CANCELLING.Enum(), enums.TaskCategoryEnum_UPLOAD.String())
 	if err != nil {
 		log.Errorf("Failed to list device cancelling upload tasks: %v", err)
 		c.errChan <- err
 		return
 	}
-	//nolint: contextcheck // context is checked in the parent goroutine
 	c.handleCancellingTasks(cancellingUploadTasks)
 
-	//nolint: contextcheck // context is checked in the parent goroutine
 	cancellingDiagnosisTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_CANCELLING.Enum(), enums.TaskCategoryEnum_DIAGNOSIS.String())
 	if err != nil {
 		log.Errorf("Failed to list device cancelling diagnosis tasks: %v", err)
 		c.errChan <- err
 		return
 	}
-	//nolint: contextcheck // context is checked in the parent goroutine
 	c.handleCancellingTasks(cancellingDiagnosisTasks)
 
-	//nolint: contextcheck // context is checked in the parent goroutine
 	pendingTasks, err := c.reqClient.ListDeviceTasks(deviceInfo.GetName(), enums.TaskStateEnum_PENDING.Enum(), enums.TaskCategoryEnum_UPLOAD.String())
 	if err != nil {
 		log.Errorf("Failed to list device tasks: %v", err)
@@ -200,13 +207,23 @@ func (c *CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.
 			continue
 		}
 
-		log.WithField("taskName", task.GetName()).Infof("Starting handle upload task")
-		_, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_PROCESSING.Enum())
-		if err != nil {
-			log.WithField("taskName", task.GetName()).Errorf("Failed to update task state: %v", err)
-			continue
+		taskDetail := task.GetUploadTaskDetail()
+		if taskDetail != nil {
+			err := upload.ValidateTimeWindow(taskDetail.GetStartTime().AsTime().Unix(), taskDetail.GetEndTime().AsTime().Unix())
+			switch {
+			case errors.Is(err, upload.ErrTimeWindowNotReady):
+				log.WithField("taskName", task.GetName()).Infof("Upload task is not ready yet, keeping it pending: %v", err)
+				continue
+			case errors.Is(err, upload.ErrInvalidTimeWindow):
+				log.WithField("taskName", task.GetName()).Errorf("Upload task has a permanently invalid time window: %v", err)
+				if _, updateErr := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_FAILED.Enum()); updateErr != nil {
+					log.WithField("taskName", task.GetName()).Errorf("Failed to mark invalid upload task failed: %v", updateErr)
+				}
+				continue
+			}
 		}
 
+		log.WithField("taskName", task.GetName()).Infof("Starting handle upload task")
 		if task.GetUploadTaskDetail() != nil {
 			c.handleUploadTask(task)
 		} else {
@@ -235,7 +252,11 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			startTime.AsTime().String(), endTime.AsTime().String(), taskFolders, additionalFiles)
 
 	// Get local files
-	localFiles, noPermissionFolders := upload.ComputeUploadFiles(task.GetName(), taskFolders, additionalFiles, []string{}, true, startTime.AsTime().Unix(), endTime.AsTime().Unix())
+	localFiles, noPermissionFolders, err := upload.ComputeUploadFiles(task.GetName(), taskFolders, additionalFiles, []string{}, true, startTime.AsTime().Unix(), endTime.AsTime().Unix())
+	if err != nil {
+		log.WithField("taskName", task.GetName()).Errorf("Upload task scan did not run: %v", err)
+		return
+	}
 
 	// Get slave files if master-slave is enabled
 	allFiles := make(map[string]model.FileInfo)
@@ -257,6 +278,17 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		}
 
 		responses := c.masterClient.RequestAllSlaveFiles(ctx, c.slaveRegistry, taskReq)
+		switch master.TaskResponsesTimeWindowErrorCode(responses) {
+		case master.TaskErrorCodeInvalidTimeWindow:
+			log.WithField("taskName", task.GetName()).Error("A slave rejected the upload task's time window as permanently invalid")
+			if _, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_FAILED.Enum()); err != nil {
+				log.WithField("taskName", task.GetName()).Errorf("Failed to mark upload task failed: %v", err)
+			}
+			return
+		case master.TaskErrorCodeTimeWindowNotReady:
+			log.WithField("taskName", task.GetName()).Info("A slave is not ready for the upload time window, keeping task pending")
+			return
+		}
 		for slaveID, response := range responses {
 			if response != nil && response.Success {
 				log.WithField("taskName", task.GetName()).Infof("Slave %s returned %d files", slaveID, len(response.Files))
@@ -272,6 +304,10 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 				}
 			}
 		}
+	}
+	if _, err := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_PROCESSING.Enum()); err != nil {
+		log.WithField("taskName", task.GetName()).Errorf("Failed to update task state: %v", err)
+		return
 	}
 	log.WithField("taskName", task.GetName()).Infof("Total files: %d (local: %d, slave: %d)", len(allFiles), len(localFiles), slaveFileCount)
 	if len(allFiles) == 0 {
@@ -306,7 +342,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 		},
 		OriginalFiles: allFiles,
 	}
-	err := rc.Save()
+	err = rc.Save()
 	if err != nil {
 		log.Errorf("Failed to save record cache: %v", err)
 		return

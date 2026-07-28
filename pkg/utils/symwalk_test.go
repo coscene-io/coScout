@@ -19,12 +19,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
 )
 
-var errOther = errors.New("other error")
+var (
+	errOther         = errors.New("other error")
+	errWalkFilePaths = errors.New("callback failed")
+)
 
 // Example: custom configuration.
 func ExampleSymWalk_custom() {
@@ -806,6 +811,465 @@ func TestGetAllFilePaths_MaxFilesLimit(t *testing.T) {
 	if len(paths) != maxFiles {
 		t.Errorf("Expected exactly %d files, got %d", maxFiles, len(paths))
 	}
+}
+
+func TestWalkFilePathsProcessesFilesBeforeLaterTraversalError(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "a-file.txt")
+	if err := os.WriteFile(firstPath, []byte("data"), 0o600); err != nil {
+		t.Fatalf("write first file: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "missing-target"), filepath.Join(root, "z-broken-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	var visited []string
+	err := WalkFilePaths(root, &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: false,
+		SkipEmptyFiles:       true,
+		MaxFiles:             99999,
+	}, func(filePath string) error {
+		visited = append(visited, filePath)
+		return nil
+	})
+
+	if err == nil {
+		t.Fatal("WalkFilePaths() error = nil, want broken symlink traversal error")
+	}
+	if len(visited) != 1 || visited[0] != firstPath {
+		t.Fatalf("visited = %v, want first file processed before later traversal error", visited)
+	}
+}
+
+func TestWalkFilePathsMatchesLegacyCollector(t *testing.T) {
+	t.Parallel()
+
+	t.Run("directory order, absolute paths, empty files, and limits", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		nested := filepath.Join(root, "b-dir")
+		if err := os.Mkdir(nested, 0o755); err != nil {
+			t.Fatalf("mkdir nested: %v", err)
+		}
+		for path, content := range map[string]string{
+			filepath.Join(root, "a.txt"):          "a",
+			filepath.Join(root, "c-empty.txt"):    "",
+			filepath.Join(nested, "a-empty.txt"):  "",
+			filepath.Join(nested, "b-nested.txt"): "nested",
+		} {
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write %s: %v", path, err)
+			}
+		}
+
+		cases := []struct {
+			name    string
+			options *SymWalkOptions
+		}{
+			{name: "nil defaults", options: nil},
+			{
+				name: "include empty and unlimited",
+				options: &SymWalkOptions{
+					FollowSymlinks:       true,
+					SkipPermissionErrors: true,
+					SkipEmptyFiles:       false,
+					MaxFiles:             0,
+				},
+			},
+			{
+				name: "limit one",
+				options: &SymWalkOptions{
+					FollowSymlinks:       true,
+					SkipPermissionErrors: true,
+					SkipEmptyFiles:       false,
+					MaxFiles:             1,
+				},
+			},
+			{
+				name: "limit at exact file count",
+				options: &SymWalkOptions{
+					FollowSymlinks:       true,
+					SkipPermissionErrors: true,
+					SkipEmptyFiles:       false,
+					MaxFiles:             4,
+				},
+			},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				assertWalkFilePathsMatchesLegacy(t, root, tc.options)
+			})
+		}
+	})
+
+	t.Run("file roots", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		nonEmpty := filepath.Join(root, "non-empty.txt")
+		empty := filepath.Join(root, "empty.txt")
+		if err := os.WriteFile(nonEmpty, []byte("data"), 0o600); err != nil {
+			t.Fatalf("write non-empty root: %v", err)
+		}
+		if err := os.WriteFile(empty, nil, 0o600); err != nil {
+			t.Fatalf("write empty root: %v", err)
+		}
+
+		assertWalkFilePathsMatchesLegacy(t, nonEmpty, nil)
+		assertWalkFilePathsMatchesLegacy(t, empty, nil)
+		assertWalkFilePathsMatchesLegacy(t, empty, &SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: true,
+			SkipEmptyFiles:       false,
+			MaxFiles:             0,
+		})
+	})
+
+	t.Run("relative root becomes absolute", func(t *testing.T) {
+		t.Parallel()
+
+		filePath := filepath.Join(t.TempDir(), "relative.txt")
+		if err := os.WriteFile(filePath, []byte("data"), 0o600); err != nil {
+			t.Fatalf("write relative-root file: %v", err)
+		}
+		workingDir, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("get working directory: %v", err)
+		}
+		relativePath, err := filepath.Rel(workingDir, filePath)
+		if err != nil {
+			t.Fatalf("make relative path: %v", err)
+		}
+		assertWalkFilePathsMatchesLegacy(t, relativePath, nil)
+	})
+}
+
+func TestWalkFilePathsMatchesLegacySymlinkVisitedBehavior(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	targetFile := filepath.Join(root, "z-target.txt")
+	if err := os.WriteFile(targetFile, []byte("target"), 0o600); err != nil {
+		t.Fatalf("write target file: %v", err)
+	}
+	targetDir := filepath.Join(root, "z-target-dir")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	targetDirFile := filepath.Join(targetDir, "file.txt")
+	if err := os.WriteFile(targetDirFile, []byte("nested"), 0o600); err != nil {
+		t.Fatalf("write target dir file: %v", err)
+	}
+
+	for link, target := range map[string]string{
+		filepath.Join(root, "a-file-link"): targetFile,
+		filepath.Join(root, "b-file-link"): targetFile,
+		filepath.Join(root, "c-dir-link"):  targetDir,
+		filepath.Join(root, "d-dir-link"):  targetDir,
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}
+
+	followOptions := &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: false,
+		SkipEmptyFiles:       false,
+		MaxFiles:             0,
+	}
+	assertWalkFilePathsMatchesLegacy(t, root, followOptions)
+	followedPaths, err := legacyGetAllFilePathsForTest(root, followOptions)
+	if err != nil {
+		t.Fatalf("legacy followed collector error = %v", err)
+	}
+	wantFollowed := []string{
+		filepath.Join(root, "a-file-link"),
+		filepath.Join(root, "c-dir-link", "file.txt"),
+		targetDirFile,
+		targetFile,
+	}
+	if !reflect.DeepEqual(followedPaths, wantFollowed) {
+		t.Fatalf("followed paths = %v, want visited-target order %v", followedPaths, wantFollowed)
+	}
+
+	noFollowOptions := &SymWalkOptions{
+		FollowSymlinks:       false,
+		SkipPermissionErrors: false,
+		SkipEmptyFiles:       false,
+		MaxFiles:             0,
+	}
+	assertWalkFilePathsMatchesLegacy(t, root, noFollowOptions)
+	notFollowedPaths, err := legacyGetAllFilePathsForTest(root, noFollowOptions)
+	if err != nil {
+		t.Fatalf("legacy non-followed collector error = %v", err)
+	}
+	wantNotFollowed := []string{
+		filepath.Join(root, "a-file-link"),
+		filepath.Join(root, "b-file-link"),
+		filepath.Join(root, "c-dir-link"),
+		filepath.Join(root, "d-dir-link"),
+		targetDirFile,
+		targetFile,
+	}
+	if !reflect.DeepEqual(notFollowedPaths, wantNotFollowed) {
+		t.Fatalf("non-followed paths = %v, want %v", notFollowedPaths, wantNotFollowed)
+	}
+}
+
+func TestWalkFilePathsMatchesLegacyBrokenAndCyclicSymlinks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("broken symlink", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		broken := filepath.Join(root, "broken")
+		if err := os.Symlink(filepath.Join(root, "missing"), broken); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+
+		assertWalkFilePathsMatchesLegacy(t, root, &SymWalkOptions{
+			FollowSymlinks:       false,
+			SkipPermissionErrors: false,
+			SkipEmptyFiles:       false,
+			MaxFiles:             0,
+		})
+
+		legacyPaths, legacyErr := legacyGetAllFilePathsForTest(root, &SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: false,
+			SkipEmptyFiles:       false,
+			MaxFiles:             0,
+		})
+		currentPaths, currentErr := GetAllFilePaths(root, &SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: false,
+			SkipEmptyFiles:       false,
+			MaxFiles:             0,
+		})
+		if legacyErr == nil || currentErr == nil {
+			t.Fatalf("legacy error = %v, current error = %v; both must reject a followed broken link", legacyErr, currentErr)
+		}
+		if legacyPaths != nil || currentPaths != nil {
+			t.Fatalf("legacy paths = %v, current paths = %v; both must be atomic on error", legacyPaths, currentPaths)
+		}
+	})
+
+	t.Run("directory cycle", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		dir := filepath.Join(root, "dir")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatalf("mkdir cycle dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("data"), 0o600); err != nil {
+			t.Fatalf("write cycle file: %v", err)
+		}
+		if err := os.Symlink(root, filepath.Join(dir, "back-to-root")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+
+		assertWalkFilePathsMatchesLegacy(t, root, &SymWalkOptions{
+			FollowSymlinks:       true,
+			SkipPermissionErrors: false,
+			SkipEmptyFiles:       false,
+			MaxFiles:             0,
+		})
+	})
+}
+
+func TestWalkFilePathsPermissionErrorCompatibility(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission test")
+	}
+
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "a-file.txt")
+	if err := os.WriteFile(firstPath, []byte("data"), 0o600); err != nil {
+		t.Fatalf("write first file: %v", err)
+	}
+	deniedDir := filepath.Join(root, "z-denied")
+	if err := os.Mkdir(deniedDir, 0o700); err != nil {
+		t.Fatalf("mkdir denied dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(deniedDir, "hidden.txt"), []byte("hidden"), 0o600); err != nil {
+		t.Fatalf("write hidden file: %v", err)
+	}
+	if err := os.Chmod(deniedDir, 0); err != nil {
+		t.Fatalf("chmod denied dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(deniedDir, 0o700)
+	})
+	if _, err := os.ReadDir(deniedDir); err == nil {
+		t.Skip("test process can read mode-000 directories")
+	}
+
+	assertWalkFilePathsMatchesLegacy(t, root, &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: true,
+		SkipEmptyFiles:       false,
+		MaxFiles:             0,
+	})
+
+	strictOptions := &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: false,
+		SkipEmptyFiles:       false,
+		MaxFiles:             0,
+	}
+	legacyPaths, legacyErr := legacyGetAllFilePathsForTest(root, strictOptions)
+	currentPaths, currentErr := GetAllFilePaths(root, strictOptions)
+	if !errors.Is(legacyErr, os.ErrPermission) || !errors.Is(currentErr, os.ErrPermission) {
+		t.Fatalf("legacy error = %v, current error = %v; both must propagate permission failure", legacyErr, currentErr)
+	}
+	if legacyPaths != nil || currentPaths != nil {
+		t.Fatalf("legacy paths = %v, current paths = %v; collectors must be atomic on permission failure", legacyPaths, currentPaths)
+	}
+
+	var streamed []string
+	streamErr := WalkFilePaths(root, strictOptions, func(filePath string) error {
+		streamed = append(streamed, filePath)
+		return nil
+	})
+	if !errors.Is(streamErr, os.ErrPermission) {
+		t.Fatalf("WalkFilePaths() error = %v, want permission failure", streamErr)
+	}
+	if !reflect.DeepEqual(streamed, []string{firstPath}) {
+		t.Fatalf("streamed = %v, want callback before later permission failure", streamed)
+	}
+}
+
+func TestWalkFilePathsCallbackControlErrors(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("data"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	options := &SymWalkOptions{
+		FollowSymlinks:       true,
+		SkipPermissionErrors: false,
+		SkipEmptyFiles:       false,
+		MaxFiles:             0,
+	}
+
+	t.Run("ordinary error propagates", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		err := WalkFilePaths(root, options, func(string) error {
+			calls++
+			return errWalkFilePaths
+		})
+		if !errors.Is(err, errWalkFilePaths) {
+			t.Fatalf("WalkFilePaths() error = %v, want %v", err, errWalkFilePaths)
+		}
+		if calls != 1 {
+			t.Fatalf("callback calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("SkipDir stops successfully", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		err := WalkFilePaths(root, options, func(string) error {
+			calls++
+			return filepath.SkipDir
+		})
+		if err != nil {
+			t.Fatalf("WalkFilePaths() error = %v, want nil", err)
+		}
+		if calls != 1 {
+			t.Fatalf("callback calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("SkipAll propagates for caller classification", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		err := WalkFilePaths(root, options, func(string) error {
+			calls++
+			return filepath.SkipAll
+		})
+		if !errors.Is(err, filepath.SkipAll) {
+			t.Fatalf("WalkFilePaths() error = %v, want filepath.SkipAll", err)
+		}
+		if calls != 1 {
+			t.Fatalf("callback calls = %d, want 1", calls)
+		}
+	})
+}
+
+func assertWalkFilePathsMatchesLegacy(t *testing.T, root string, options *SymWalkOptions) {
+	t.Helper()
+
+	legacyPaths, legacyErr := legacyGetAllFilePathsForTest(root, options)
+	if legacyErr != nil {
+		t.Fatalf("legacy collector error = %v", legacyErr)
+	}
+
+	var streamedPaths []string
+	streamErr := WalkFilePaths(root, options, func(filePath string) error {
+		streamedPaths = append(streamedPaths, filePath)
+		return nil
+	})
+	if streamErr != nil {
+		t.Fatalf("WalkFilePaths() error = %v", streamErr)
+	}
+	if !reflect.DeepEqual(streamedPaths, legacyPaths) {
+		t.Fatalf("WalkFilePaths() = %v, legacy collector = %v", streamedPaths, legacyPaths)
+	}
+
+	currentPaths, currentErr := GetAllFilePaths(root, options)
+	if currentErr != nil {
+		t.Fatalf("GetAllFilePaths() error = %v", currentErr)
+	}
+	if !reflect.DeepEqual(currentPaths, legacyPaths) {
+		t.Fatalf("GetAllFilePaths() = %v, legacy collector = %v", currentPaths, legacyPaths)
+	}
+}
+
+// legacyGetAllFilePathsForTest independently reconstructs the implementation
+// from main before GetAllFilePaths delegated to WalkFilePaths.
+func legacyGetAllFilePathsForTest(root string, options *SymWalkOptions) ([]string, error) {
+	if options == nil {
+		options = DefaultSymWalkOptions()
+	}
+
+	var filePaths []string
+	err := SymWalk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if options.MaxFiles > 0 && len(filePaths) >= options.MaxFiles {
+			return filepath.SkipDir
+		}
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		filePaths = append(filePaths, absPath)
+		return nil
+	}, options)
+	if err != nil {
+		return nil, err
+	}
+	return filePaths, nil
 }
 
 // Test GetAllFilePaths with MaxFiles set to 0 (no limit).
