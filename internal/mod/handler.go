@@ -23,6 +23,7 @@ import (
 	"github.com/coscene-io/coscout/internal/mod/http"
 	"github.com/coscene-io/coscout/internal/mod/rule"
 	"github.com/coscene-io/coscout/internal/mod/task"
+	"github.com/coscene-io/coscout/internal/queuedbytes"
 	"github.com/coscene-io/coscout/pkg/constant"
 )
 
@@ -31,14 +32,14 @@ type CustomHandler interface {
 	Run(ctx context.Context)
 }
 
-func NewModHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error, mod string) CustomHandler {
+func NewModHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error, mod string, queuedBytes *queuedbytes.Budget) CustomHandler {
 	switch mod {
 	case constant.TaskModType:
 		return task.NewTaskHandler(reqClient, confManager, pubSub, errChan)
 	case constant.RuleModType:
-		return rule.NewRuleHandler(reqClient, confManager, pubSub, errChan)
+		return rule.NewRuleHandler(reqClient, confManager, pubSub, errChan, queuedBytes)
 	case constant.HttpModType:
-		return http.NewHttpHandler(reqClient, confManager, pubSub, errChan)
+		return http.NewHttpHandler(reqClient, confManager, pubSub, errChan, queuedBytes)
 	default:
 		return nil
 	}
