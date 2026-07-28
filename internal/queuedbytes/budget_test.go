@@ -80,8 +80,29 @@ func TestBudgetTransfersTrackedMessageToOneSubscriber(t *testing.T) {
 	assert.Equal(t, int64(80), size)
 	_, claimed = budget.ClaimMessage("message-1")
 	assert.False(t, claimed)
-	assert.True(t, budget.FinishMessage("message-1"))
+	require.True(t, budget.AdmitMessage("message-1"))
+	admitted, transferred := budget.FinishMessage("message-1")
+	assert.True(t, admitted)
+	assert.True(t, transferred)
 
+	budget.Release(size)
+	assert.Zero(t, budget.Queued())
+}
+
+func TestBudgetReportsAbortedMessageAsNotAdmitted(t *testing.T) {
+	t.Parallel()
+
+	budget := NewBudget(100)
+	require.True(t, budget.TryReserve(80))
+	require.True(t, budget.TrackMessage("message-1", 80))
+
+	size, claimed := budget.ClaimMessage("message-1")
+	require.True(t, claimed)
+	require.True(t, budget.AbortMessage("message-1"))
+	admitted, transferred := budget.FinishMessage("message-1")
+
+	assert.False(t, admitted)
+	assert.True(t, transferred)
 	budget.Release(size)
 	assert.Zero(t, budget.Queued())
 }
@@ -93,7 +114,9 @@ func TestBudgetKeepsUnclaimedMessageWithPublisher(t *testing.T) {
 	require.True(t, budget.TryReserve(80))
 	require.True(t, budget.TrackMessage("message-1", 80))
 
-	assert.False(t, budget.FinishMessage("message-1"))
+	admitted, transferred := budget.FinishMessage("message-1")
+	assert.False(t, admitted)
+	assert.False(t, transferred)
 	budget.Release(80)
 	assert.Zero(t, budget.Queued())
 }
@@ -117,7 +140,7 @@ func TestBudgetMessageOwnershipIsAtomic(t *testing.T) {
 		})
 		wg.Go(func() {
 			<-start
-			transferred = budget.FinishMessage(messageID)
+			_, transferred = budget.FinishMessage(messageID)
 		})
 
 		close(start)

@@ -35,24 +35,35 @@ func TestConsumeRuleMessageReleasesQueuedBytes(t *testing.T) {
 		queuedBytes: budget,
 	}
 	handler.consumeRuleMessage(queuedRuleMessage{
-		payload:       []byte(`{"msg":{"code":1},"topic":"/fault","ts":1}`),
+		payload:       []byte(`[{"msg":{"code":1},"topic":"/fault","ts":1}]`),
 		reservedBytes: 80,
 	})
 
 	assert.Zero(t, budget.Queued())
 }
 
-func TestDecodeHTTPRuleMessageSetsSourceAtConsumption(t *testing.T) {
+func TestConsumeHTTPRuleBatchPreservesOrder(t *testing.T) {
 	t.Parallel()
 
-	item, err := decodeHTTPRuleMessage([]byte(`{"msg":{"code":1},"topic":"/fault","ts":1,"source":"external"}`))
+	var consumed []rule_engine.RuleItem
+	err := consumeHTTPRuleBatch(
+		[]byte(`[
+			{"msg":{"code":1},"topic":"/first","ts":1},
+			{"msg":{"code":2},"topic":"/second","ts":2}
+		]`),
+		func(item rule_engine.RuleItem) {
+			consumed = append(consumed, item)
+		},
+	)
 
 	require.NoError(t, err)
-	assert.Equal(t, rule_engine.RuleSourceHTTP, item.Source)
-	assert.Equal(t, "/fault", item.Topic)
-	code, ok := item.Msg["code"].(float64)
-	require.True(t, ok)
-	assert.InDelta(t, 1, code, 0)
+	require.Len(t, consumed, 2)
+	assert.Equal(t, "/first", consumed[0].Topic)
+	assert.InDelta(t, 1, consumed[0].Ts, 0)
+	assert.Equal(t, rule_engine.RuleSourceHTTP, consumed[0].Source)
+	assert.Equal(t, "/second", consumed[1].Topic)
+	assert.InDelta(t, 2, consumed[1].Ts, 0)
+	assert.Equal(t, rule_engine.RuleSourceHTTP, consumed[1].Source)
 }
 
 func TestHandleRuleMessageTransfersReservationToQueue(t *testing.T) {
@@ -67,12 +78,14 @@ func TestHandleRuleMessageTransfersReservationToQueue(t *testing.T) {
 		queuedBytes:     budget,
 		ruleMessageChan: make(chan queuedRuleMessage, 1),
 	}
-	payload := []byte(`{"msg":{"code":1},"topic":"/fault","ts":1}`)
+	payload := []byte(`[{"msg":{"code":1},"topic":"/fault","ts":1}]`)
 	msg := message.NewMessage("message-1", payload)
 
 	assert.True(t, handler.handleRuleMessage(t.Context(), msg))
 	requireMessageAcked(t, msg)
-	assert.True(t, budget.FinishMessage(msg.UUID))
+	admitted, transferred := budget.FinishMessage(msg.UUID)
+	assert.True(t, admitted)
+	assert.True(t, transferred)
 
 	queued := <-handler.ruleMessageChan
 	assert.Equal(t, payload, queued.payload)
@@ -95,12 +108,14 @@ func TestHandleRuleMessageDelaysDecodeUntilConsumption(t *testing.T) {
 		queuedBytes:     budget,
 		ruleMessageChan: make(chan queuedRuleMessage, 1),
 	}
-	payload := []byte(`{"msg":[],"topic":"/fault","ts":1}`)
+	payload := []byte(`[{"msg":[],"topic":"/fault","ts":1}]`)
 	msg := message.NewMessage("message-1", payload)
 
 	assert.True(t, handler.handleRuleMessage(t.Context(), msg))
 	requireMessageAcked(t, msg)
-	assert.True(t, budget.FinishMessage(msg.UUID))
+	admitted, transferred := budget.FinishMessage(msg.UUID)
+	assert.True(t, admitted)
+	assert.True(t, transferred)
 
 	queued := <-handler.ruleMessageChan
 	assert.Equal(t, payload, queued.payload)
@@ -125,11 +140,13 @@ func TestHTTPAndFileMessagesShareFIFOQueue(t *testing.T) {
 	fileItem := ruleItemForQueueTest()
 	handler.ruleMessageChan <- queuedRuleMessage{item: fileItem}
 
-	payload := []byte(`{"msg":{"code":1},"topic":"/http","ts":2}`)
+	payload := []byte(`[{"msg":{"code":1},"topic":"/http","ts":2}]`)
 	msg := message.NewMessage("message-1", payload)
 	require.True(t, handler.handleRuleMessage(t.Context(), msg))
 	requireMessageAcked(t, msg)
-	require.True(t, budget.FinishMessage(msg.UUID))
+	admitted, transferred := budget.FinishMessage(msg.UUID)
+	require.True(t, admitted)
+	require.True(t, transferred)
 
 	first := <-handler.ruleMessageChan
 	second := <-handler.ruleMessageChan
@@ -167,13 +184,15 @@ func TestHandleRuleMessageReleasesReservationWhenCanceled(t *testing.T) {
 		queuedBytes:     budget,
 		ruleMessageChan: make(chan queuedRuleMessage),
 	}
-	msg := message.NewMessage("message-1", []byte(`{"msg":{"code":1},"topic":"/fault","ts":1}`))
+	msg := message.NewMessage("message-1", []byte(`[{"msg":{"code":1},"topic":"/fault","ts":1}]`))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	assert.False(t, handler.handleRuleMessage(ctx, msg))
 	requireMessageAcked(t, msg)
-	assert.True(t, budget.FinishMessage(msg.UUID))
+	admitted, transferred := budget.FinishMessage(msg.UUID)
+	assert.False(t, admitted)
+	assert.True(t, transferred)
 	assert.Zero(t, budget.Queued())
 }
 
@@ -205,7 +224,7 @@ func TestReleaseQueuedRuleMessagesReleasesOnlyHTTPReservations(t *testing.T) {
 	}
 	handler.ruleMessageChan <- queuedRuleMessage{item: ruleItemForQueueTest()}
 	handler.ruleMessageChan <- queuedRuleMessage{
-		payload:       []byte(`{"msg":{"code":1},"topic":"/fault","ts":1}`),
+		payload:       []byte(`[{"msg":{"code":1},"topic":"/fault","ts":1}]`),
 		reservedBytes: 80,
 	}
 

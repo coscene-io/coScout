@@ -108,34 +108,38 @@ func RulesHandler(pubSub *gochannel.GoChannel, budget *queuedbytes.Budget) func(
 			}
 		}()
 
-		for i := range payloads {
-			payload := &payloads[i]
-			msg := gcmessage.NewMessage(watermill.NewUUID(), payload.data)
-			if !budget.TrackMessage(msg.UUID, payload.reservedBytes) {
-				log.Errorf("Failed to track queued bytes for message %s", msg.UUID)
-				http.Error(w, "failed to track rule message", http.StatusInternalServerError)
-				return
-			}
-
-			publishErr := pubSub.Publish(constant.TopicRuleMsg, msg)
-			claimed := budget.FinishMessage(msg.UUID)
-			if claimed {
-				payload.reservedBytes = 0
-			}
-
-			if publishErr != nil {
-				log.Errorf("Failed to publish message: %v", publishErr)
-				http.Error(w, "failed to publish rule message", http.StatusServiceUnavailable)
-				return
-			}
-			if !claimed {
-				log.Errorf("Rule message %s was not claimed by a subscriber", msg.UUID)
-				http.Error(w, "rule message consumer unavailable", http.StatusServiceUnavailable)
-				return
-			}
-
-			log.WithField("payloadBytes", len(payload.data)).Debug("Published request message")
+		batch := encodeRuleMessageBatch(payloads)
+		reservedBytes := queuedPayloadsReservedBytes(payloads)
+		msg := gcmessage.NewMessage(watermill.NewUUID(), batch)
+		if !budget.TrackMessage(msg.UUID, reservedBytes) {
+			log.Errorf("Failed to track queued bytes for message batch %s", msg.UUID)
+			http.Error(w, "failed to track rule message batch", http.StatusInternalServerError)
+			return
 		}
+
+		publishErr := pubSub.Publish(constant.TopicRuleMsg, msg)
+		admitted, transferred := budget.FinishMessage(msg.UUID)
+		if transferred {
+			for i := range payloads {
+				payloads[i].reservedBytes = 0
+			}
+		}
+
+		if publishErr != nil {
+			log.Errorf("Failed to publish message batch: %v", publishErr)
+			http.Error(w, "failed to publish rule message batch", http.StatusServiceUnavailable)
+			return
+		}
+		if !admitted {
+			log.Errorf("Rule message batch %s was not admitted by a subscriber", msg.UUID)
+			http.Error(w, "rule message consumer unavailable", http.StatusServiceUnavailable)
+			return
+		}
+
+		log.WithFields(log.Fields{
+			"messageCount": len(payloads),
+			"payloadBytes": len(batch),
+		}).Debug("Published request message batch")
 
 		bytes, err := json.Marshal(map[string]string{"status": "ok"})
 		if err != nil {
@@ -298,6 +302,34 @@ func releaseQueuedPayloads(budget *queuedbytes.Budget, payloads []queuedPayload)
 	for _, payload := range payloads {
 		budget.Release(payload.reservedBytes)
 	}
+}
+
+func encodeRuleMessageBatch(payloads []queuedPayload) []byte {
+	size := 2
+	if len(payloads) > 1 {
+		size += len(payloads) - 1
+	}
+	for _, payload := range payloads {
+		size += len(payload.data)
+	}
+
+	batch := make([]byte, 0, size)
+	batch = append(batch, '[')
+	for i, payload := range payloads {
+		if i > 0 {
+			batch = append(batch, ',')
+		}
+		batch = append(batch, payload.data...)
+	}
+	return append(batch, ']')
+}
+
+func queuedPayloadsReservedBytes(payloads []queuedPayload) int64 {
+	var reservedBytes int64
+	for _, payload := range payloads {
+		reservedBytes += payload.reservedBytes
+	}
+	return reservedBytes
 }
 
 func decodeRuleMessageMetadata(data []byte) (float64, error) {

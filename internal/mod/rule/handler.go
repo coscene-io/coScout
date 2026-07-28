@@ -15,6 +15,7 @@
 package rule
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -293,9 +294,15 @@ func (c *CustomRuleHandler) handleRuleMessage(ctx context.Context, msg *gcmessag
 		reservedBytes: reservedBytes,
 	}:
 		releaseReservation = false
+		if !c.queuedBytes.AdmitMessage(msg.UUID) {
+			log.Warnf("Failed to record admission for rule message batch %s", msg.UUID)
+		}
 		msg.Ack()
 		return true
 	case <-ctx.Done():
+		if !c.queuedBytes.AbortMessage(msg.UUID) {
+			log.Warnf("Failed to record abort for rule message batch %s", msg.UUID)
+		}
 		msg.Ack()
 		return false
 	}
@@ -303,13 +310,11 @@ func (c *CustomRuleHandler) handleRuleMessage(ctx context.Context, msg *gcmessag
 
 func (c *CustomRuleHandler) consumeRuleMessage(message queuedRuleMessage) {
 	if message.payload != nil {
-		item, err := decodeHTTPRuleMessage(message.payload)
-		c.queuedBytes.Release(message.reservedBytes)
-		if err != nil {
-			log.Errorf("unmarshal rule item: %v", err)
-			return
+		defer c.queuedBytes.Release(message.reservedBytes)
+		if err := consumeHTTPRuleBatch(message.payload, c.engine.ConsumeNext); err != nil {
+			log.Errorf("consume HTTP rule message batch: %v", err)
 		}
-		message.item = item
+		return
 	}
 
 	c.engine.ConsumeNext(message.item)
@@ -328,13 +333,27 @@ func (c *CustomRuleHandler) releaseQueuedRuleMessages() {
 	}
 }
 
-func decodeHTTPRuleMessage(payload []byte) (rule_engine.RuleItem, error) {
-	item := rule_engine.RuleItem{}
-	if err := json.Unmarshal(payload, &item); err != nil {
-		return rule_engine.RuleItem{}, err
+func consumeHTTPRuleBatch(payload []byte, consume func(rule_engine.RuleItem)) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	token, err := decoder.Token()
+	if err != nil {
+		return err
 	}
-	item.Source = rule_engine.RuleSourceHTTP
-	return item, nil
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
+		return errors.New("HTTP rule message batch must be a JSON array")
+	}
+
+	for decoder.More() {
+		item := rule_engine.RuleItem{}
+		if err := decoder.Decode(&item); err != nil {
+			return err
+		}
+		item.Source = rule_engine.RuleSourceHTTP
+		consume(item)
+	}
+
+	_, err = decoder.Token()
+	return err
 }
 
 func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {

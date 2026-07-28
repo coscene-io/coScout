@@ -39,6 +39,8 @@ type messageReservation struct {
 const (
 	reservationOpen uint32 = iota
 	reservationClaimed
+	reservationAdmitted
+	reservationAborted
 	reservationFinished
 )
 
@@ -119,9 +121,27 @@ func (b *Budget) ClaimMessage(messageID string) (int64, bool) {
 	return reservation.size, true
 }
 
-// FinishMessage removes the publisher-side tracking entry after Publish
-// returns. A true result means the subscriber owns and must release the bytes.
-func (b *Budget) FinishMessage(messageID string) bool {
+// AdmitMessage records that the claimed message has been placed in the
+// consumer queue. The subscriber owns the reservation after admission.
+func (b *Budget) AdmitMessage(messageID string) bool {
+	return b.transitionMessage(
+		messageID,
+		reservationClaimed,
+		reservationAdmitted,
+	)
+}
+
+// AbortMessage records that a claimed message was dropped before queue
+// admission. The subscriber still owns and must release the reservation.
+func (b *Budget) AbortMessage(messageID string) bool {
+	return b.transitionMessage(
+		messageID,
+		reservationClaimed,
+		reservationAborted,
+	)
+}
+
+func (b *Budget) transitionMessage(messageID string, from, to uint32) bool {
 	value, ok := b.reservations.Load(messageID)
 	if !ok {
 		return false
@@ -130,10 +150,32 @@ func (b *Budget) FinishMessage(messageID string) bool {
 	if !ok {
 		return false
 	}
+	return reservation.state.CompareAndSwap(from, to)
+}
+
+// FinishMessage removes the publisher-side tracking entry after Publish
+// returns. admitted is true only after the whole message has entered the
+// consumer queue. transferred is true when the subscriber owns and must
+// release the bytes.
+func (b *Budget) FinishMessage(messageID string) (admitted, transferred bool) {
+	value, ok := b.reservations.Load(messageID)
+	if !ok {
+		return false, false
+	}
+	reservation, ok := value.(*messageReservation)
+	if !ok {
+		return false, false
+	}
 
 	publisherOwns := reservation.state.CompareAndSwap(reservationOpen, reservationFinished)
+	state := reservation.state.Load()
 	b.reservations.Delete(messageID)
-	return !publisherOwns && reservation.state.Load() == reservationClaimed
+	if publisherOwns {
+		return false, false
+	}
+	return state == reservationAdmitted, state == reservationClaimed ||
+		state == reservationAdmitted ||
+		state == reservationAborted
 }
 
 // ReserveBody reserves a known Content-Length immediately. For chunked or

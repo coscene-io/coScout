@@ -201,7 +201,7 @@ func TestDecodeRuleMessagesAccountsForPerMessageOverhead(t *testing.T) {
 	assert.Zero(t, budget.Queued())
 }
 
-func TestRulesHandlerPublishesRawMessagesInTimestampOrder(t *testing.T) {
+func TestRulesHandlerPublishesOneRawBatchInTimestampOrder(t *testing.T) {
 	t.Parallel()
 
 	pubSub := newRulesTestPubSub(t)
@@ -214,15 +214,15 @@ func TestRulesHandlerPublishesRawMessagesInTimestampOrder(t *testing.T) {
 
 	payloads := make(chan string, 3)
 	go func() {
-		for range 3 {
-			msg, ok := <-messages
-			if !ok {
-				return
-			}
+		for msg := range messages {
 			size, claimed := budget.ClaimMessage(msg.UUID)
 			if !claimed {
 				msg.Nack()
-				return
+				continue
+			}
+			if !budget.AdmitMessage(msg.UUID) {
+				msg.Nack()
+				continue
 			}
 			payloads <- string(msg.Payload)
 			budget.Release(size)
@@ -235,12 +235,13 @@ func TestRulesHandlerPublishesRawMessagesInTimestampOrder(t *testing.T) {
 	handler(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	//nolint:testifylint // Exact bytes verify that the HTTP layer does not re-marshal payloads.
-	assert.Equal(t, `{"msg":{"code":1},"topic":"/fault","ts":1}`, <-payloads)
-	//nolint:testifylint // Exact bytes verify that the HTTP layer does not re-marshal payloads.
-	assert.Equal(t, `{"msg":{"code":2},"topic":"/fault","ts":2}`, <-payloads)
-	//nolint:testifylint // Exact bytes verify that the HTTP layer does not re-marshal payloads.
-	assert.Equal(t, `{ "msg": { "code": 3 }, "topic": "/fault", "ts": 3 }`, <-payloads)
+	require.Len(t, payloads, 1)
+	//nolint:testifylint // Exact bytes verify that the HTTP layer preserves each raw element.
+	assert.Equal(
+		t,
+		`[{"msg":{"code":1},"topic":"/fault","ts":1},{"msg":{"code":2},"topic":"/fault","ts":2},{ "msg": { "code": 3 }, "topic": "/fault", "ts": 3 }]`,
+		<-payloads,
+	)
 	assert.Zero(t, budget.Queued())
 }
 
@@ -248,13 +249,45 @@ func TestRulesHandlerReleasesQueuedBytesWhenSubscriberIsUnavailable(t *testing.T
 	t.Parallel()
 
 	pubSub := newRulesTestPubSub(t)
-	body := []byte(`{"messages":[{"msg":{"code":1},"topic":"/fault","ts":1}]}`)
-	budget := queuedbytes.NewBudget(int64(len(body)) + rawRuleReservationBytes(t, body))
+	body := []byte(`{"messages":[{"msg":{"code":2},"topic":"/fault","ts":2},{"msg":{"code":1},"topic":"/fault","ts":1}]}`)
+	budget := queuedbytes.NewBudget(int64(len(body)) + rawRuleReservationsBytes(t, body))
 	handler := RulesHandler(pubSub, budget)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/ruleEngine/messages", bytes.NewReader(body))
 	handler(recorder, request)
+
+	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	assert.Zero(t, budget.Queued())
+}
+
+func TestRulesHandlerReturnsUnavailableWhenSubscriberAbortsBeforeAdmission(t *testing.T) {
+	t.Parallel()
+
+	pubSub := newRulesTestPubSub(t)
+	messages, err := pubSub.Subscribe(t.Context(), constant.TopicRuleMsg)
+	require.NoError(t, err)
+
+	body := []byte(`{"messages":[{"msg":{"code":1},"topic":"/fault","ts":1}]}`)
+	budget := queuedbytes.NewBudget(int64(len(body)) + rawRuleReservationsBytes(t, body))
+	go func() {
+		msg := <-messages
+		size, claimed := budget.ClaimMessage(msg.UUID)
+		if !claimed {
+			msg.Nack()
+			return
+		}
+		if !budget.AbortMessage(msg.UUID) {
+			msg.Nack()
+			return
+		}
+		budget.Release(size)
+		msg.Ack()
+	}()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/ruleEngine/messages", bytes.NewReader(body))
+	RulesHandler(pubSub, budget)(recorder, request)
 
 	assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	assert.Zero(t, budget.Queued())
@@ -270,7 +303,7 @@ func TestRulesHandlerKeepsBytesReservedWhilePublishIsBlocked(t *testing.T) {
 
 	firstBody := []byte(`{"messages":[{"msg":{"code":1},"topic":"/fault","ts":1}]}`)
 	secondBody := []byte(`{"messages":[{"msg":{"code":2},"topic":"/fault","ts":2}]}`)
-	firstPayloadBytes := rawRuleReservationBytes(t, firstBody)
+	firstPayloadBytes := rawRuleReservationsBytes(t, firstBody)
 	budget := queuedbytes.NewBudget(int64(len(firstBody)+len(secondBody)-1) + firstPayloadBytes)
 	handler := RulesHandler(pubSub, budget)
 
@@ -280,6 +313,10 @@ func TestRulesHandlerKeepsBytesReservedWhilePublishIsBlocked(t *testing.T) {
 		msg := <-messages
 		size, claimed := budget.ClaimMessage(msg.UUID)
 		if !claimed {
+			msg.Nack()
+			return
+		}
+		if !budget.AdmitMessage(msg.UUID) {
 			msg.Nack()
 			return
 		}
@@ -328,11 +365,15 @@ func TestRulesHandlerReleasesQueuedBytesAfterSuccessfulRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	body := []byte(`{"messages":[{"msg":{"code":1},"topic":"/fault","ts":1}]}`)
-	budget := queuedbytes.NewBudget(int64(len(body)) + rawRuleReservationBytes(t, body))
+	budget := queuedbytes.NewBudget(int64(len(body)) + rawRuleReservationsBytes(t, body))
 	go func() {
 		for msg := range messages {
 			size, claimed := budget.ClaimMessage(msg.UUID)
 			if !claimed {
+				msg.Nack()
+				continue
+			}
+			if !budget.AdmitMessage(msg.UUID) {
 				msg.Nack()
 				continue
 			}
@@ -361,13 +402,17 @@ func TestRulesHandlerTransfersPayloadReservationToSubscriber(t *testing.T) {
 	require.NoError(t, err)
 
 	body := []byte(`{"messages":[{"msg":{"code":1},"topic":"/fault","ts":1}]}`)
-	payloadBytes := rawRuleReservationBytes(t, body)
+	payloadBytes := rawRuleReservationsBytes(t, body)
 	budget := queuedbytes.NewBudget(int64(len(body)) + payloadBytes)
 	handler := RulesHandler(pubSub, budget)
 
 	go func() {
 		msg := <-messages
 		if _, claimed := budget.ClaimMessage(msg.UUID); !claimed {
+			msg.Nack()
+			return
+		}
+		if !budget.AdmitMessage(msg.UUID) {
 			msg.Nack()
 			return
 		}
@@ -385,15 +430,14 @@ func TestRulesHandlerTransfersPayloadReservationToSubscriber(t *testing.T) {
 	assert.Zero(t, budget.Queued())
 }
 
-func rawRuleReservationBytes(t *testing.T, body []byte) int64 {
+func rawRuleReservationsBytes(t *testing.T, body []byte) int64 {
 	t.Helper()
 
 	budget := queuedbytes.NewBudget(ampleRuleBudget)
 	payloads, err := decodeRuleMessages(bytes.NewReader(body), budget)
 	require.NoError(t, err)
-	require.Len(t, payloads, 1)
 	defer releaseQueuedPayloads(budget, payloads)
-	return payloads[0].reservedBytes
+	return queuedPayloadsReservedBytes(payloads)
 }
 
 func newRulesTestPubSub(t *testing.T) *gochannel.GoChannel {
