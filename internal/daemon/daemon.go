@@ -80,8 +80,29 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	if appConfig.MasterSlave.Enabled {
 		masterConfig = config.DefaultMasterConfig()
 		masterServer = master.NewServer(masterConfig.Port, masterConfig)
+		masterStartErr := make(chan error, 1)
 		go func() {
-			if err := masterServer.Start(ctx); err != nil {
+			masterStartErr <- masterServer.Start(ctx)
+		}()
+
+		select {
+		case <-masterServer.Ready():
+			log.Infof("Master server started on port %d", masterConfig.Port)
+		case err := <-masterStartErr:
+			log.Errorf("Master server failed: %v", err)
+			select {
+			case errorChan <- err:
+			default:
+				log.Warnf("Error channel is full, dropping error: %v", err)
+			}
+			return
+		case <-ctx.Done():
+			return
+		}
+
+		// Continue watching for runtime server failures after startup.
+		go func() {
+			if err := <-masterStartErr; err != nil {
 				log.Errorf("Master server failed: %v", err)
 				select {
 				case errorChan <- err:
@@ -90,7 +111,6 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 				}
 			}
 		}()
-		log.Infof("Master server started on port %d", masterConfig.Port)
 
 		// Set up FileManager for slave file handling
 		masterClient := master.NewClient(masterConfig)
