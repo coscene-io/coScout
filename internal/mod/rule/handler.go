@@ -77,8 +77,14 @@ type CustomRuleHandler struct {
 
 	// Master-slave components (optional)
 	slaveRegistry *master.SlaveRegistry
-	masterClient  *master.Client
+	masterClient  ruleSlaveFileRequester
 	masterConfig  *config.MasterConfig
+
+	cleanCollectInfo func(model.CollectInfo) string
+}
+
+type ruleSlaveFileRequester interface {
+	RequestAllSlaveFilesByContent(context.Context, *master.SlaveRegistry, *master.TaskRequest) map[string]*master.TaskResponse
 }
 
 func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error, queuedBytes *queuedbytes.Budget) *CustomRuleHandler {
@@ -106,6 +112,9 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		engine:                  Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
 		pubSub:                  pubSub,
 		queuedBytes:             queuedBytes,
+		cleanCollectInfo: func(info model.CollectInfo) string {
+			return info.Clean()
+		},
 	}
 }
 
@@ -497,11 +506,6 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 			continue
 		}
 
-		if time.Unix(collectInfo.Cut.End, 0).After(time.Now()) {
-			log.WithField("collectID", collectInfo.Id).Infof("Collect info end time is not reached, skip!")
-			continue
-		}
-
 		log.WithField("collectID", collectInfo.Id).Infof("Found collect info to handle")
 		c.handleCollectInfo(*collectInfo, *modConfig)
 	}
@@ -521,21 +525,34 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 
 	if info.Skip {
 		collectLog.Infof("skipping collect info, cleaning")
-		info.Clean()
+		c.clean(info)
 		return
 	}
 
 	if info.Cut == nil {
 		collectLog.Errorf("collect info cut is nil, cleaning")
-		info.Clean()
+		c.clean(info)
 		return
 	}
 
-	if time.Unix(info.Cut.End, 0).After(time.Now()) {
+	if err := upload.ValidateTimeWindow(info.Cut.Start, info.Cut.End); err != nil {
+		if errors.Is(err, upload.ErrTimeWindowNotReady) {
+			collectLog.WithFields(log.Fields{
+				"start": info.Cut.Start,
+				"end":   info.Cut.End,
+			}).Infof("collect info starts beyond the future tolerance and will be consumed as an empty successful scan: %v", err)
+			if cleanedPath := c.clean(info); cleanedPath == "" {
+				collectLog.Errorf("failed to clean future collect info after empty successful scan")
+			}
+			return
+		}
 		collectLog.WithFields(log.Fields{
 			"start": info.Cut.Start,
 			"end":   info.Cut.End,
-		}).Infof("collect info end time is not reached, skip")
+		}).Errorf("collect info has a permanently invalid time window, cleaning: %v", err)
+		if cleanedPath := c.clean(info); cleanedPath == "" {
+			collectLog.Errorf("failed to clean collect info with permanently invalid time window")
+		}
 		return
 	}
 
@@ -551,7 +568,11 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 	if hasBirthTime {
 		collectLog.Infof("at least one collect dir has birth time support")
 
-		uploadFiles, noPermissionFiles := upload.ComputeUploadFiles(info.Id, modConfig.CollectDirs, []string{}, info.Cut.WhiteList, modConfig.RecursivelyWalkDirs, info.Cut.Start, info.Cut.End)
+		uploadFiles, noPermissionFiles, err := upload.ComputeUploadFiles(info.Id, modConfig.CollectDirs, []string{}, info.Cut.WhiteList, modConfig.RecursivelyWalkDirs, info.Cut.Start, info.Cut.End)
+		if err != nil {
+			collectLog.Errorf("collect info scan did not run: %v", err)
+			return
+		}
 		if len(noPermissionFiles) > 0 {
 			collectLog.WithField("files", noPermissionFiles).Infof("found no permission files")
 		}
@@ -607,14 +628,22 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 		}
 
 		responses := c.masterClient.RequestAllSlaveFilesByContent(ctx, c.slaveRegistry, taskReq)
-		for slaveID, response := range responses {
-			if response != nil && response.Success {
-				collectLog.WithFields(log.Fields{
-					"slaveID": slaveID,
-					"files":   len(response.Files),
-				}).Infof("slave returned files for rule collection")
-				slaveFiles = append(slaveFiles, response.Files...)
+		switch master.TaskResponsesTimeWindowErrorCode(responses) {
+		case master.TaskErrorCodeInvalidTimeWindow:
+			collectLog.Errorf("a slave rejected the collect info time window as permanently invalid, cleaning")
+			if cleanedPath := c.clean(info); cleanedPath == "" {
+				collectLog.Errorf("failed to clean collect info rejected by slave")
 			}
+			return
+		case master.TaskErrorCodeTimeWindowNotReady:
+			collectLog.Infof("a legacy slave reported a not-ready time window; treating that response as empty and continuing with available results")
+		}
+		for slaveID, response := range successfulSlaveResponses(responses) {
+			collectLog.WithFields(log.Fields{
+				"slaveID": slaveID,
+				"files":   len(response.Files),
+			}).Infof("slave returned files for rule collection")
+			slaveFiles = append(slaveFiles, response.Files...)
 		}
 		collectLog.WithField("slaveFiles", len(slaveFiles)).Infof("total slave files collected for rule")
 	}
@@ -745,7 +774,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 		"moments":     len(rc.Moments),
 	}).Infof("saved record cache")
 
-	if cleanId := info.Clean(); cleanId == "" {
+	if cleanId := c.clean(info); cleanId == "" {
 		collectLog.WithField("recordCache", rc.GetRecordCachePath()).Errorf("clean collect info failed")
 	} else {
 		collectLog.WithFields(log.Fields{
@@ -761,6 +790,23 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 	} else {
 		collectLog.WithField("recordCache", rc.GetRecordCachePath()).Infof("published collect message")
 	}
+}
+
+func successfulSlaveResponses(responses map[string]*master.TaskResponse) map[string]*master.TaskResponse {
+	successful := make(map[string]*master.TaskResponse)
+	for slaveID, response := range responses {
+		if response != nil && response.Success {
+			successful[slaveID] = response
+		}
+	}
+	return successful
+}
+
+func (c *CustomRuleHandler) clean(info model.CollectInfo) string {
+	if c.cleanCollectInfo != nil {
+		return c.cleanCollectInfo(info)
+	}
+	return info.Clean()
 }
 
 // EnhanceRuleHandlerWithMasterSlave adds master-slave support to rule handler.

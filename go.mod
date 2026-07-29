@@ -1,6 +1,6 @@
 module github.com/coscene-io/coscout
 
-go 1.26.2
+go 1.26.5
 
 require (
 	buf.build/gen/go/coscene-io/coscene-openapi/connectrpc/go v1.19.1-20251226070313-d49f689cdc34.2

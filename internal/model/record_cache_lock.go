@@ -22,12 +22,17 @@ import (
 
 type keyedMutexRegistry struct {
 	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	locks map[string]*keyedMutex
+}
+
+type keyedMutex struct {
+	mu         sync.Mutex
+	references int
 }
 
 func newKeyedMutexRegistry() *keyedMutexRegistry {
 	return &keyedMutexRegistry{
-		locks: make(map[string]*sync.Mutex),
+		locks: make(map[string]*keyedMutex),
 	}
 }
 
@@ -40,13 +45,33 @@ func (r *keyedMutexRegistry) Lock(key string) func() {
 	r.mu.Lock()
 	lock, ok := r.locks[key]
 	if !ok {
-		lock = &sync.Mutex{}
+		lock = &keyedMutex{}
 		r.locks[key] = lock
 	}
+	lock.references++
 	r.mu.Unlock()
 
-	lock.Lock()
-	return lock.Unlock
+	lock.mu.Lock()
+
+	var releaseOnce sync.Once
+	return func() {
+		releaseOnce.Do(func() {
+			r.release(key, lock)
+		})
+	}
+}
+
+func (r *keyedMutexRegistry) release(key string, lock *keyedMutex) {
+	// Keep the registry locked until the keyed mutex is unlocked. When the last
+	// reference is removed, a new caller cannot create a replacement entry
+	// until the old mutex no longer has a holder.
+	r.mu.Lock()
+	lock.references--
+	if lock.references == 0 && r.locks[key] == lock {
+		delete(r.locks, key)
+	}
+	lock.mu.Unlock()
+	r.mu.Unlock()
 }
 
 var recordCacheFileLocks = newKeyedMutexRegistry() //nolint:gochecknoglobals // package-level singleton registry for record cache file locking

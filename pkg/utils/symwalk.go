@@ -34,7 +34,8 @@ type SymWalkOptions struct {
 	// instead of returning an error.
 	SkipPermissionErrors bool
 
-	// MaxFiles limits the maximum number of files to collect in GetAllFilePaths.
+	// MaxFiles limits the maximum number of files processed by WalkFilePaths
+	// or collected by GetAllFilePaths.
 	// When set to 0, no limit is applied. Default is 10000.
 	// This helps prevent memory issues when traversing large directory structures
 	// or when symbolic links point to root directories.
@@ -305,6 +306,37 @@ func IsSymlink(fi os.FileInfo) bool {
 	return fi.Mode()&os.ModeSymlink != 0
 }
 
+// WalkFilePaths walks the file tree rooted at root and invokes walkFn
+// immediately for every file found. It uses the same symbolic link handling,
+// permission handling, empty-file filtering, and file limit as
+// GetAllFilePaths.
+func WalkFilePaths(root string, options *SymWalkOptions, walkFn func(string) error) error {
+	if options == nil {
+		options = DefaultSymWalkOptions()
+	}
+
+	fileCount := 0
+	return SymWalk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if options.MaxFiles > 0 && fileCount >= options.MaxFiles {
+			log.Warnf("WalkFilePaths: reached maximum file limit (%d), stopping traversal at path: %s", options.MaxFiles, path)
+			return filepath.SkipDir
+		}
+
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		fileCount++
+		return walkFn(absPath)
+	}, options)
+}
+
 // GetAllFilePaths walks the file tree rooted at root and returns a slice of absolute paths
 // for all files (not directories) found. It uses the same symbolic link handling and
 // permission error handling as SymWalk. By default, empty files (size 0) are skipped
@@ -319,34 +351,10 @@ func GetAllFilePaths(root string, options *SymWalkOptions) ([]string, error) {
 	}
 
 	var filePaths []string
-
-	// Define the walk function that collects file paths
-	walkFn := func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Only collect regular files, not directories
-		if !info.IsDir() {
-			// Check if we've reached the maximum number of files
-			if options.MaxFiles > 0 && len(filePaths) >= options.MaxFiles {
-				log.Warnf("GetAllFilePaths: reached maximum file limit (%d), stopping collection at path: %s", options.MaxFiles, path)
-				return filepath.SkipDir // Stop traversal
-			}
-
-			// Convert to absolute path
-			absPath, err := filepath.Abs(path)
-			if err != nil {
-				return err
-			}
-			filePaths = append(filePaths, absPath)
-		}
-
+	err := WalkFilePaths(root, options, func(path string) error {
+		filePaths = append(filePaths, path)
 		return nil
-	}
-
-	// Walk the directory tree
-	err := SymWalk(root, walkFn, options)
+	})
 	if err != nil {
 		return nil, err
 	}

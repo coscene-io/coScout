@@ -102,6 +102,11 @@ type fileStateHandler struct {
 	handlers     []file_handlers.Interface
 }
 
+type fileStateCheckpoint struct {
+	state  FileState
+	exists bool
+}
+
 var (
 	//nolint: gochecknoglobals // singleton instances map
 	instances = make(map[string]*fileStateHandler)
@@ -258,6 +263,31 @@ func (f *fileStateHandler) getFileState(filePath string) (FileState, bool) {
 	return state, exists
 }
 
+func (f *fileStateHandler) checkpointFileState(checkpoints map[string]fileStateCheckpoint, filePath string) {
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		log.Errorf("Failed to get absolute path for %s: %v", filePath, err)
+		return
+	}
+	if _, recorded := checkpoints[absPath]; recorded {
+		return
+	}
+	state, exists := f.getFileState(absPath)
+	checkpoints[absPath] = fileStateCheckpoint{state: state, exists: exists}
+}
+
+func (f *fileStateHandler) restoreFileStates(checkpoints map[string]fileStateCheckpoint) {
+	for filePath, checkpoint := range checkpoints {
+		if checkpoint.exists {
+			f.setFileState(filePath, checkpoint.state)
+			continue
+		}
+		if err := f.delFileState(filePath); err != nil {
+			log.Errorf("Failed to roll back file state for %s: %v", filePath, err)
+		}
+	}
+}
+
 // updateDeletedFileState removes state entries for files that no longer exist.
 func (f *fileStateHandler) updateDeletedFileState() error {
 	for _, filename := range lo.Keys(f.state) {
@@ -308,34 +338,35 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 		// Check should recursively walk directories
 		//nolint: nestif // complexity is acceptable for this function
 		if conf.RecursivelyWalkDirs {
-			filePaths, err := utils.GetAllFilePaths(dir, &utils.SymWalkOptions{
+			checkpoints := make(map[string]fileStateCheckpoint)
+			err := utils.WalkFilePaths(dir, &utils.SymWalkOptions{
 				FollowSymlinks:       true,
 				SkipPermissionErrors: true,
 				SkipEmptyFiles:       true,
 				MaxFiles:             99999,
-			})
-
-			if err != nil {
-				log.Errorf("Failed to get all file paths in directory %s, skipping: %v", dir, err)
-				continue
-			}
-
-			for _, entryPath := range filePaths {
+			}, func(entryPath string) error {
 				// Check if the entry is readable
 				if !utils.CheckReadPath(entryPath) {
 					log.Warnf("Skipping file %s due to insufficient permissions", entryPath)
-					continue
+					return nil
 				}
 
 				// Get the entry info
 				d, err := os.Stat(entryPath)
 				if err != nil {
 					log.Errorf("Failed to stat file %s, skipping: %v", entryPath, err)
-					continue
+					return nil
 				}
 
 				// Process the file
+				f.checkpointFileState(checkpoints, entryPath)
 				f.processListenFile(entryPath, d, conf.SkipPeriodHours)
+				return nil
+			})
+			if err != nil {
+				f.restoreFileStates(checkpoints)
+				log.Errorf("Failed to walk files in directory %s, skipping: %v", dir, err)
+				continue
 			}
 		} else {
 			entries, err := os.ReadDir(dir)
@@ -434,39 +465,43 @@ func (f *fileStateHandler) UpdateCollectDirs(whitelist []string, conf config.Def
 		// Check should recursively walk directories
 		//nolint: nestif // complexity is acceptable for this function
 		if conf.RecursivelyWalkDirs {
-			filePaths, err := utils.GetAllFilePaths(dir, &utils.SymWalkOptions{
+			checkpoints := make(map[string]fileStateCheckpoint)
+			err := utils.WalkFilePaths(dir, &utils.SymWalkOptions{
 				FollowSymlinks:       true,
 				SkipPermissionErrors: true,
 				SkipEmptyFiles:       true,
 				MaxFiles:             99999,
-			})
-
-			if err != nil {
-				log.Errorf("Failed to get all file paths in directory %s, skipping: %v", dir, err)
-				continue
-			}
-
-			for _, entryPath := range filePaths {
+			}, func(entryPath string) error {
 				// Check whitelist before processing (saves expensive file operations)
 				if !matchesWhitelist(entryPath) {
-					continue
+					return nil
 				}
 
 				// Check if the entry is readable
 				if !utils.CheckReadPath(entryPath) {
 					log.Warnf("Skipping file %s due to insufficient permissions", entryPath)
-					return nil
+					return filepath.SkipAll
 				}
 
 				// Get the entry info
 				d, err := os.Stat(entryPath)
 				if err != nil {
 					log.Errorf("Failed to stat file %s, skipping: %v", entryPath, err)
-					continue
+					return nil
 				}
 
 				// Process the file
+				f.checkpointFileState(checkpoints, entryPath)
 				f.processCollectFile(entryPath, d)
+				return nil
+			})
+			if errors.Is(err, filepath.SkipAll) {
+				return nil
+			}
+			if err != nil {
+				f.restoreFileStates(checkpoints)
+				log.Errorf("Failed to walk files in directory %s, skipping: %v", dir, err)
+				continue
 			}
 		} else {
 			entries, err := os.ReadDir(dir)
