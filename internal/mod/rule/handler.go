@@ -535,17 +535,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 		return
 	}
 
-	if err := upload.ValidateTimeWindow(info.Cut.Start, info.Cut.End); err != nil {
-		if errors.Is(err, upload.ErrTimeWindowNotReady) {
-			collectLog.WithFields(log.Fields{
-				"start": info.Cut.Start,
-				"end":   info.Cut.End,
-			}).Infof("collect info starts beyond the future tolerance and will be consumed as an empty successful scan: %v", err)
-			if cleanedPath := c.clean(info); cleanedPath == "" {
-				collectLog.Errorf("failed to clean future collect info after empty successful scan")
-			}
-			return
-		}
+	if err := upload.ValidateTimeWindow(info.Cut.Start, info.Cut.End); errors.Is(err, upload.ErrInvalidTimeWindow) {
 		collectLog.WithFields(log.Fields{
 			"start": info.Cut.Start,
 			"end":   info.Cut.End,
@@ -553,6 +543,14 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 		if cleanedPath := c.clean(info); cleanedPath == "" {
 			collectLog.Errorf("failed to clean collect info with permanently invalid time window")
 		}
+		return
+	}
+
+	if time.Unix(info.Cut.End, 0).After(time.Now()) {
+		collectLog.WithFields(log.Fields{
+			"start": info.Cut.Start,
+			"end":   info.Cut.End,
+		}).Info("collect info end time has not been reached, waiting for the complete collection window")
 		return
 	}
 
