@@ -959,8 +959,9 @@ func uploadSlaveFile(ctx context.Context, reqClient *api.RequestClient, appConfi
 	if err != nil {
 		log.Warnf("Failed to get actual file size for %s: %v", localCachePath, err)
 	} else {
+		previousSize := fileInfo.Size
 		fileInfo.Size = actualSize
-		log.Infof("Updated file size from %d to %d for %s", fileInfo.Size, actualSize, localCachePath)
+		log.Infof("Updated file size from %d to %d for %s", previousSize, actualSize, localCachePath)
 	}
 
 	// Continue with standard upload logic
@@ -1031,18 +1032,10 @@ func downloadSlaveFileToLocal(parentCtx context.Context, fileManager *master.Fil
 	// Copy complete content to local file (no size limit)
 	bytesCopied, err := io.Copy(localFile, reader)
 	if err != nil {
-		// Clean up on error
-		err := os.Remove(localPath)
-		if err != nil {
-			return err
+		if removeErr := os.Remove(localPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			return errors.Wrapf(err, "failed to copy slave file content and remove incomplete cache file: %v", removeErr)
 		}
 		return errors.Wrap(err, "failed to copy slave file content")
-	}
-	if fileInfo.Size > 0 && bytesCopied != fileInfo.Size {
-		if err := os.Remove(localPath); err != nil && !os.IsNotExist(err) {
-			log.Warnf("failed to remove incomplete slave cache file %s: %v", localPath, err)
-		}
-		return errors.Errorf("slave file size mismatch after download: path=%s copied=%d expected=%d", fileInfo.Path, bytesCopied, fileInfo.Size)
 	}
 
 	log.Infof("Successfully downloaded slave file to local cache: %s (copied %d bytes)", localPath, bytesCopied)
