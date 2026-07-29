@@ -16,6 +16,7 @@ package file_handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -166,7 +167,12 @@ func getStartTimeEndTimeForUncompletedMcap(filePath string) (*time.Time, *time.T
 	return &start, &end, nil
 }
 
-func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
+func (h *mcapHandler) SendRuleItems(
+	ctx context.Context,
+	filepath string,
+	activeTopics mapset.Set[string],
+	ruleItemChan chan<- rule_engine.RuleItem,
+) {
 	file, err := os.Open(filepath)
 	if err != nil {
 		log.Errorf("failed to open MCAP file [%s]: %v", filepath, err)
@@ -219,6 +225,10 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 	errTopics := map[string]struct{}{}
 
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+
 		schema, channel, message, err := iter.NextInto(msg)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -357,11 +367,13 @@ func (h *mcapHandler) SendRuleItems(filepath string, activeTopics mapset.Set[str
 			}
 		}
 
-		ruleItemChan <- rule_engine.RuleItem{
+		if !sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
 			Msg:    decoded,
 			Ts:     utils.FloatSecFromTime(utils.TimeFromFloat(float64(msg.PublishTime))),
 			Topic:  channel.Topic,
 			Source: filepath,
+		}) {
+			return
 		}
 	}
 }

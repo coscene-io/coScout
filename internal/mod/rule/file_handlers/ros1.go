@@ -16,6 +16,7 @@ package file_handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -82,7 +83,12 @@ func (h *ros1Handler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Ti
 	return &start, &end, nil
 }
 
-func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
+func (h *ros1Handler) SendRuleItems(
+	ctx context.Context,
+	filePath string,
+	activeTopics mapset.Set[string],
+	ruleItemChan chan<- rule_engine.RuleItem,
+) {
 	reader, err := os.Open(filePath)
 	if err != nil {
 		log.Errorf("failed to open ros1 file [%s]: %v", filePath, err)
@@ -135,6 +141,10 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 
 	// Read messages
 	for it.More() {
+		if ctx.Err() != nil {
+			return
+		}
+
 		conn, msg, err := it.Next()
 		if err != nil {
 			log.Errorf("failed to read message: %v", err)
@@ -182,11 +192,13 @@ func (h *ros1Handler) SendRuleItems(filePath string, activeTopics mapset.Set[str
 
 		sec, nsec := utils.NormalizeFloatTimestamp(float64(msg.Time))
 		// Send JSON message through channel
-		ruleItemChan <- rule_engine.RuleItem{
+		if !sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
 			Msg:    structuredData,
 			Ts:     float64(sec) + float64(nsec)/1e9,
 			Topic:  conn.Topic,
 			Source: filePath,
+		}) {
+			return
 		}
 	}
 	log.Infof("finished sending rule items for ros1 file %s", filePath)

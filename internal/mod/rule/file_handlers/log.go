@@ -15,6 +15,7 @@
 package file_handlers
 
 import (
+	"context"
 	"os"
 	"strings"
 	"time"
@@ -75,7 +76,12 @@ func (h *logHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Tim
 	return startTime, endTime, nil
 }
 
-func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem) {
+func (h *logHandler) SendRuleItems(
+	ctx context.Context,
+	filePath string,
+	activeTopics mapset.Set[string],
+	ruleItemChan chan<- rule_engine.RuleItem,
+) {
 	if activeTopics.Cardinality() > 0 && !activeTopics.Contains("/external_log") {
 		return
 	}
@@ -100,6 +106,10 @@ func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[stri
 	}
 
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+
 		stampedLog, hasNext := iter.Next()
 		if !hasNext {
 			log.Infof("finished sending rule items for log file %s", filePath)
@@ -110,7 +120,7 @@ func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[stri
 		nsec := stampedLog.Timestamp.Nanosecond()
 		tsFloat := float64(sec) + float64(nsec)/1e9
 
-		ruleItemChan <- rule_engine.RuleItem{
+		if !sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
 			Msg: map[string]interface{}{
 				"timestamp": map[string]interface{}{
 					"sec":  sec,
@@ -123,6 +133,8 @@ func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[stri
 			Topic:  "/external_log",
 			Ts:     tsFloat,
 			Source: filePath,
+		}) {
+			return
 		}
 	}
 }

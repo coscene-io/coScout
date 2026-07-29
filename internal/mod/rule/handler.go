@@ -147,7 +147,11 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 				apiRules, err := c.reqClient.ListDeviceDiagnosisRules(device.GetName())
 				if err != nil {
 					log.Errorf("list device diagnosis rules: %v", err)
-					c.errChan <- errors.Errorf("list device diagnosis rules: %v", err)
+					select {
+					case c.errChan <- errors.Errorf("list device diagnosis rules: %v", err):
+					case <-ctx.Done():
+						return
+					}
 					continue
 				}
 				log.Infof("received rules: %d", len(apiRules))
@@ -190,7 +194,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				listenTicker.Reset(config.RuleCheckListenFilesInterval)
 
-				c.sendFilesToBeProcessed(modConfig)
+				c.sendFilesToBeProcessed(ctx, modConfig)
 			case <-ctx.Done():
 				return
 			}
@@ -222,8 +226,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				t.Reset(config.RuleScanCollectInfosInterval)
 
-				//nolint: contextcheck// context is checked in the parent goroutine
-				c.scanCollectInfosAndHandle(modConfig)
+				c.scanCollectInfosAndHandle(ctx, modConfig)
 			case <-ctx.Done():
 				log.Infof("collect info handler stopped")
 				return
@@ -241,7 +244,10 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 	messages, err := c.pubSub.Subscribe(ctx, constant.TopicRuleMsg)
 	if err != nil {
 		log.Errorf("subscribe to rule message: %v", err)
-		c.errChan <- errors.Wrap(err, "subscribe to rule message")
+		select {
+		case c.errChan <- errors.Wrap(err, "subscribe to rule message"):
+		case <-ctx.Done():
+		}
 		return
 	}
 
@@ -274,7 +280,10 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 	}
 }
 
-func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) sendFilesToBeProcessed(
+	ctx context.Context,
+	modConfig *config.DefaultModConfConfig,
+) {
 	if len(modConfig.ListenDirs) == 0 {
 		return
 	}
@@ -293,11 +302,16 @@ func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModC
 		file_state_handler.FilterIsListening(),
 		file_state_handler.FilterReadyToProcess(),
 	) {
+		select {
+		case c.listenChan <- fileState.Pathname:
+		case <-ctx.Done():
+			return
+		}
+
 		err := c.listenFileStateHandler.MarkProcessedFile(fileState.Pathname)
 		if err != nil {
 			log.Errorf("mark processed file: %v", err)
 		}
-		c.listenChan <- fileState.Pathname
 	}
 }
 
@@ -317,14 +331,19 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 				return
 			}
 
-			semaphore <- struct{}{}
+			select {
+			case semaphore <- struct{}{}:
+			case <-ctx.Done():
+				wg.Wait()
+				return
+			}
 
 			wg.Add(1)
 			go func(filename string) {
 				defer wg.Done()
 				defer func() { <-semaphore }() // release the semaphore
 
-				c.processFileWithRule(filename)
+				c.processFileWithRule(ctx, filename)
 				log.Infof("Finished processing file: %v", filename)
 			}(fileToProcess)
 		case <-ctx.Done():
@@ -335,6 +354,7 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 }
 
 func (c *CustomRuleHandler) processFileWithRule(
+	ctx context.Context,
 	filename string,
 ) {
 	log.Infof("RuleEngine exec file: %v", filename)
@@ -345,11 +365,14 @@ func (c *CustomRuleHandler) processFileWithRule(
 		return
 	}
 
-	handler.SendRuleItems(filename, c.engine.activeTopicSet(), c.ruleItemChan)
+	handler.SendRuleItems(ctx, filename, c.engine.activeTopicSet(), c.ruleItemChan)
 }
 
 // scanCollectInfosAndHandle handles all collect info files within the collect info dir.
-func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) scanCollectInfosAndHandle(
+	ctx context.Context,
+	modConfig *config.DefaultModConfConfig,
+) {
 	log.Infof("Starts to scan collect info dir")
 
 	// Search for files under the collect info dir and handles them
@@ -357,7 +380,10 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 	entries, err := os.ReadDir(collectInfoDir)
 	if err != nil {
 		log.Errorf("read collect info dir: %v", err)
-		c.errChan <- errors.Wrap(err, "read collect info dir")
+		select {
+		case c.errChan <- errors.Wrap(err, "read collect info dir"):
+		case <-ctx.Done():
+		}
 		return
 	}
 
@@ -378,10 +404,18 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 
 	log.Infof("Found %d collect info files", len(collectInfoIds))
 	for _, collectInfoId := range collectInfoIds {
+		if ctx.Err() != nil {
+			return
+		}
+
 		collectInfo := &model.CollectInfo{}
 		if err := collectInfo.Load(collectInfoId); err != nil {
 			log.Errorf("load collect info: %v", err)
-			c.errChan <- errors.Wrap(err, "load collect info")
+			select {
+			case c.errChan <- errors.Wrap(err, "load collect info"):
+			case <-ctx.Done():
+				return
+			}
 			continue
 		}
 

@@ -15,6 +15,7 @@
 package file_handlers
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -37,7 +38,25 @@ type Interface interface {
 	IsFinished(filePath string) bool
 
 	// SendRuleItems sends rule items to the rule engine.
-	SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem)
+	SendRuleItems(
+		ctx context.Context,
+		filePath string,
+		activeTopics mapset.Set[string],
+		ruleItemChan chan<- rule_engine.RuleItem,
+	)
+}
+
+func sendRuleItem(
+	ctx context.Context,
+	ruleItemChan chan<- rule_engine.RuleItem,
+	item rule_engine.RuleItem,
+) bool {
+	select {
+	case ruleItemChan <- item:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // defaultGetFileSize provides default implementations for some methods.

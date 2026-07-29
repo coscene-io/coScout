@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,9 @@ import (
 	"github.com/coscene-io/coscout/internal/mod/rule/file_handlers"
 	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/pkg/rule_engine"
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
@@ -185,4 +189,145 @@ func (*recordingRuleFileStateHandler) MarkProcessedFile(string) error {
 
 func (*recordingRuleFileStateHandler) GetFileHandler(string) file_handlers.Interface {
 	return nil
+}
+
+type fakeFileStateHandler struct {
+	files       []file_state_handler.FileState
+	fileHandler file_handlers.Interface
+
+	mu            sync.Mutex
+	processedFile []string
+}
+
+func (f *fakeFileStateHandler) UpdateListenDirs(config.DefaultModConfConfig) error {
+	return nil
+}
+
+func (f *fakeFileStateHandler) UpdateCollectDirs([]string, config.DefaultModConfConfig) error {
+	return nil
+}
+
+func (f *fakeFileStateHandler) Files(...file_state_handler.FileFilter) []file_state_handler.FileState {
+	return f.files
+}
+
+func (f *fakeFileStateHandler) UpdateFilesProcessState() error {
+	return nil
+}
+
+func (f *fakeFileStateHandler) MarkProcessedFile(filename string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.processedFile = append(f.processedFile, filename)
+	return nil
+}
+
+func (f *fakeFileStateHandler) GetFileHandler(string) file_handlers.Interface {
+	return f.fileHandler
+}
+
+func (f *fakeFileStateHandler) processedCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.processedFile)
+}
+
+type cancellationBlockingHandler struct {
+}
+
+func (h *cancellationBlockingHandler) CheckFilePath(string) bool {
+	return true
+}
+
+func (h *cancellationBlockingHandler) GetStartTimeEndTime(string) (*time.Time, *time.Time, error) {
+	return nil, nil, nil
+}
+
+func (h *cancellationBlockingHandler) GetFileSize(string) (int64, error) {
+	return 0, nil
+}
+
+func (h *cancellationBlockingHandler) IsFinished(string) bool {
+	return true
+}
+
+func (h *cancellationBlockingHandler) SendRuleItems(
+	ctx context.Context,
+	_ string,
+	_ mapset.Set[string],
+	_ chan<- rule_engine.RuleItem,
+) {
+	<-ctx.Done()
+}
+
+func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T) {
+	stateHandler := &fakeFileStateHandler{
+		files: []file_state_handler.FileState{{Pathname: "pending.log"}},
+	}
+	listenChan := make(chan string, 1)
+	listenChan <- "already-queued.log"
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             listenChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	listenDir := t.TempDir()
+
+	go func() {
+		defer close(done)
+		handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
+			ListenDirs: []string{listenDir},
+		})
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("sendFilesToBeProcessed returned before the full channel was cancelled")
+	case <-time.After(50 * time.Millisecond):
+	}
+	require.Zero(t, stateHandler.processedCount())
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.Zero(t, stateHandler.processedCount())
+}
+
+func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
+	stateHandler := &fakeFileStateHandler{
+		fileHandler: &cancellationBlockingHandler{},
+	}
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             make(chan string, 2),
+		ruleItemChan:           make(chan rule_engine.RuleItem),
+	}
+	handler.listenChan <- "first.log"
+	handler.listenChan <- "second.log"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.processListenedFilesAndSendMessages(ctx, 1)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 }
