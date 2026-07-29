@@ -129,6 +129,10 @@ func (s *Server) handleFileScan(w http.ResponseWriter, r *http.Request) {
 		Success: err == nil,
 	}
 	if err != nil {
+		log.WithFields(log.Fields{
+			"taskName": req.TaskID,
+			"scanMode": "modification_time",
+		}).WithError(err).Error("Slave file scan failed")
 		resp.ErrorCode = scanErrorCode(err)
 		resp.Error = err.Error()
 	}
@@ -179,6 +183,14 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+	}
+
+	writeDeadline := time.Now().Add(config.DefaultFileTransferTimeout)
+	if err := http.NewResponseController(w).SetWriteDeadline(writeDeadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		log.WithFields(log.Fields{
+			"file":    realPath,
+			"timeout": config.DefaultFileTransferTimeout,
+		}).WithError(err).Warn("Failed to extend slave file download write deadline")
 	}
 
 	file, err := os.Open(realPath)
@@ -247,6 +259,10 @@ func (s *Server) handleFileScanByContent(w http.ResponseWriter, r *http.Request)
 		Success: err == nil,
 	}
 	if err != nil {
+		log.WithFields(log.Fields{
+			"taskName": req.TaskID,
+			"scanMode": "content_time",
+		}).WithError(err).Error("Slave file scan failed")
 		resp.ErrorCode = scanErrorCode(err)
 		resp.Error = err.Error()
 	}
@@ -289,8 +305,7 @@ func (s *Server) scanFilesByContent(taskID string, scanFolders []string, additio
 		log.WithField("taskName", taskID).Infof("os does not support birth time, will use modification time for content time filtering")
 
 		if s.collectFileStateHandler == nil {
-			log.WithField("taskName", taskID).Errorf("collect file state handler is nil")
-			return result, nil
+			return result, errors.New("collect file state handler is unavailable")
 		}
 
 		// Update cache via file_state_handler using provided scan folders
@@ -299,8 +314,7 @@ func (s *Server) scanFilesByContent(taskID string, scanFolders []string, additio
 			RecursivelyWalkDirs: recursivelyWalkDirs,
 		}
 		if err := s.collectFileStateHandler.UpdateCollectDirs(whiteList, conf); err != nil {
-			log.Errorf("file state handler update collect dirs: %v", err)
-			return result, nil
+			return result, errors.Wrap(err, "update collect directories in file state handler")
 		}
 
 		// Build filters: collecting + time overlap
@@ -383,6 +397,6 @@ func scanErrorCode(err error) string {
 	case errors.Is(err, upload.ErrTimeWindowNotReady):
 		return master.TaskErrorCodeTimeWindowNotReady
 	default:
-		return ""
+		return master.TaskErrorCodeInternal
 	}
 }

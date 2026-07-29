@@ -18,6 +18,8 @@ import (
 	"time"
 )
 
+const DefaultFileTransferTimeout = 30 * time.Minute
+
 // SlaveConfig slave configuration.
 type SlaveConfig struct {
 	ID                string        `yaml:"id"`                 // Unique slave ID (auto-generated)
