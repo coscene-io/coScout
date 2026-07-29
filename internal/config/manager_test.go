@@ -26,6 +26,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var (
+	errReloadUnexpectedlySucceeded = errors.New("reload unexpectedly succeeded")
+	errReloadMissingLastKnownGood  = errors.New("reload returned no last-known-good config")
+	errReloadPortMismatch          = errors.New("reload port mismatch")
+	errStorageUnavailable          = errors.New("storage unavailable")
+)
+
 type configTestStorage struct {
 	mu     sync.RWMutex
 	value  []byte
@@ -78,6 +85,8 @@ func (s *configTestStorage) setGetError(err error) {
 }
 
 func TestLoadOnceReturnsInvalidYAMLError(t *testing.T) {
+	t.Parallel()
+
 	configPath := filepath.Join(t.TempDir(), "cos.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("http_server: ["), 0o600))
 
@@ -88,6 +97,8 @@ func TestLoadOnceReturnsInvalidYAMLError(t *testing.T) {
 }
 
 func TestLoadWithRemoteReturnsLastKnownGoodOnReloadFailure(t *testing.T) {
+	t.Parallel()
+
 	configPath := filepath.Join(t.TempDir(), "cos.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("http_server:\n  port: 12345\n"), 0o600))
 
@@ -106,6 +117,8 @@ func TestLoadWithRemoteReturnsLastKnownGoodOnReloadFailure(t *testing.T) {
 }
 
 func TestLoadWithRemoteLastKnownGoodIsConcurrentSafe(t *testing.T) {
+	t.Parallel()
+
 	configPath := filepath.Join(t.TempDir(), "cos.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("http_server:\n  port: 12345\n"), 0o600))
 
@@ -126,15 +139,15 @@ func TestLoadWithRemoteLastKnownGoodIsConcurrentSafe(t *testing.T) {
 			defer wg.Done()
 			reloaded, loadErr := manager.LoadWithRemote()
 			if loadErr == nil {
-				results <- fmt.Errorf("reload unexpectedly succeeded")
+				results <- errReloadUnexpectedlySucceeded
 				return
 			}
 			if reloaded == nil {
-				results <- fmt.Errorf("reload returned no last-known-good config")
+				results <- errReloadMissingLastKnownGood
 				return
 			}
 			if reloaded.HttpServer.Port != 12345 {
-				results <- fmt.Errorf("reload port = %d, want 12345", reloaded.HttpServer.Port)
+				results <- fmt.Errorf("%w: got %d, want 12345", errReloadPortMismatch, reloaded.HttpServer.Port)
 				return
 			}
 			results <- nil
@@ -148,6 +161,8 @@ func TestLoadWithRemoteLastKnownGoodIsConcurrentSafe(t *testing.T) {
 }
 
 func TestLoadWithRemoteRejectsInvalidImportedConfig(t *testing.T) {
+	t.Parallel()
+
 	configDir := t.TempDir()
 	importPath := filepath.Join(configDir, "import.yaml")
 	configPath := filepath.Join(configDir, "cos.yaml")
@@ -172,6 +187,8 @@ func TestLoadWithRemoteRejectsInvalidImportedConfig(t *testing.T) {
 }
 
 func TestLoadWithRemoteRejectsInvalidRemoteConfig(t *testing.T) {
+	t.Parallel()
+
 	configPath := filepath.Join(t.TempDir(), "cos.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("__import__:\n  - cos://remote\n"), 0o600))
 
@@ -192,6 +209,8 @@ func TestLoadWithRemoteRejectsInvalidRemoteConfig(t *testing.T) {
 }
 
 func TestLoadWithRemoteDoesNotReplaceLastKnownGoodWhenRemoteIsUnavailable(t *testing.T) {
+	t.Parallel()
+
 	configPath := filepath.Join(t.TempDir(), "cos.yaml")
 	require.NoError(t, os.WriteFile(configPath, []byte("__import__:\n  - cos://remote\n"), 0o600))
 
@@ -202,7 +221,7 @@ func TestLoadWithRemoteDoesNotReplaceLastKnownGoodWhenRemoteIsUnavailable(t *tes
 		{
 			name: "read error",
 			update: func(backend *configTestStorage) {
-				backend.setGetError(errors.New("storage unavailable"))
+				backend.setGetError(errStorageUnavailable)
 			},
 		},
 		{
@@ -215,6 +234,8 @@ func TestLoadWithRemoteDoesNotReplaceLastKnownGoodWhenRemoteIsUnavailable(t *tes
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			backend := &configTestStorage{value: []byte(`{"http_server":{"port":34567}}`)}
 			var store storage.Storage = backend
 			manager := InitConfManager(configPath, &store)
@@ -234,6 +255,8 @@ func TestLoadWithRemoteDoesNotReplaceLastKnownGoodWhenRemoteIsUnavailable(t *tes
 }
 
 func TestLoadWithRemoteDoesNotReplaceLastKnownGoodWhenLocalImportIsMissing(t *testing.T) {
+	t.Parallel()
+
 	configDir := t.TempDir()
 	importPath := filepath.Join(configDir, "import.yaml")
 	configPath := filepath.Join(configDir, "cos.yaml")
@@ -258,6 +281,8 @@ func TestLoadWithRemoteDoesNotReplaceLastKnownGoodWhenLocalImportIsMissing(t *te
 }
 
 func TestLoadStartupSeedsFallbackBeforeRemoteConfigIsAvailable(t *testing.T) {
+	t.Parallel()
+
 	configPath := filepath.Join(t.TempDir(), "cos.yaml")
 	require.NoError(t, os.WriteFile(
 		configPath,

@@ -31,6 +31,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var errTestReadFailed = errors.New("read failed")
+
 func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 	t.Parallel()
 
@@ -101,7 +103,7 @@ func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 				},
 			}
 
-			handler.handleCollectInfo(info, config.DefaultModConfConfig{})
+			handler.handleCollectInfo(t.Context(), info, config.DefaultModConfConfig{})
 
 			if cleaned != tc.wantClean {
 				t.Fatalf("cleaned = %v, want %v", cleaned, tc.wantClean)
@@ -336,6 +338,8 @@ func (h *itemProducingFileHandler) SendRuleItems(
 }
 
 func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T) {
+	t.Parallel()
+
 	stateHandler := &fakeFileStateHandler{
 		files: []file_state_handler.FileState{{Pathname: "pending.log"}},
 	}
@@ -345,7 +349,7 @@ func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T)
 		listenFileStateHandler: stateHandler,
 		listenChan:             listenChan,
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan struct{})
 	listenDir := t.TempDir()
@@ -378,6 +382,8 @@ func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T)
 }
 
 func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
+	t.Parallel()
+
 	stateHandler := &fakeFileStateHandler{
 		fileHandler: &cancellationBlockingHandler{},
 	}
@@ -389,7 +395,7 @@ func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
 	handler.listenChan <- "first.log"
 	handler.listenChan <- "second.log"
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
@@ -411,6 +417,8 @@ func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
 }
 
 func TestCancelledFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
+	t.Parallel()
+
 	started := make(chan struct{}, 1)
 	stateHandler := &fakeFileStateHandler{
 		files:       []file_state_handler.FileState{{Pathname: "pending.log"}},
@@ -421,7 +429,7 @@ func TestCancelledFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 		listenChan:             make(chan string, 1),
 		ruleItemChan:           make(chan ruleItemEnvelope),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
 		ListenDirs: []string{t.TempDir()},
@@ -457,6 +465,8 @@ func TestCancelledFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 }
 
 func TestCompletedFileProcessingMarksFileProcessed(t *testing.T) {
+	t.Parallel()
+
 	stateHandler := &fakeFileStateHandler{
 		files:       []file_state_handler.FileState{{Pathname: "completed.log"}},
 		fileHandler: &resultFileHandler{},
@@ -466,7 +476,7 @@ func TestCompletedFileProcessingMarksFileProcessed(t *testing.T) {
 		listenChan:             make(chan string, 1),
 		ruleItemChan:           make(chan ruleItemEnvelope),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
 		ListenDirs: []string{t.TempDir()},
@@ -495,10 +505,12 @@ func TestCompletedFileProcessingMarksFileProcessed(t *testing.T) {
 }
 
 func TestFailedFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
+	t.Parallel()
+
 	stateHandler := &fakeFileStateHandler{
 		files: []file_state_handler.FileState{{Pathname: "failed.log"}},
 		fileHandler: &resultFileHandler{
-			err: errors.New("read failed"),
+			err: errTestReadFailed,
 		},
 	}
 	handler := &CustomRuleHandler{
@@ -506,7 +518,7 @@ func TestFailedFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 		listenChan:             make(chan string, 1),
 		ruleItemChan:           make(chan ruleItemEnvelope),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
 		ListenDirs: []string{t.TempDir()},
@@ -535,6 +547,8 @@ func TestFailedFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 }
 
 func TestSendFilesToBeProcessedDoesNotEnqueueInFlightFileTwice(t *testing.T) {
+	t.Parallel()
+
 	stateHandler := &fakeFileStateHandler{
 		files: []file_state_handler.FileState{{Pathname: "pending.log"}},
 	}
@@ -542,7 +556,7 @@ func TestSendFilesToBeProcessedDoesNotEnqueueInFlightFileTwice(t *testing.T) {
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 2),
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	modConfig := &config.DefaultModConfConfig{
 		ListenDirs: []string{t.TempDir()},
 	}
@@ -556,6 +570,8 @@ func TestSendFilesToBeProcessedDoesNotEnqueueInFlightFileTwice(t *testing.T) {
 }
 
 func TestProducedRuleItemWithoutConsumerAckIsNotMarkedProcessedOnCancel(t *testing.T) {
+	t.Parallel()
+
 	produced := make(chan struct{})
 	stateHandler := &fakeFileStateHandler{
 		files: []file_state_handler.FileState{{Pathname: "pending-ack.log"}},
@@ -568,7 +584,7 @@ func TestProducedRuleItemWithoutConsumerAckIsNotMarkedProcessedOnCancel(t *testi
 		listenChan:             make(chan string, 1),
 		ruleItemChan:           make(chan ruleItemEnvelope, 1),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
 		ListenDirs: []string{t.TempDir()},
@@ -610,6 +626,8 @@ func TestProducedRuleItemWithoutConsumerAckIsNotMarkedProcessedOnCancel(t *testi
 }
 
 func TestProducedRuleItemIsMarkedProcessedOnlyAfterConsumerAck(t *testing.T) {
+	t.Parallel()
+
 	stateHandler := &fakeFileStateHandler{
 		files:       []file_state_handler.FileState{{Pathname: "acked.log"}},
 		fileHandler: &itemProducingFileHandler{},
@@ -619,7 +637,7 @@ func TestProducedRuleItemIsMarkedProcessedOnlyAfterConsumerAck(t *testing.T) {
 		listenChan:             make(chan string, 1),
 		ruleItemChan:           make(chan ruleItemEnvelope, 1),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
 		ListenDirs: []string{t.TempDir()},

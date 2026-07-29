@@ -94,23 +94,38 @@ func run(confManager *config.ConfManager, reqClient *api.RequestClient, register
 	state := &authState{}
 	for deviceStatus := range registerChan {
 		if deviceStatus.Authorized {
-			log.Info("Device is authorized. Performing actions...")
-
-			if state.tryStart() {
-				startChan <- true
-				go func() {
-					defer state.daemonStopped()
-					if err := daemon.Run(confManager, reqClient, startChan, exitChan, errorChan); err != nil {
-						log.Errorf("Daemon stopped: %v", err)
-					}
-				}()
-			}
-		} else {
-			log.Warn("Device is not authorized, waiting...")
-
-			if state.requestStop() {
-				exitChan <- true
-			}
+			startDaemon(state, confManager, reqClient, startChan, exitChan, errorChan)
+			continue
 		}
+
+		stopDaemon(state, exitChan)
+	}
+}
+
+func startDaemon(
+	state *authState,
+	confManager *config.ConfManager,
+	reqClient *api.RequestClient,
+	startChan, exitChan chan bool,
+	errorChan chan error,
+) {
+	log.Info("Device is authorized. Performing actions...")
+	if !state.tryStart() {
+		return
+	}
+
+	startChan <- true
+	go func() {
+		defer state.daemonStopped()
+		if err := daemon.Run(confManager, reqClient, startChan, exitChan, errorChan); err != nil {
+			log.Errorf("Daemon stopped: %v", err)
+		}
+	}()
+}
+
+func stopDaemon(state *authState, exitChan chan bool) {
+	log.Warn("Device is not authorized, waiting...")
+	if state.requestStop() {
+		exitChan <- true
 	}
 }

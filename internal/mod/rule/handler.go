@@ -523,13 +523,17 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(
 		}
 
 		log.WithField("collectID", collectInfo.Id).Infof("Found collect info to handle")
-		c.handleCollectInfo(*collectInfo, *modConfig)
+		c.handleCollectInfo(ctx, *collectInfo, *modConfig)
 	}
 	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
 }
 
 // handleCollectInfo handles a single the collect info.
-func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) handleCollectInfo(
+	ctx context.Context,
+	info model.CollectInfo,
+	modConfig config.DefaultModConfConfig,
+) {
 	ruleName, _ := info.DiagnosisTask["rule_name"].(string)
 	ruleDisplayName, _ := info.DiagnosisTask["rule_display_name"].(string)
 	collectLog := log.WithFields(log.Fields{
@@ -630,7 +634,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 	// Get slave files if master-slave is enabled
 	var slaveFiles []master.SlaveFileInfo
 	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
+		requestCtx, cancel := context.WithTimeout(ctx, c.masterConfig.RequestTimeout)
 		defer cancel()
 
 		taskReq := &master.TaskRequest{
@@ -643,7 +647,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 			RecursivelyWalkDirs: modConfig.RecursivelyWalkDirs,
 		}
 
-		responses := c.masterClient.RequestAllSlaveFilesByContent(ctx, c.slaveRegistry, taskReq)
+		responses := c.masterClient.RequestAllSlaveFilesByContent(requestCtx, c.slaveRegistry, taskReq)
 		switch master.TaskResponsesTimeWindowErrorCode(responses) {
 		case master.TaskErrorCodeInvalidTimeWindow:
 			collectLog.Errorf("a slave rejected the collect info time window as permanently invalid, cleaning")

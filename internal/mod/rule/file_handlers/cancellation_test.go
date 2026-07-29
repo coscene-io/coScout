@@ -27,6 +27,8 @@ import (
 )
 
 func TestLogHandlerCancellationUnblocksFullRuleItemChannel(t *testing.T) {
+	t.Parallel()
+
 	logPath := filepath.Join(t.TempDir(), "application.log")
 	require.NoError(t, os.WriteFile(
 		logPath,
@@ -35,7 +37,7 @@ func TestLogHandlerCancellationUnblocksFullRuleItemChannel(t *testing.T) {
 	))
 
 	ruleItems := make(chan rule_engine.RuleItem)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan struct{})
 	result := make(chan error, 1)
@@ -73,6 +75,8 @@ func TestLogHandlerCancellationUnblocksFullRuleItemChannel(t *testing.T) {
 }
 
 func TestHandlersReturnErrorsForUnreadableFiles(t *testing.T) {
+	t.Parallel()
+
 	missingPath := filepath.Join(t.TempDir(), "missing")
 	ruleItems := make(chan rule_engine.RuleItem, 1)
 	activeTopics := mapset.NewSet[string]()
@@ -83,8 +87,10 @@ func TestHandlersReturnErrorsForUnreadableFiles(t *testing.T) {
 		"ros1": NewRos1Handler(),
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			err := handler.SendRuleItems(
-				context.Background(),
+				t.Context(),
 				missingPath,
 				activeTopics,
 				ruleItems,
@@ -95,16 +101,18 @@ func TestHandlersReturnErrorsForUnreadableFiles(t *testing.T) {
 }
 
 func TestIntentionalSkipsReturnSuccess(t *testing.T) {
+	t.Parallel()
+
 	ruleItems := make(chan rule_engine.RuleItem, 1)
 
 	require.NoError(t, NewDefaultHandler().SendRuleItems(
-		context.Background(),
+		t.Context(),
 		"unsupported.file",
 		mapset.NewSet[string](),
 		ruleItems,
 	))
 	require.NoError(t, NewLogHandler().SendRuleItems(
-		context.Background(),
+		t.Context(),
 		"missing.log",
 		mapset.NewSet[string]("/some_other_topic"),
 		ruleItems,
@@ -112,6 +120,8 @@ func TestIntentionalSkipsReturnSuccess(t *testing.T) {
 }
 
 func TestLogHandlerEOFReturnsSuccess(t *testing.T) {
+	t.Parallel()
+
 	logPath := filepath.Join(t.TempDir(), "application.log")
 	require.NoError(t, os.WriteFile(
 		logPath,
@@ -121,7 +131,7 @@ func TestLogHandlerEOFReturnsSuccess(t *testing.T) {
 	ruleItems := make(chan rule_engine.RuleItem, 1)
 
 	require.NoError(t, NewLogHandler().SendRuleItems(
-		context.Background(),
+		t.Context(),
 		logPath,
 		mapset.NewSet[string](),
 		ruleItems,

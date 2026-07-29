@@ -200,10 +200,12 @@ func (r *CdrReader) String() (string, error) {
 		return "", err
 	}
 
-	if uint64(length) > uint64(maxInt()) {
+	if uint64(length) > uint64(math.MaxInt) {
 		return "", errors.Errorf("string declared length %d cannot fit in int", length)
 	}
 
+	// The conversion is safe because the platform int bound is checked above.
+	// #nosec G115
 	data, err := r.Uint8Array(int(length))
 	if err != nil {
 		return "", err
@@ -265,13 +267,31 @@ func (r *CdrReader) read(size int) ([]byte, error) {
 	return data, nil
 }
 
-func maxInt() int {
-	return int(^uint(0) >> 1)
-}
-
 // validateArrayLength validates a declared array length before it is converted
 // to int or used by make/slicing.
-func validateArrayLength(length uint64, remainingBytes, minEncodedBytes, resultElementBytes int) error {
+func validateArrayLength(
+	length uint64,
+	remainingBytes, minEncodedBytes, resultElementBytes int,
+) (int, error) {
+	if length > uint64(math.MaxInt) {
+		return 0, errors.Errorf("array declared length %d cannot fit in int", length)
+	}
+
+	// The conversion is safe because the platform int bound is checked above.
+	// #nosec G115
+	intLength := int(length)
+	return intLength, validateIntArrayLength(
+		intLength,
+		remainingBytes,
+		minEncodedBytes,
+		resultElementBytes,
+	)
+}
+
+func validateIntArrayLength(length, remainingBytes, minEncodedBytes, resultElementBytes int) error {
+	if length < 0 {
+		return errors.Errorf("array declared a negative length %d", length)
+	}
 	if remainingBytes < 0 || minEncodedBytes <= 0 || resultElementBytes <= 0 {
 		return errors.Errorf(
 			"invalid array validation parameters (remaining=%d, minimum encoded element=%d, result element=%d)",
@@ -281,7 +301,7 @@ func validateArrayLength(length uint64, remainingBytes, minEncodedBytes, resultE
 		)
 	}
 
-	remainingLimit := uint64(remainingBytes / minEncodedBytes)
+	remainingLimit := remainingBytes / minEncodedBytes
 	if length > remainingLimit {
 		return errors.Errorf(
 			"array declared length %d exceeds remaining-data limit %d (remaining=%d bytes, minimum encoded element=%d bytes)",
@@ -292,7 +312,7 @@ func validateArrayLength(length uint64, remainingBytes, minEncodedBytes, resultE
 		)
 	}
 
-	allocationLimit := uint64(maxDecodedArrayBytes / resultElementBytes)
+	allocationLimit := maxDecodedArrayBytes / resultElementBytes
 	if length > allocationLimit {
 		return errors.Errorf(
 			"array declared length %d exceeds decoder allocation limit %d elements (%d bytes, result element=%d bytes)",
@@ -303,23 +323,11 @@ func validateArrayLength(length uint64, remainingBytes, minEncodedBytes, resultE
 		)
 	}
 
-	if length > uint64(maxInt()) {
-		return errors.Errorf("array declared length %d cannot fit in int", length)
-	}
-
 	return nil
 }
 
 func (r *CdrReader) validateArrayLength(length, minEncodedBytes, resultElementBytes int) error {
-	if length < 0 {
-		return errors.Errorf("array declared a negative length %d", length)
-	}
-	return validateArrayLength(
-		uint64(length),
-		r.RemainingBytes(),
-		minEncodedBytes,
-		resultElementBytes,
-	)
+	return validateIntArrayLength(length, r.RemainingBytes(), minEncodedBytes, resultElementBytes)
 }
 
 // BooleanArray reads an array of booleans.

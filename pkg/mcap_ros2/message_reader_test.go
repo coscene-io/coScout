@@ -31,6 +31,8 @@ func dynamicArrayData(length uint32, payload ...byte) []byte {
 }
 
 func TestReadPrimitiveArrayRejectsLengthExceedingRemainingData(t *testing.T) {
+	t.Parallel()
+
 	reader, err := NewCdrReader(dynamicArrayData(math.MaxUint32))
 	require.NoError(t, err)
 
@@ -43,6 +45,8 @@ func TestReadPrimitiveArrayRejectsLengthExceedingRemainingData(t *testing.T) {
 }
 
 func TestReadComplexArrayRejectsLengthExceedingRemainingData(t *testing.T) {
+	t.Parallel()
+
 	reader, err := NewCdrReader(dynamicArrayData(math.MaxUint32))
 	require.NoError(t, err)
 	field := Field{
@@ -66,6 +70,8 @@ func TestReadComplexArrayRejectsLengthExceedingRemainingData(t *testing.T) {
 }
 
 func TestReadComplexArrayRejectsHardAllocationLimit(t *testing.T) {
+	t.Parallel()
+
 	length := maxDecodedArrayBytes/resultComplexElementBytes + 1
 	reader, err := NewCdrReader(dynamicArrayData(uint32(length), make([]byte, length)...))
 	require.NoError(t, err)
@@ -88,15 +94,19 @@ func TestReadComplexArrayRejectsHardAllocationLimit(t *testing.T) {
 }
 
 func TestValidateArrayLengthRejectsHardAllocationLimit(t *testing.T) {
+	t.Parallel()
+
 	length := uint64(maxDecodedArrayBytes/resultInterfaceSlotBytes + 1)
 
-	err := validateArrayLength(length, math.MaxInt, 1, resultInterfaceSlotBytes)
+	_, err := validateArrayLength(length, math.MaxInt, 1, resultInterfaceSlotBytes)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decoder allocation limit")
 }
 
 func TestReadPrimitiveArrayDecodesValidDynamicArray(t *testing.T) {
+	t.Parallel()
+
 	reader, err := NewCdrReader(dynamicArrayData(3, 1, 2, 3))
 	require.NoError(t, err)
 
@@ -107,6 +117,8 @@ func TestReadPrimitiveArrayDecodesValidDynamicArray(t *testing.T) {
 }
 
 func TestReadComplexArrayDecodesValidDynamicArray(t *testing.T) {
+	t.Parallel()
+
 	reader, err := NewCdrReader(dynamicArrayData(2, 7, 8))
 	require.NoError(t, err)
 	field := Field{
@@ -131,6 +143,8 @@ func TestReadComplexArrayDecodesValidDynamicArray(t *testing.T) {
 }
 
 func TestReadPrimitiveArrayDecodesBoundedDynamicArray(t *testing.T) {
+	t.Parallel()
+
 	bound := 3
 	reader, err := NewCdrReader(dynamicArrayData(2, 7, 8))
 	require.NoError(t, err)
@@ -147,6 +161,8 @@ func TestReadPrimitiveArrayDecodesBoundedDynamicArray(t *testing.T) {
 }
 
 func TestReadPrimitiveArrayRejectsSchemaBoundViolation(t *testing.T) {
+	t.Parallel()
+
 	bound := 3
 	reader, err := NewCdrReader(dynamicArrayData(4, 1, 2, 3, 4))
 	require.NoError(t, err)
@@ -163,6 +179,8 @@ func TestReadPrimitiveArrayRejectsSchemaBoundViolation(t *testing.T) {
 }
 
 func TestReadPrimitiveFixedArrayRejectsTruncatedDataWithoutPanic(t *testing.T) {
+	t.Parallel()
+
 	arraySize := 3
 	reader, err := NewCdrReader([]byte{0, 1, 0, 0, 1})
 	require.NoError(t, err)
@@ -178,6 +196,8 @@ func TestReadPrimitiveFixedArrayRejectsTruncatedDataWithoutPanic(t *testing.T) {
 }
 
 func TestReadMessageRejectsTruncatedSequenceLengthWithoutPanic(t *testing.T) {
+	t.Parallel()
+
 	msgDefs := map[string]MessageSpecification{
 		"test/Message": {
 			PkgName: "test",
@@ -199,6 +219,8 @@ func TestReadMessageRejectsTruncatedSequenceLengthWithoutPanic(t *testing.T) {
 }
 
 func TestScalarReadersReturnErrorsForTruncatedData(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]func(*CdrReader) error{
 		"boolean": func(reader *CdrReader) error {
 			_, err := reader.Boolean()
@@ -248,6 +270,8 @@ func TestScalarReadersReturnErrorsForTruncatedData(t *testing.T) {
 
 	for name, read := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			reader, err := NewCdrReader([]byte{0, 1, 0, 0})
 			require.NoError(t, err)
 
@@ -260,6 +284,8 @@ func TestScalarReadersReturnErrorsForTruncatedData(t *testing.T) {
 }
 
 func TestAlignedScalarReadReturnsErrorWithoutPanic(t *testing.T) {
+	t.Parallel()
+
 	reader, err := NewCdrReader([]byte{0, 1, 0, 0, 1, 2})
 	require.NoError(t, err)
 	_, err = reader.Uint8()

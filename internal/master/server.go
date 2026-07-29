@@ -29,6 +29,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var errServerAlreadyStarted = errors.New("master server already started")
+
 // Server master server.
 type Server struct {
 	registry *SlaveRegistry
@@ -81,7 +83,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.startMu.Lock()
 	if s.started {
 		s.startMu.Unlock()
-		return errors.New("master server already started")
+		return errServerAlreadyStarted
 	}
 	s.started = true
 	s.startMu.Unlock()

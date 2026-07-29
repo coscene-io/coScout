@@ -98,6 +98,8 @@ func TestRecursiveDirectoryUpdatesRollBackAfterLaterTraversalError(t *testing.T)
 }
 
 func TestConcurrentStateAccessAndPersistence(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestFileStateHandler(t)
 	baseDir := t.TempDir()
 	const iterations = 500
@@ -108,20 +110,20 @@ func TestConcurrentStateAccessAndPersistence(t *testing.T) {
 	wg.Add(4)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			filename := filepath.Join(baseDir, fmt.Sprintf("%d.log", i))
 			handler.setFileState(filename, FileState{Size: int64(i), IsListening: true})
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			_ = handler.Files()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			if err := handler.saveState(); err != nil {
 				errs <- err
 			}
@@ -129,7 +131,7 @@ func TestConcurrentStateAccessAndPersistence(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			_, _ = handler.getFileState(filepath.Join(baseDir, fmt.Sprintf("%d.log", i)))
 		}
 	}()
@@ -142,6 +144,8 @@ func TestConcurrentStateAccessAndPersistence(t *testing.T) {
 }
 
 func TestConcurrentDirectoryUpdates(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestFileStateHandler(t)
 	listenDir := t.TempDir()
 	collectDir := t.TempDir()
@@ -153,7 +157,7 @@ func TestConcurrentDirectoryUpdates(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			if err := handler.UpdateListenDirs(config.DefaultModConfConfig{
 				ListenDirs: []string{listenDir},
 			}); err != nil {
@@ -163,7 +167,7 @@ func TestConcurrentDirectoryUpdates(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			if err := handler.UpdateCollectDirs(nil, config.DefaultModConfConfig{
 				CollectDirs: []string{collectDir},
 			}); err != nil {

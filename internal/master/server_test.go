@@ -25,18 +25,23 @@ import (
 )
 
 func TestServerStartReturnsBindErrorWithoutReportingReady(t *testing.T) {
+	t.Parallel()
+
+	// #nosec G102 -- this test must reserve every interface used by the server.
 	listener, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, listener.Close())
 	})
 
-	port := listener.Addr().(*net.TCPAddr).Port
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	port := addr.Port
 	server := NewServer(port, config.DefaultMasterConfig())
 
 	startErr := make(chan error, 1)
 	go func() {
-		startErr <- server.Start(context.Background())
+		startErr <- server.Start(t.Context())
 	}()
 
 	select {
@@ -54,8 +59,10 @@ func TestServerStartReturnsBindErrorWithoutReportingReady(t *testing.T) {
 }
 
 func TestServerStartReportsReadyAfterListenAndStopsOnCancellation(t *testing.T) {
+	t.Parallel()
+
 	server := NewServer(0, config.DefaultMasterConfig())
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	startErr := make(chan error, 1)
 
 	go func() {

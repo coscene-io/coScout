@@ -26,6 +26,9 @@ import (
 )
 
 func TestRunReturnsMasterBindError(t *testing.T) {
+	t.Parallel()
+
+	// #nosec G102 -- this test must reserve every interface used by the daemon.
 	listener, err := net.Listen("tcp", ":22525")
 	if err == nil {
 		t.Cleanup(func() {

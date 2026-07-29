@@ -404,17 +404,18 @@ func readField(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateArrayLength(
+	length, err := validateArrayLength(
 		arrayLength,
 		reader.RemainingBytes(),
 		1,
 		resultComplexElementBytes,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
 
-	array := make([]interface{}, int(arrayLength))
-	for i := range int(arrayLength) {
+	array := make([]interface{}, length)
+	for i := range length {
 		value, err := readComplexType(nestedDef, msgDefs, reader)
 		if err != nil {
 			return nil, err
@@ -434,15 +435,15 @@ func readPrimitiveArray(ftype Type, reader *CdrReader) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateArrayLength(
+	length, err := validateArrayLength(
 		arrayLength,
 		reader.RemainingBytes(),
 		minEncodedBytes,
 		resultElementBytes,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
-	length := int(arrayLength)
 
 	switch ftype.Type {
 	case typeBool:

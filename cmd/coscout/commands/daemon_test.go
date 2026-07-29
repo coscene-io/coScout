@@ -21,6 +21,8 @@ import (
 )
 
 func TestAuthStateCanRetryAfterDaemonStops(t *testing.T) {
+	t.Parallel()
+
 	state := &authState{}
 
 	require.True(t, state.tryStart())
