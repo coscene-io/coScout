@@ -53,6 +53,10 @@ type FileStateHandler interface {
 	// to mark them as processed.
 	MarkProcessedFile(filename string) error
 
+	// MarkFailedFile marks a file as permanently failed. Failed files remain
+	// terminal until their size or modification time changes.
+	MarkFailedFile(filename string) error
+
 	// GetFileHandler returns the handler for a given file path.
 	GetFileHandler(filePath string) file_handlers.Interface
 }
@@ -65,6 +69,7 @@ const (
 	processStateSeenOnce
 	processStateReadyToProcess
 	processStateProcessed
+	processStateFailed
 )
 
 // FileState represents the state of a file in the system.
@@ -277,15 +282,34 @@ func (f *fileStateHandler) saveState() error {
 
 // setFileState updates the state for a given file path.
 func (f *fileStateHandler) setFileState(filePath string, state FileState) {
+	if err := f.updateFileState(filePath, func(FileState, bool) (FileState, bool) {
+		return state, true
+	}); err != nil {
+		log.Errorf("Failed to update file state for %s: %v", filePath, err)
+	}
+}
+
+// updateFileState applies a read-modify-write operation while holding stateLock.
+// The callback must only update in-memory state and must not perform file I/O.
+func (f *fileStateHandler) updateFileState(
+	filePath string,
+	update func(current FileState, exists bool) (next FileState, keep bool),
+) error {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		log.Errorf("Failed to get absolute path for %s: %v", filePath, err)
-		return
+		return errors.Errorf("failed to get absolute path for %s: %v", filePath, err)
 	}
 
 	f.stateLock.Lock()
 	defer f.stateLock.Unlock()
-	f.state[absPath] = state
+	current, exists := f.state[absPath]
+	next, keep := update(current, exists)
+	if !keep {
+		delete(f.state, absPath)
+		return nil
+	}
+	f.state[absPath] = next
+	return nil
 }
 
 // delFileState removes the state for a given file path.
@@ -330,11 +354,24 @@ func (f *fileStateHandler) checkpointFileState(checkpoints map[string]fileStateC
 
 func (f *fileStateHandler) restoreFileStates(checkpoints map[string]fileStateCheckpoint) {
 	for filePath, checkpoint := range checkpoints {
-		if checkpoint.exists {
-			f.setFileState(filePath, checkpoint.state)
-			continue
-		}
-		if err := f.delFileState(filePath); err != nil {
+		err := f.updateFileState(filePath, func(current FileState, exists bool) (FileState, bool) {
+			if checkpoint.exists {
+				restored := checkpoint.state
+				if exists && current.ProcessState != checkpoint.state.ProcessState {
+					restored.ProcessState = current.ProcessState
+				}
+				return restored, true
+			}
+
+			// A non-default process state can only have been written after the
+			// checkpoint. Preserve that concurrent transition instead of
+			// deleting the newly-created state.
+			if exists && current.ProcessState != processStateUnprocessed {
+				return current, true
+			}
+			return FileState{}, false
+		})
+		if err != nil {
 			log.Errorf("Failed to roll back file state for %s: %v", filePath, err)
 		}
 	}
@@ -619,6 +656,39 @@ func (f *fileStateHandler) UpdateCollectDirs(whitelist []string, conf config.Def
 	return nil
 }
 
+func fileContentsChanged(state FileState, info os.FileInfo) bool {
+	return state.Size != info.Size() || state.ModifyTime != info.ModTime().UnixNano()
+}
+
+func nextScannedProcessState(state FileState, exists bool, info os.FileInfo) processState {
+	if exists && state.ProcessState == processStateFailed && fileContentsChanged(state, info) {
+		return processStateUnprocessed
+	}
+	if exists {
+		return state.ProcessState
+	}
+	return processStateUnprocessed
+}
+
+// applyScannedFileState merges a scan result with the latest in-memory state.
+// If processing advanced while the scanner was doing file I/O, the latest
+// process state wins over the scanner's stale observation.
+func (f *fileStateHandler) applyScannedFileState(
+	filePath string,
+	observed FileState,
+	observedExists bool,
+	scanned FileState,
+) {
+	if err := f.updateFileState(filePath, func(current FileState, exists bool) (FileState, bool) {
+		if exists && (!observedExists || current.ProcessState != observed.ProcessState) {
+			scanned.ProcessState = current.ProcessState
+		}
+		return scanned, true
+	}); err != nil {
+		log.Errorf("Failed to apply scanned file state for %s: %v", filePath, err)
+	}
+}
+
 func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, skipPeriodHours int) {
 	fileState, hasFileState := f.getFileState(absPath)
 
@@ -626,26 +696,34 @@ func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, s
 	if hasFileState && !fileState.Unsupported && fileState.ProcessState == processStateProcessed {
 		return
 	}
+	// A permanently failed file is retried only after its contents change.
+	if hasFileState && fileState.ProcessState == processStateFailed && !fileContentsChanged(fileState, info) {
+		return
+	}
 
 	handler := f.GetFileHandler(absPath)
 	if handler == nil {
 		// No handler supported for file, mark as unsupported if not already
 		if !hasFileState || !fileState.Unsupported {
-			f.setFileState(absPath, FileState{
-				Size:        info.Size(),
-				Unsupported: true,
-			})
+			newState := fileState
+			newState.Size = info.Size()
+			newState.ModifyTime = info.ModTime().UnixNano()
+			newState.Unsupported = true
+			newState.ProcessState = nextScannedProcessState(fileState, hasFileState, info)
+			f.applyScannedFileState(absPath, fileState, hasFileState, newState)
 		}
 		return
 	}
 
 	// Check if file is too old
 	if !info.IsDir() && info.ModTime().Before(time.Now().Add(-time.Duration(skipPeriodHours)*time.Hour)) {
-		f.setFileState(absPath, FileState{
-			Size:        info.Size(),
-			Unsupported: true,
-			TooOld:      true,
-		})
+		newState := fileState
+		newState.Size = info.Size()
+		newState.ModifyTime = info.ModTime().UnixNano()
+		newState.Unsupported = true
+		newState.TooOld = true
+		newState.ProcessState = nextScannedProcessState(fileState, hasFileState, info)
+		f.applyScannedFileState(absPath, fileState, hasFileState, newState)
 		return
 	}
 
@@ -657,11 +735,12 @@ func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, s
 		}
 
 		newState.Size = info.Size()
-		newState.ModifyTime = info.ModTime().Unix()
+		newState.ModifyTime = info.ModTime().UnixNano()
 		newState.IsListening = true
 		newState.Unsupported = false
 		newState.TooOld = false
-		f.setFileState(absPath, newState)
+		newState.ProcessState = nextScannedProcessState(fileState, hasFileState, info)
+		f.applyScannedFileState(absPath, fileState, hasFileState, newState)
 		return
 	} else {
 		log.Infof("Listening file %s is not finished, will be processed later", absPath)
@@ -671,27 +750,28 @@ func (f *fileStateHandler) processListenFile(absPath string, info os.FileInfo, s
 func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) {
 	fileState, hasFileState := f.getFileState(absPath)
 
-	// Skip file if file is not modified
+	// Skip terminal files while their contents are unchanged.
 	if hasFileState &&
 		!fileState.Unsupported &&
-		fileState.ProcessState == processStateProcessed &&
-		fileState.ModifyTime == info.ModTime().Unix() {
+		(fileState.ProcessState == processStateProcessed || fileState.ProcessState == processStateFailed) &&
+		!fileContentsChanged(fileState, info) {
 		return
 	}
 
 	handler := f.GetFileHandler(absPath)
 	if handler == nil {
-		f.setFileState(absPath, FileState{
-			Size:        info.Size(),
-			ModifyTime:  info.ModTime().Unix(),
-			Unsupported: true,
-		})
+		newState := fileState
+		newState.Size = info.Size()
+		newState.ModifyTime = info.ModTime().UnixNano()
+		newState.Unsupported = true
+		newState.ProcessState = nextScannedProcessState(fileState, hasFileState, info)
+		f.applyScannedFileState(absPath, fileState, hasFileState, newState)
 		return
 	}
 
 	// Update state
 	newState := fileState
-	if !hasFileState || fileState.ModifyTime != info.ModTime().Unix() {
+	if !hasFileState || fileContentsChanged(fileState, info) {
 		var startTime, endTime *time.Time
 
 		// Try to use file creation time and modification time if available
@@ -710,11 +790,12 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 			if err != nil {
 				log.Errorf("Error getting start and end time for %s: %v, skip collect", absPath, err)
 
-				f.setFileState(absPath, FileState{
-					Size:        info.Size(),
-					ModifyTime:  info.ModTime().Unix(),
-					Unsupported: true,
-				})
+				newState := fileState
+				newState.Size = info.Size()
+				newState.ModifyTime = info.ModTime().UnixNano()
+				newState.Unsupported = true
+				newState.ProcessState = nextScannedProcessState(fileState, hasFileState, info)
+				f.applyScannedFileState(absPath, fileState, hasFileState, newState)
 				return
 			}
 		}
@@ -723,7 +804,7 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 			Size:       info.Size(),
 			StartTime:  startTime.Unix(),
 			EndTime:    endTime.Unix(),
-			ModifyTime: info.ModTime().Unix(),
+			ModifyTime: info.ModTime().UnixNano(),
 		}
 
 		log.Infof("Collecting file %s start time: %s, end time: %s", absPath, startTime.UTC().String(), endTime.UTC().String())
@@ -731,26 +812,31 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 
 	newState.IsCollecting = true
 	newState.ProcessState = processStateProcessed
+	if fileState.ProcessState == processStateFailed && fileContentsChanged(fileState, info) {
+		newState.ProcessState = processStateUnprocessed
+	}
 
-	f.setFileState(absPath, newState)
+	f.applyScannedFileState(absPath, fileState, hasFileState, newState)
 }
 
 func (f *fileStateHandler) UpdateFilesProcessState() error {
-	for filename, state := range f.stateSnapshot() {
-		if !state.IsListening {
-			continue
-		}
+	for _, filename := range f.stateKeysSnapshot() {
+		if err := f.updateFileState(filename, func(state FileState, exists bool) (FileState, bool) {
+			if !exists || !state.IsListening {
+				return state, exists
+			}
 
-		switch state.ProcessState {
-		case processStateUnprocessed:
-			state.ProcessState = processStateSeenOnce
-		case processStateSeenOnce:
-			state.ProcessState = processStateReadyToProcess
-		case processStateReadyToProcess, processStateProcessed:
-			continue
+			switch state.ProcessState {
+			case processStateUnprocessed:
+				state.ProcessState = processStateSeenOnce
+			case processStateSeenOnce:
+				state.ProcessState = processStateReadyToProcess
+			case processStateReadyToProcess, processStateProcessed, processStateFailed:
+			}
+			return state, true
+		}); err != nil {
+			return errors.Errorf("failed to update process state for %s: %v", filename, err)
 		}
-
-		f.setFileState(filename, state)
 	}
 	if err := f.saveState(); err != nil {
 		return errors.Errorf("failed to save state: %v", err)
@@ -760,14 +846,28 @@ func (f *fileStateHandler) UpdateFilesProcessState() error {
 }
 
 func (f *fileStateHandler) MarkProcessedFile(filename string) error {
-	state, exists := f.getFileState(filename)
+	return f.markFileProcessState(filename, processStateProcessed)
+}
+
+func (f *fileStateHandler) MarkFailedFile(filename string) error {
+	return f.markFileProcessState(filename, processStateFailed)
+}
+
+func (f *fileStateHandler) markFileProcessState(filename string, nextProcessState processState) error {
+	exists := false
+	if err := f.updateFileState(filename, func(state FileState, currentExists bool) (FileState, bool) {
+		if !currentExists {
+			return state, false
+		}
+		exists = true
+		state.ProcessState = nextProcessState
+		return state, true
+	}); err != nil {
+		return err
+	}
 	if !exists {
 		return errors.Errorf("file state for %s does not exist", filename)
 	}
-
-	state.ProcessState = processStateProcessed
-
-	f.setFileState(filename, state)
 
 	if err := f.saveState(); err != nil {
 		return errors.Errorf("failed to save state: %v", err)

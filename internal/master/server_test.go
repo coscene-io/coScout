@@ -16,6 +16,7 @@ package master
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -61,7 +62,15 @@ func TestServerStartReturnsBindErrorWithoutReportingReady(t *testing.T) {
 func TestServerStartReportsReadyAfterListenAndStopsOnCancellation(t *testing.T) {
 	t.Parallel()
 
-	server := NewServer(0, config.DefaultMasterConfig())
+	// Reserve a concrete port first so the post-shutdown bind verifies that the
+	// exact listener owned by this server has been released.
+	// #nosec G102 -- this test must reserve every interface used by the server.
+	portReservation, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+	port := portReservation.Addr().(*net.TCPAddr).Port
+	require.NoError(t, portReservation.Close())
+
+	server := NewServer(port, config.DefaultMasterConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	startErr := make(chan error, 1)
 
@@ -80,9 +89,14 @@ func TestServerStartReportsReadyAfterListenAndStopsOnCancellation(t *testing.T) 
 	cancel()
 
 	select {
-	case err := <-startErr:
+	case err = <-startErr:
 		require.NoError(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("Start did not return after cancellation")
 	}
+
+	// #nosec G102 -- this test verifies that shutdown released every interface.
+	rebound, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	require.NoError(t, err, "Start returned before releasing the listening port")
+	require.NoError(t, rebound.Close())
 }

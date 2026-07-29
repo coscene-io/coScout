@@ -16,6 +16,7 @@ package rule
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"strconv"
 	"sync"
 	"time"
@@ -51,6 +52,8 @@ type Engine struct {
 	activeTopics mapset.Set[string]
 
 	ruleDebounceTime map[string]*time.Time
+
+	publishCollectInfoFn func(string) error
 }
 
 // UpdateRules updates the rules in the rule engine.
@@ -169,9 +172,10 @@ func (e *Engine) getDeviceName() string {
 	return e.deviceName
 }
 
-// ConsumeNext shows how to process a message through the rule engine.
-func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
+// ConsumeNext processes a message through the rule engine.
+func (e *Engine) ConsumeNext(item rule_engine.RuleItem) error {
 	log.Debugf("consuming message: %+v", item)
+	var consumeErr error
 
 	e.mu.RLock()
 	rules := e.rules
@@ -225,10 +229,22 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 			for _, action := range rule.Actions {
 				if err := action.Run(curActivation, additionalArgs); err != nil {
 					ruleLog.WithField("action", action.Name).Errorf("failed to run action: %v", err)
+					consumeErr = stderrors.Join(
+						consumeErr,
+						errors.Wrapf(err, "run action %s", action.Name),
+					)
 				}
 			}
-			if err := model.PublishCollectInfo(collectInfoId); err != nil {
+			publishCollectInfo := e.publishCollectInfoFn
+			if publishCollectInfo == nil {
+				publishCollectInfo = model.PublishCollectInfo
+			}
+			if err := publishCollectInfo(collectInfoId); err != nil {
 				ruleLog.Errorf("failed to publish collect info: %v", err)
+				consumeErr = stderrors.Join(
+					consumeErr,
+					errors.Wrap(err, "publish collect info"),
+				)
 			} else {
 				ruleLog.Infof("published collect info")
 			}
@@ -236,6 +252,7 @@ func (e *Engine) ConsumeNext(item rule_engine.RuleItem) {
 	}
 
 	e.cleanupDebounceTime()
+	return consumeErr
 }
 
 func debounceKeyForRule(rule *rule_engine.Rule) string {

@@ -15,8 +15,10 @@
 package commands
 
 import (
+	"context"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -32,6 +34,8 @@ import (
 
 type authState struct {
 	lifecycle atomic.Int32
+	cancelMu  sync.Mutex
+	cancel    context.CancelFunc
 }
 
 const (
@@ -40,16 +44,45 @@ const (
 	daemonStopping
 )
 
-func (s *authState) tryStart() bool {
-	return s.lifecycle.CompareAndSwap(daemonIdle, daemonRunning)
+func (s *authState) tryStart() (context.Context, bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if !s.lifecycle.CompareAndSwap(daemonIdle, daemonRunning) {
+		cancel()
+		return nil, false
+	}
+	s.cancel = cancel
+	return ctx, true
 }
 
 func (s *authState) requestStop() bool {
-	return s.lifecycle.CompareAndSwap(daemonRunning, daemonStopping)
+	if !s.lifecycle.CompareAndSwap(daemonRunning, daemonStopping) {
+		return false
+	}
+
+	s.cancelMu.Lock()
+	cancel := s.cancel
+	s.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	return true
 }
 
 func (s *authState) daemonStopped() {
-	s.lifecycle.Store(daemonIdle)
+	s.cancelMu.Lock()
+	cancelRunAndMarkIdle(s.cancel, &s.lifecycle)
+	s.cancel = nil
+	s.cancelMu.Unlock()
+}
+
+func cancelRunAndMarkIdle(cancel context.CancelFunc, lifecycle *atomic.Int32) {
+	if cancel != nil {
+		cancel()
+	}
+	lifecycle.Store(daemonIdle)
 }
 
 func NewDaemonCommand(cfgPath *string) *cobra.Command {
@@ -87,18 +120,16 @@ func NewDaemonCommand(cfgPath *string) *cobra.Command {
 }
 
 func run(confManager *config.ConfManager, reqClient *api.RequestClient, registerChan chan model.DeviceStatusResponse) {
-	startChan := make(chan bool, 1)
-	exitChan := make(chan bool, 1)
 	errorChan := make(chan error, 100)
 
 	state := &authState{}
 	for deviceStatus := range registerChan {
 		if deviceStatus.Authorized {
-			startDaemon(state, confManager, reqClient, startChan, exitChan, errorChan)
+			startDaemon(state, confManager, reqClient, errorChan)
 			continue
 		}
 
-		stopDaemon(state, exitChan)
+		stopDaemon(state)
 	}
 }
 
@@ -106,26 +137,23 @@ func startDaemon(
 	state *authState,
 	confManager *config.ConfManager,
 	reqClient *api.RequestClient,
-	startChan, exitChan chan bool,
 	errorChan chan error,
 ) {
 	log.Info("Device is authorized. Performing actions...")
-	if !state.tryStart() {
+	ctx, started := state.tryStart()
+	if !started {
 		return
 	}
 
-	startChan <- true
 	go func() {
 		defer state.daemonStopped()
-		if err := daemon.Run(confManager, reqClient, startChan, exitChan, errorChan); err != nil {
+		if err := daemon.Run(ctx, confManager, reqClient, errorChan); err != nil {
 			log.Errorf("Daemon stopped: %v", err)
 		}
 	}()
 }
 
-func stopDaemon(state *authState, exitChan chan bool) {
+func stopDaemon(state *authState) {
 	log.Warn("Device is not authorized, waiting...")
-	if state.requestStop() {
-		exitChan <- true
-	}
+	state.requestStop()
 }

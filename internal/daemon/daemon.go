@@ -32,11 +32,18 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startChan chan bool, finishChan chan bool, errorChan chan error) error {
-	<-startChan
-
-	ctx, cancel := context.WithCancel(context.Background())
+func Run(
+	ctx context.Context,
+	confManager *config.ConfManager,
+	reqClient *api.RequestClient,
+	errorChan chan error,
+) error {
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if runCtx.Err() != nil {
+		return nil
+	}
 
 	appConfig, err := confManager.LoadWithRemote()
 	if err != nil {
@@ -72,35 +79,35 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	var masterServer *master.Server
 	var masterConfig *config.MasterConfig
 	var fileManager *master.FileManager
+	var masterResult <-chan error
 	if appConfig.MasterSlave.Enabled {
 		masterConfig = config.DefaultMasterConfig()
 		masterServer = master.NewServer(masterConfig.Port, masterConfig)
-		masterStartErr := make(chan error, 1)
+		result := make(chan error, 1)
+		masterResult = result
 		go func() {
-			masterStartErr <- masterServer.Start(ctx)
+			result <- masterServer.Start(runCtx)
 		}()
 
 		select {
 		case <-masterServer.Ready():
-			log.Infof("Master server started on port %d", masterConfig.Port)
-		case err := <-masterStartErr:
-			log.Errorf("Master server failed: %v", err)
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-
-		// Continue watching for runtime server failures after startup.
-		go func() {
-			if err := <-masterStartErr; err != nil {
-				log.Errorf("Master server failed: %v", err)
-				select {
-				case errorChan <- err:
-				default:
-					log.Warnf("Error channel is full, dropping error: %v", err)
-				}
+			if runCtx.Err() != nil {
+				err := <-masterResult
+				cancel()
+				return err
 			}
-		}()
+			log.Infof("Master server started on port %d", masterConfig.Port)
+		case err := <-masterResult:
+			if err != nil {
+				log.Errorf("Master server failed: %v", err)
+			}
+			cancel()
+			return err
+		case <-runCtx.Done():
+			err := <-masterResult
+			cancel()
+			return err
+		}
 
 		// Set up FileManager for slave file handling
 		masterClient := master.NewClient(masterConfig)
@@ -110,7 +117,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 
 	// Start collector
 	go func() {
-		err := collector.Collect(ctx, reqClient, confManager, fileManager, pubSub, errorChan)
+		err := collector.Collect(runCtx, reqClient, confManager, fileManager, pubSub, errorChan)
 		if err != nil {
 			select {
 			case errorChan <- err:
@@ -130,7 +137,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 				ticker.Reset(config.RefreshRemoteConfigInterval)
 				//nolint: contextcheck // context is checked in the parent goroutine
 				refreshRemoteConfig(confManager, reqClient)
-			case <-ctx.Done():
+			case <-runCtx.Done():
 				log.Infof("Daemon ticker goroutine done")
 				return
 			}
@@ -138,7 +145,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	}(ticker)
 
 	// Start core services
-	go core.SendHeartbeat(ctx, reqClient, confManager.GetStorage(), errorChan)
+	go core.SendHeartbeat(runCtx, reqClient, confManager.GetStorage(), errorChan)
 
 	// Start task handler with optional master-slave enhancement
 	taskHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.TaskModType)
@@ -150,7 +157,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 			log.Info("Task handler enhanced with master-slave support")
 		}
 	}
-	go taskHandler.Run(ctx)
+	go taskHandler.Run(runCtx)
 
 	// Start rule handler with optional master-slave enhancement
 	ruleHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.RuleModType)
@@ -162,14 +169,38 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 			log.Info("Rule handler enhanced with master-slave support")
 		}
 	}
-	go ruleHandler.Run(ctx)
+	go ruleHandler.Run(runCtx)
 
 	// Start HTTP handler
-	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.HttpModType).Run(ctx)
+	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.HttpModType).Run(runCtx)
 
 	log.Info("Daemon started successfully")
-	<-finishChan
+	if masterResult != nil {
+		return waitForMasterAndCancel(runCtx, masterResult, cancel)
+	}
+
+	<-runCtx.Done()
+	cancel()
 	return nil
+}
+
+// waitForMasterAndCancel returns a runtime master failure immediately and
+// cancels all other daemon services before returning. On daemon cancellation
+// it still waits for Server.Start to finish shutdown so callers cannot start a
+// replacement daemon before the listening port is released.
+func waitForMasterAndCancel(
+	ctx context.Context,
+	masterResult <-chan error,
+	cancel context.CancelFunc,
+) error {
+	var err error
+	select {
+	case err = <-masterResult:
+	case <-ctx.Done():
+		err = <-masterResult
+	}
+	cancel()
+	return err
 }
 
 func refreshRemoteConfig(confManager *config.ConfManager, reqClient *api.RequestClient) {

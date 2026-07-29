@@ -15,6 +15,8 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -43,14 +45,11 @@ master_slave:
 `), 0o600))
 
 	confManager := config.InitConfManager(configPath, nil)
-	startChan := make(chan bool, 1)
-	finishChan := make(chan bool, 1)
 	errorChan := make(chan error, 1)
 	runErr := make(chan error, 1)
-	startChan <- true
 
 	go func() {
-		runErr <- Run(confManager, nil, startChan, finishChan, errorChan)
+		runErr <- Run(t.Context(), confManager, nil, errorChan)
 	}()
 
 	select {
@@ -64,5 +63,43 @@ master_slave:
 	case err := <-errorChan:
 		t.Fatalf("startup error was also sent as a non-fatal runtime error: %v", err)
 	default:
+	}
+}
+
+func TestWaitForMasterReturnsRuntimeError(t *testing.T) {
+	t.Parallel()
+
+	runtimeErr := errors.New("master serve failed")
+	masterResult := make(chan error, 1)
+	masterResult <- runtimeErr
+	runCtx, cancel := context.WithCancel(t.Context())
+
+	require.ErrorIs(t, waitForMasterAndCancel(runCtx, masterResult, cancel), runtimeErr)
+	require.ErrorIs(t, runCtx.Err(), context.Canceled)
+}
+
+func TestWaitForMasterCancellationWaitsForShutdown(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	masterResult := make(chan error)
+	waitResult := make(chan error, 1)
+	go func() {
+		waitResult <- waitForMasterAndCancel(ctx, masterResult, cancel)
+	}()
+
+	cancel()
+	select {
+	case <-waitResult:
+		t.Fatal("waitForMaster returned before master shutdown completed")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	masterResult <- nil
+	select {
+	case err := <-waitResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("waitForMaster did not return after master shutdown completed")
 	}
 }

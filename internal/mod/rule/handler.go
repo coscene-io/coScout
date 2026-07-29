@@ -17,6 +17,7 @@ package rule
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,8 +56,8 @@ const (
 )
 
 type ruleItemEnvelope struct {
-	item     rule_engine.RuleItem
-	consumed chan struct{}
+	item   rule_engine.RuleItem
+	result chan error
 }
 
 type CustomRuleHandler struct {
@@ -224,9 +225,9 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 		for {
 			select {
 			case envelope := <-c.ruleItemChan:
-				c.engine.ConsumeNext(envelope.item)
-				if envelope.consumed != nil {
-					close(envelope.consumed)
+				consumeErr := c.engine.ConsumeNext(envelope.item)
+				if envelope.result != nil {
+					envelope.result <- consumeErr
 				}
 			case <-ctx.Done():
 				log.Infof("rule item channel closed")
@@ -391,8 +392,12 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 				defer c.releaseFileInFlight(filename)
 
 				if err := c.processFileWithRule(ctx, filename); err != nil {
-					if !errors.Is(err, context.Canceled) {
-						log.Errorf("process file %s with rule: %v", filename, err)
+					if !shouldMarkFileFailed(ctx, err) {
+						return
+					}
+					log.Errorf("process file %s with rule: %v", filename, err)
+					if markErr := c.listenFileStateHandler.MarkFailedFile(filename); markErr != nil {
+						log.Errorf("mark failed file %s: %v", filename, markErr)
 					}
 					return
 				}
@@ -408,6 +413,14 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 			return
 		}
 	}
+}
+
+func shouldMarkFileFailed(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded)
 }
 
 func (c *CustomRuleHandler) processFileWithRule(
@@ -432,26 +445,33 @@ func (c *CustomRuleHandler) processFileWithRule(
 		)
 	}()
 
+	var consumeErr error
 	for {
 		select {
 		case item := <-localRuleItems:
-			consumed := make(chan struct{})
+			result := make(chan error, 1)
 			select {
 			case c.ruleItemChan <- ruleItemEnvelope{
-				item:     item,
-				consumed: consumed,
+				item:   item,
+				result: result,
 			}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
 
 			select {
-			case <-consumed:
+			case itemConsumeErr := <-result:
+				if itemConsumeErr != nil {
+					consumeErr = stderrors.Join(
+						consumeErr,
+						errors.Wrap(itemConsumeErr, "consume rule item"),
+					)
+				}
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-		case err := <-handlerDone:
-			return err
+		case handlerErr := <-handlerDone:
+			return stderrors.Join(handlerErr, consumeErr)
 		case <-ctx.Done():
 			return ctx.Err()
 		}

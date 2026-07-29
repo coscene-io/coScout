@@ -15,6 +15,7 @@
 package rule
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -134,6 +135,95 @@ func TestConsumeNextDebouncesEachScopeSeparately(t *testing.T) {
 	if triggered[0] != "A" || triggered[1] != "B" {
 		t.Fatalf("triggered scopes = %v, want [A B]", triggered)
 	}
+}
+
+func TestConsumeNextReturnsActionError(t *testing.T) {
+	t.Parallel()
+
+	actionErr := errors.New("action failed")
+	action, err := rule_engine.NewAction(
+		"failing-action",
+		map[string]interface{}{},
+		func(map[string]interface{}) error {
+			return actionErr
+		},
+	)
+	if err != nil {
+		t.Fatalf("new action: %v", err)
+	}
+	publishCalls := 0
+	engine := Engine{
+		rules:            []*rule_engine.Rule{testRuntimeRule(t, action)},
+		ruleDebounceTime: make(map[string]*time.Time),
+		publishCollectInfoFn: func(string) error {
+			publishCalls++
+			return nil
+		},
+	}
+
+	gotErr := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{},
+		Topic: "/fault",
+		Ts:    1,
+	})
+
+	if !errors.Is(gotErr, actionErr) {
+		t.Fatalf("ConsumeNext error = %v, want action error", gotErr)
+	}
+	if publishCalls != 1 {
+		t.Fatalf("publish calls = %d, want 1", publishCalls)
+	}
+}
+
+func TestConsumeNextReturnsPublishError(t *testing.T) {
+	t.Parallel()
+
+	action, err := rule_engine.NewAction(
+		"successful-action",
+		map[string]interface{}{},
+		rule_engine.EmptyActionImpl,
+	)
+	if err != nil {
+		t.Fatalf("new action: %v", err)
+	}
+	publishErr := errors.New("publish failed")
+	engine := Engine{
+		rules:            []*rule_engine.Rule{testRuntimeRule(t, action)},
+		ruleDebounceTime: make(map[string]*time.Time),
+		publishCollectInfoFn: func(string) error {
+			return publishErr
+		},
+	}
+
+	gotErr := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{},
+		Topic: "/fault",
+		Ts:    1,
+	})
+
+	if !errors.Is(gotErr, publishErr) {
+		t.Fatalf("ConsumeNext error = %v, want publish error", gotErr)
+	}
+}
+
+func testRuntimeRule(t *testing.T, action *rule_engine.Action) *rule_engine.Rule {
+	t.Helper()
+
+	condition, err := rule_engine.NewCondition("true")
+	if err != nil {
+		t.Fatalf("new condition: %v", err)
+	}
+	return rule_engine.NewRule(
+		[]rule_engine.Condition{*condition},
+		[]rule_engine.Action{*action},
+		nil,
+		mapset.NewSet[string]("/fault"),
+		0,
+		map[string]interface{}{
+			"rule_name":         "runtime-rule",
+			"rule_display_name": "runtime rule",
+		},
+	)
 }
 
 func testDiagnosisRule(id string, activeTopic string) *resources.DiagnosisRule {
