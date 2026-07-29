@@ -25,6 +25,11 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 )
 
+var (
+	errTestActionFailed  = errors.New("action failed")
+	errTestPublishFailed = errors.New("publish failed")
+)
+
 func TestUpdateRulesKeepsAllTopicsActiveWhenAnyRuleHasNoTopic(t *testing.T) {
 	t.Parallel()
 
@@ -106,6 +111,9 @@ func TestConsumeNextDebouncesEachScopeSeparately(t *testing.T) {
 	}
 	engine := Engine{
 		ruleDebounceTime: make(map[string]*time.Time),
+		publishCollectInfoFn: func(string) error {
+			return nil
+		},
 		rules: []*rule_engine.Rule{
 			rule_engine.NewRule(
 				[]rule_engine.Condition{*condition},
@@ -126,8 +134,20 @@ func TestConsumeNextDebouncesEachScopeSeparately(t *testing.T) {
 		},
 	}
 
-	engine.ConsumeNext(rule_engine.RuleItem{Msg: map[string]interface{}{"code": "A"}, Topic: "/fault", Ts: 1})
-	engine.ConsumeNext(rule_engine.RuleItem{Msg: map[string]interface{}{"code": "B"}, Topic: "/fault", Ts: 2})
+	if err := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{"code": "A"},
+		Topic: "/fault",
+		Ts:    1,
+	}); err != nil {
+		t.Fatalf("consume scope A: %v", err)
+	}
+	if err := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{"code": "B"},
+		Topic: "/fault",
+		Ts:    2,
+	}); err != nil {
+		t.Fatalf("consume scope B: %v", err)
+	}
 
 	if len(triggered) != 2 {
 		t.Fatalf("triggered scopes = %v, want both scopes to trigger independently", triggered)
@@ -140,12 +160,11 @@ func TestConsumeNextDebouncesEachScopeSeparately(t *testing.T) {
 func TestConsumeNextReturnsActionError(t *testing.T) {
 	t.Parallel()
 
-	actionErr := errors.New("action failed")
 	action, err := rule_engine.NewAction(
 		"failing-action",
 		map[string]interface{}{},
 		func(map[string]interface{}) error {
-			return actionErr
+			return errTestActionFailed
 		},
 	)
 	if err != nil {
@@ -167,7 +186,7 @@ func TestConsumeNextReturnsActionError(t *testing.T) {
 		Ts:    1,
 	})
 
-	if !errors.Is(gotErr, actionErr) {
+	if !errors.Is(gotErr, errTestActionFailed) {
 		t.Fatalf("ConsumeNext error = %v, want action error", gotErr)
 	}
 	if publishCalls != 1 {
@@ -186,12 +205,11 @@ func TestConsumeNextReturnsPublishError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new action: %v", err)
 	}
-	publishErr := errors.New("publish failed")
 	engine := Engine{
 		rules:            []*rule_engine.Rule{testRuntimeRule(t, action)},
 		ruleDebounceTime: make(map[string]*time.Time),
 		publishCollectInfoFn: func(string) error {
-			return publishErr
+			return errTestPublishFailed
 		},
 	}
 
@@ -201,7 +219,7 @@ func TestConsumeNextReturnsPublishError(t *testing.T) {
 		Ts:    1,
 	})
 
-	if !errors.Is(gotErr, publishErr) {
+	if !errors.Is(gotErr, errTestPublishFailed) {
 		t.Fatalf("ConsumeNext error = %v, want publish error", gotErr)
 	}
 }

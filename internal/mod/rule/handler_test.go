@@ -31,7 +31,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var errTestReadFailed = errors.New("read failed")
+var (
+	errTestReadFailed           = errors.New("read failed")
+	errTestCancellationSentinel = errors.New("handler lost cancellation cause")
+	errTestConsumeFailed        = errors.New("consume failed")
+	errTestFirstItemFailed      = errors.New("first item failed")
+)
 
 func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 	t.Parallel()
@@ -523,12 +528,11 @@ func TestCancellationDoesNotMarkFailedWhenHandlerReturnsSentinelError(t *testing
 	t.Parallel()
 
 	started := make(chan struct{}, 1)
-	sentinelErr := errors.New("handler lost cancellation cause")
 	stateHandler := &fakeFileStateHandler{
 		files: []file_state_handler.FileState{{Pathname: "cancelled-sentinel.log"}},
 		fileHandler: &cancellationBlockingHandler{
 			started: started,
-			err:     sentinelErr,
+			err:     errTestCancellationSentinel,
 		},
 	}
 	handler := &CustomRuleHandler{
@@ -557,7 +561,7 @@ func TestCancellationDoesNotMarkFailedWhenHandlerReturnsSentinelError(t *testing
 	}, time.Second, 10*time.Millisecond)
 
 	cancel()
-	require.False(t, shouldMarkFileFailed(ctx, sentinelErr))
+	require.False(t, shouldMarkFileFailed(ctx, errTestCancellationSentinel))
 	require.Eventually(t, func() bool {
 		select {
 		case <-done:
@@ -793,12 +797,11 @@ func TestProducedRuleItemIsMarkedProcessedOnlyAfterConsumerAck(t *testing.T) {
 func TestRuleItemConsumptionErrorMarksFileFailed(t *testing.T) {
 	t.Parallel()
 
-	consumeErr := errors.New("consume failed")
 	action, err := rule_engine.NewAction(
 		"failing-action",
 		map[string]interface{}{},
 		func(map[string]interface{}) error {
-			return consumeErr
+			return errTestConsumeFailed
 		},
 	)
 	require.NoError(t, err)
@@ -892,16 +895,15 @@ func TestRuleItemConsumptionErrorDrainsRemainingHandlerItems(t *testing.T) {
 
 	var consumedIndexes []int
 	consumerDone := make(chan struct{})
-	firstConsumeErr := errors.New("first item failed")
 	go func() {
 		defer close(consumerDone)
-		for index := 0; index < 2; index++ {
+		for index := range 2 {
 			select {
 			case envelope := <-handler.ruleMessageChan:
 				itemIndex, _ := envelope.item.Msg["index"].(int)
 				consumedIndexes = append(consumedIndexes, itemIndex)
 				if index == 0 {
-					envelope.result <- firstConsumeErr
+					envelope.result <- errTestFirstItemFailed
 				} else {
 					envelope.result <- nil
 				}

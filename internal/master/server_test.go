@@ -67,7 +67,9 @@ func TestServerStartReportsReadyAfterListenAndStopsOnCancellation(t *testing.T) 
 	// #nosec G102 -- this test must reserve every interface used by the server.
 	portReservation, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
-	port := portReservation.Addr().(*net.TCPAddr).Port
+	addr, ok := portReservation.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+	port := addr.Port
 	require.NoError(t, portReservation.Close())
 
 	server := NewServer(port, config.DefaultMasterConfig())

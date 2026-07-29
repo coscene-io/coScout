@@ -234,6 +234,8 @@ func TestConcurrentDirectoryUpdates(t *testing.T) {
 }
 
 func TestProcessListenFileDoesNotRevertConcurrentProcessedState(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestFileStateHandler(t)
 	filePath := filepath.Join(t.TempDir(), "active.log")
 	require.NoError(t, os.WriteFile(filePath, []byte("log"), 0o600))
@@ -269,6 +271,8 @@ func TestProcessListenFileDoesNotRevertConcurrentProcessedState(t *testing.T) {
 }
 
 func TestFailedFileIsNotReadyUntilItsContentsChange(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestFileStateHandler(t)
 	filePath := filepath.Join(t.TempDir(), "failed.log")
 	require.NoError(t, os.WriteFile(filePath, []byte("old"), 0o600))
@@ -300,6 +304,8 @@ func TestFailedFileIsNotReadyUntilItsContentsChange(t *testing.T) {
 }
 
 func TestFailedFileRetriesWhenOnlyModTimeNanosecondsChange(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestFileStateHandler(t)
 	filePath := filepath.Join(t.TempDir(), "same-size.log")
 	require.NoError(t, os.WriteFile(filePath, []byte("same"), 0o600))
@@ -328,6 +334,8 @@ func TestFailedFileRetriesWhenOnlyModTimeNanosecondsChange(t *testing.T) {
 }
 
 func TestRestoreFileStatesPreservesConcurrentProcessState(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestFileStateHandler(t)
 	filePath := filepath.Join(t.TempDir(), "restore.log")
 	original := FileState{

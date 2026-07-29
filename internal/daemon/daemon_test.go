@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var errTestMasterServeFailed = errors.New("master serve failed")
+
 func TestRunReturnsMasterBindError(t *testing.T) {
 	t.Parallel()
 
@@ -69,12 +71,11 @@ master_slave:
 func TestWaitForMasterReturnsRuntimeError(t *testing.T) {
 	t.Parallel()
 
-	runtimeErr := errors.New("master serve failed")
 	masterResult := make(chan error, 1)
-	masterResult <- runtimeErr
+	masterResult <- errTestMasterServeFailed
 	runCtx, cancel := context.WithCancel(t.Context())
 
-	require.ErrorIs(t, waitForMasterAndCancel(runCtx, masterResult, cancel), runtimeErr)
+	require.ErrorIs(t, waitForMasterAndCancel(runCtx, masterResult, cancel), errTestMasterServeFailed)
 	require.ErrorIs(t, runCtx.Err(), context.Canceled)
 }
 
