@@ -120,6 +120,44 @@ func TestScanFilesByContentRejectsInvalidWindowBeforeFilesystemAccess(t *testing
 	}
 }
 
+func TestFileScanByContentReportsUnavailableStateHandler(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	server := &Server{
+		hasBirthTime: func([]string) bool {
+			return false
+		},
+	}
+
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(master.TaskRequest{
+		TaskID:    "missing-state-handler",
+		StartTime: now.Add(-time.Minute).Unix(),
+		EndTime:   now.Unix(),
+	}); err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/", &body)
+	server.handleFileScanByContent(recorder, request)
+
+	var response master.TaskResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Success {
+		t.Fatalf("response = %+v, want an explicit failure", response)
+	}
+	if response.ErrorCode != master.TaskErrorCodeInternal {
+		t.Fatalf("error code = %q, want %q", response.ErrorCode, master.TaskErrorCodeInternal)
+	}
+	if response.Error == "" {
+		t.Fatalf("response = %+v, want diagnostic error text", response)
+	}
+}
+
 func TestFileScanHandlersReturnTimeWindowOutcomes(t *testing.T) {
 	t.Parallel()
 
