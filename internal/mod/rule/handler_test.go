@@ -40,10 +40,16 @@ func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 		wantStateScan bool
 	}{
 		{
-			name:      "future local window is consumed as empty success",
+			name:      "future local window waits for end",
 			start:     now.Add(10 * time.Minute),
 			end:       now.Add(20 * time.Minute),
-			wantClean: true,
+			wantClean: false,
+		},
+		{
+			name:      "active after window waits for end",
+			start:     now.Add(-time.Minute),
+			end:       now.Add(time.Minute),
+			wantClean: false,
 		},
 		{
 			name:      "invalid local window is cleaned",
@@ -53,8 +59,8 @@ func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 		},
 		{
 			name:  "invalid slave window wins and is cleaned",
-			start: now.Add(-time.Minute),
-			end:   now.Add(time.Minute),
+			start: now.Add(-2 * time.Minute),
+			end:   now.Add(-time.Minute),
 			responses: map[string]*master.TaskResponse{
 				"future": {
 					Success:   false,
