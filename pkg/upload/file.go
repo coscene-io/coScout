@@ -17,6 +17,7 @@ package upload
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -36,6 +37,10 @@ func ComputeUploadFiles(taskName string, scanFolders []string, additionalFiles [
 	files := make(map[string]model.FileInfo)
 	noPermissionFolders := make([]string, 0)
 	if err := ValidateTimeWindow(startTime, endTime); err != nil {
+		if errors.Is(err, ErrTimeWindowNotReady) {
+			log.WithField("taskName", taskName).Infof("Start time is beyond the future tolerance, returning an empty successful scan: %v", err)
+			return files, noPermissionFolders, nil
+		}
 		return files, noPermissionFolders, err
 	}
 

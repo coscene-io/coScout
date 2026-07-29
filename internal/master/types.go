@@ -215,8 +215,8 @@ const (
 )
 
 // TaskResponsesTimeWindowErrorCode returns the strongest time-window status
-// reported by any slave. Permanent invalidity takes precedence over a
-// retryable not-ready result.
+// reported by any slave. Permanent invalidity takes precedence over a legacy
+// not-ready result from an older slave.
 func TaskResponsesTimeWindowErrorCode(responses map[string]*TaskResponse) string {
 	result := ""
 	for _, response := range responses {

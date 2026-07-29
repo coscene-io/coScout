@@ -37,29 +37,19 @@ func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 		responses     map[string]*master.TaskResponse
 		wantClean     bool
 		wantSlaveCall bool
+		wantStateScan bool
 	}{
 		{
-			name:  "future local window is retained",
-			start: now.Add(10 * time.Minute),
-			end:   now.Add(20 * time.Minute),
+			name:      "future local window is consumed as empty success",
+			start:     now.Add(10 * time.Minute),
+			end:       now.Add(20 * time.Minute),
+			wantClean: true,
 		},
 		{
 			name:      "invalid local window is cleaned",
 			start:     now,
 			end:       now.Add(-time.Minute),
 			wantClean: true,
-		},
-		{
-			name:  "retryable slave window is retained",
-			start: now.Add(-time.Minute),
-			end:   now.Add(time.Minute),
-			responses: map[string]*master.TaskResponse{
-				"future": {
-					Success:   false,
-					ErrorCode: master.TaskErrorCodeTimeWindowNotReady,
-				},
-			},
-			wantSlaveCall: true,
 		},
 		{
 			name:  "invalid slave window wins and is cleaned",
@@ -77,6 +67,7 @@ func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 			},
 			wantClean:     true,
 			wantSlaveCall: true,
+			wantStateScan: true,
 		},
 	}
 
@@ -86,8 +77,9 @@ func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 
 			cleaned := false
 			requester := &recordingRuleSlaveFileRequester{responses: tc.responses}
+			fileStates := &recordingRuleFileStateHandler{}
 			handler := &CustomRuleHandler{
-				collectFileStateHandler: emptyRuleFileStateHandler{},
+				collectFileStateHandler: fileStates,
 				slaveRegistry:           master.NewSlaveRegistry(),
 				masterClient:            requester,
 				masterConfig:            &config.MasterConfig{RequestTimeout: time.Second},
@@ -112,7 +104,43 @@ func TestHandleCollectInfoTimeWindowLifecycle(t *testing.T) {
 			if requester.called != tc.wantSlaveCall {
 				t.Fatalf("slave called = %v, want %v", requester.called, tc.wantSlaveCall)
 			}
+			if got := fileStates.updateCalls > 0; got != tc.wantStateScan {
+				t.Fatalf("file state scan = %v, want %v", got, tc.wantStateScan)
+			}
 		})
+	}
+}
+
+func TestSuccessfulSlaveResponsesPreservesResultsAlongsideLegacyNotReady(t *testing.T) {
+	t.Parallel()
+
+	success := &master.TaskResponse{
+		Success: true,
+		Files: []master.SlaveFileInfo{
+			{
+				FileInfo: model.FileInfo{Path: "/var/log/healthy.log"},
+				SlaveID:  "healthy",
+			},
+		},
+	}
+	responses := map[string]*master.TaskResponse{
+		"legacy": {
+			Success:   false,
+			ErrorCode: master.TaskErrorCodeTimeWindowNotReady,
+		},
+		"healthy": success,
+		"missing": nil,
+	}
+
+	got := successfulSlaveResponses(responses)
+	if len(got) != 1 {
+		t.Fatalf("successful response count = %d, want 1", len(got))
+	}
+	if got["healthy"] != success {
+		t.Fatalf("healthy response = %#v, want %#v", got["healthy"], success)
+	}
+	if _, ok := got["legacy"]; ok {
+		t.Fatal("legacy not-ready response was treated as successful")
 	}
 }
 
@@ -130,28 +158,31 @@ func (r *recordingRuleSlaveFileRequester) RequestAllSlaveFilesByContent(
 	return r.responses
 }
 
-type emptyRuleFileStateHandler struct{}
+type recordingRuleFileStateHandler struct {
+	updateCalls int
+}
 
-func (emptyRuleFileStateHandler) UpdateListenDirs(config.DefaultModConfConfig) error {
+func (*recordingRuleFileStateHandler) UpdateListenDirs(config.DefaultModConfConfig) error {
 	return nil
 }
 
-func (emptyRuleFileStateHandler) UpdateCollectDirs([]string, config.DefaultModConfConfig) error {
+func (r *recordingRuleFileStateHandler) UpdateCollectDirs([]string, config.DefaultModConfConfig) error {
+	r.updateCalls++
 	return nil
 }
 
-func (emptyRuleFileStateHandler) Files(...file_state_handler.FileFilter) []file_state_handler.FileState {
+func (*recordingRuleFileStateHandler) Files(...file_state_handler.FileFilter) []file_state_handler.FileState {
 	return nil
 }
 
-func (emptyRuleFileStateHandler) UpdateFilesProcessState() error {
+func (*recordingRuleFileStateHandler) UpdateFilesProcessState() error {
 	return nil
 }
 
-func (emptyRuleFileStateHandler) MarkProcessedFile(string) error {
+func (*recordingRuleFileStateHandler) MarkProcessedFile(string) error {
 	return nil
 }
 
-func (emptyRuleFileStateHandler) GetFileHandler(string) file_handlers.Interface {
+func (*recordingRuleFileStateHandler) GetFileHandler(string) file_handlers.Interface {
 	return nil
 }

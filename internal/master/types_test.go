@@ -32,7 +32,7 @@ func TestTaskResponsesTimeWindowErrorCode(t *testing.T) {
 			},
 		},
 		{
-			name: "retryable not ready",
+			name: "legacy not ready",
 			responses: map[string]*TaskResponse{
 				"future": {ErrorCode: TaskErrorCodeTimeWindowNotReady},
 			},

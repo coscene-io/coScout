@@ -432,7 +432,10 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 			collectLog.WithFields(log.Fields{
 				"start": info.Cut.Start,
 				"end":   info.Cut.End,
-			}).Infof("collect info is not ready yet, retaining it for a later scan: %v", err)
+			}).Infof("collect info starts beyond the future tolerance and will be consumed as an empty successful scan: %v", err)
+			if cleanedPath := c.clean(info); cleanedPath == "" {
+				collectLog.Errorf("failed to clean future collect info after empty successful scan")
+			}
 			return
 		}
 		collectLog.WithFields(log.Fields{
@@ -525,17 +528,14 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 			}
 			return
 		case master.TaskErrorCodeTimeWindowNotReady:
-			collectLog.Infof("a slave is not ready for the collect info time window, retaining it for a later scan")
-			return
+			collectLog.Infof("a legacy slave reported a not-ready time window; treating that response as empty and continuing with available results")
 		}
-		for slaveID, response := range responses {
-			if response != nil && response.Success {
-				collectLog.WithFields(log.Fields{
-					"slaveID": slaveID,
-					"files":   len(response.Files),
-				}).Infof("slave returned files for rule collection")
-				slaveFiles = append(slaveFiles, response.Files...)
-			}
+		for slaveID, response := range successfulSlaveResponses(responses) {
+			collectLog.WithFields(log.Fields{
+				"slaveID": slaveID,
+				"files":   len(response.Files),
+			}).Infof("slave returned files for rule collection")
+			slaveFiles = append(slaveFiles, response.Files...)
 		}
 		collectLog.WithField("slaveFiles", len(slaveFiles)).Infof("total slave files collected for rule")
 	}
@@ -682,6 +682,16 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 	} else {
 		collectLog.WithField("recordCache", rc.GetRecordCachePath()).Infof("published collect message")
 	}
+}
+
+func successfulSlaveResponses(responses map[string]*master.TaskResponse) map[string]*master.TaskResponse {
+	successful := make(map[string]*master.TaskResponse)
+	for slaveID, response := range responses {
+		if response != nil && response.Success {
+			successful[slaveID] = response
+		}
+	}
+	return successful
 }
 
 func (c *CustomRuleHandler) clean(info model.CollectInfo) string {

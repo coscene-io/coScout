@@ -42,7 +42,7 @@ func TestValidateTimeWindow(t *testing.T) {
 			endTime:   now.Add(FutureStartTolerance + time.Minute).Unix(),
 		},
 		{
-			name:      "start beyond tolerance is retryable",
+			name:      "start beyond tolerance is classified for empty success",
 			startTime: now.Add(FutureStartTolerance + time.Second).Unix(),
 			endTime:   now.Add(FutureStartTolerance + time.Minute).Unix(),
 			wantErr:   ErrTimeWindowNotReady,

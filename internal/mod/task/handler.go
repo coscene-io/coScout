@@ -212,7 +212,14 @@ func (c *CustomTaskHandler) handlePendingTasks(tasks []*openDpsV1alpha1Resource.
 			err := upload.ValidateTimeWindow(taskDetail.GetStartTime().AsTime().Unix(), taskDetail.GetEndTime().AsTime().Unix())
 			switch {
 			case errors.Is(err, upload.ErrTimeWindowNotReady):
-				log.WithField("taskName", task.GetName()).Infof("Upload task is not ready yet, keeping it pending: %v", err)
+				log.WithField("taskName", task.GetName()).Infof("Upload task starts beyond the future tolerance and will complete as an empty successful scan: %v", err)
+				if _, updateErr := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_PROCESSING.Enum()); updateErr != nil {
+					log.WithField("taskName", task.GetName()).Errorf("Failed to update task state: %v", updateErr)
+					continue
+				}
+				if _, updateErr := c.reqClient.UpdateTaskState(task.GetName(), enums.TaskStateEnum_SUCCEEDED.Enum()); updateErr != nil {
+					log.WithField("taskName", task.GetName()).Errorf("Failed to update task state: %v", updateErr)
+				}
 				continue
 			case errors.Is(err, upload.ErrInvalidTimeWindow):
 				log.WithField("taskName", task.GetName()).Errorf("Upload task has a permanently invalid time window: %v", err)
@@ -286,8 +293,7 @@ func (c *CustomTaskHandler) handleUploadTask(task *openDpsV1alpha1Resource.Task)
 			}
 			return
 		case master.TaskErrorCodeTimeWindowNotReady:
-			log.WithField("taskName", task.GetName()).Info("A slave is not ready for the upload time window, keeping task pending")
-			return
+			log.WithField("taskName", task.GetName()).Info("A legacy slave reported a not-ready time window; treating its response as an empty successful result")
 		}
 		for slaveID, response := range responses {
 			if response != nil && response.Success {

@@ -40,6 +40,9 @@ type Server struct {
 	server     *http.Server
 	port       int
 	filePrefix string
+	// hasBirthTime reports whether the scan roots expose filesystem birth time.
+	// Tests override it to verify that invalid/future windows return before the probe.
+	hasBirthTime func([]string) bool
 	// collectFileStateHandler caches file metadata and content time
 	collectFileStateHandler file_state_handler.FileStateHandler
 }
@@ -56,9 +59,10 @@ func NewServer(port int, filePrefix string) *Server {
 	}
 
 	s := &Server{
-		server:     server,
-		port:       port,
-		filePrefix: filePrefix,
+		server:       server,
+		port:         port,
+		filePrefix:   filePrefix,
+		hasBirthTime: utils.HasBirthTime,
 	}
 
 	// Initialize collect file state handler for content-based scans
@@ -254,11 +258,15 @@ func (s *Server) handleFileScanByContent(w http.ResponseWriter, r *http.Request)
 func (s *Server) scanFilesByContent(taskID string, scanFolders []string, additionalFiles []string, whiteList []string, recursivelyWalkDirs bool, startTime, endTime int64) ([]master.SlaveFileInfo, error) {
 	result := make([]master.SlaveFileInfo, 0)
 	if err := upload.ValidateTimeWindow(startTime, endTime); err != nil {
+		if errors.Is(err, upload.ErrTimeWindowNotReady) {
+			log.WithField("taskName", taskID).Infof("Start time is beyond the future tolerance, returning an empty successful scan: %v", err)
+			return result, nil
+		}
 		return result, err
 	}
 
 	fileStates := make([]file_state_handler.FileState, 0)
-	hasBirthTime := utils.HasBirthTime(scanFolders)
+	hasBirthTime := s.supportsBirthTime(scanFolders)
 	//nolint: nestif // nested if is more readable here.
 	if hasBirthTime {
 		log.WithField("taskName", taskID).Infof("os supports birth time, will use birth time for content time filtering")
@@ -359,6 +367,13 @@ func (s *Server) scanFilesByContent(taskID string, scanFolders []string, additio
 
 	log.Infof("Found %d files matching content time range", len(result))
 	return result, nil
+}
+
+func (s *Server) supportsBirthTime(paths []string) bool {
+	if s.hasBirthTime != nil {
+		return s.hasBirthTime(paths)
+	}
+	return utils.HasBirthTime(paths)
 }
 
 func scanErrorCode(err error) string {

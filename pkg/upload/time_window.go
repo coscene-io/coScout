@@ -29,8 +29,8 @@ const (
 var (
 	// ErrInvalidTimeWindow identifies a permanent request error.
 	ErrInvalidTimeWindow = errors.New("invalid upload time window")
-	// ErrTimeWindowNotReady identifies a retryable request whose start time has
-	// not arrived yet.
+	// ErrTimeWindowNotReady classifies a request whose start time is beyond the
+	// accepted future tolerance. Scan entry points translate it to empty success.
 	ErrTimeWindowNotReady = errors.New("upload time window is not ready")
 )
 
@@ -64,8 +64,8 @@ func (e *TimeWindowError) Unwrap() error {
 	return e.kind
 }
 
-// ValidateTimeWindow rejects permanent invalid ranges and retryable ranges
-// whose start time is still too far in the future. A future end time is valid.
+// ValidateTimeWindow rejects permanently invalid ranges and classifies ranges
+// whose start time is beyond the accepted tolerance. A future end time is valid.
 func ValidateTimeWindow(startTime, endTime int64) error {
 	return validateTimeWindowAt(startTime, endTime, time.Now())
 }

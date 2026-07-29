@@ -42,12 +42,39 @@ func TestScanFilesRejectsInvalidWindowBeforeFilesystemAccess(t *testing.T) {
 	}
 }
 
-func TestScanFilesByContentDefersFutureWindowBeforeFilesystemAccess(t *testing.T) {
+func TestScanFilesReturnsEmptySuccessForFutureWindowBeforeFilesystemAccess(t *testing.T) {
 	t.Parallel()
 
 	missingPath := filepath.Join(t.TempDir(), "must-not-be-accessed")
 	now := time.Now()
-	files, err := (&Server{}).scanFilesByContent(
+	files, err := (&Server{}).scanFiles(
+		"future",
+		[]string{missingPath},
+		[]string{missingPath},
+		now.Add(10*time.Minute).Unix(),
+		now.Add(20*time.Minute).Unix(),
+	)
+
+	if err != nil {
+		t.Fatalf("error = %v, want empty success", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("files = %v, want none", files)
+	}
+}
+
+func TestScanFilesByContentReturnsEmptySuccessForFutureWindowBeforeFilesystemAccess(t *testing.T) {
+	t.Parallel()
+
+	missingPath := filepath.Join(t.TempDir(), "must-not-be-accessed")
+	now := time.Now()
+	server := &Server{
+		hasBirthTime: func([]string) bool {
+			t.Fatal("birth-time probe was called for a future window")
+			return false
+		},
+	}
+	files, err := server.scanFilesByContent(
 		"future",
 		[]string{missingPath},
 		[]string{missingPath},
@@ -57,15 +84,43 @@ func TestScanFilesByContentDefersFutureWindowBeforeFilesystemAccess(t *testing.T
 		now.Add(20*time.Minute).Unix(),
 	)
 
-	if !errors.Is(err, upload.ErrTimeWindowNotReady) {
-		t.Fatalf("error = %v, want ErrTimeWindowNotReady", err)
+	if err != nil {
+		t.Fatalf("error = %v, want empty success", err)
 	}
 	if len(files) != 0 {
 		t.Fatalf("files = %v, want none", files)
 	}
 }
 
-func TestFileScanHandlersReturnRecognizableTimeWindowStatus(t *testing.T) {
+func TestScanFilesByContentRejectsInvalidWindowBeforeFilesystemAccess(t *testing.T) {
+	t.Parallel()
+
+	missingPath := filepath.Join(t.TempDir(), "must-not-be-accessed")
+	server := &Server{
+		hasBirthTime: func([]string) bool {
+			t.Fatal("birth-time probe was called for an invalid window")
+			return false
+		},
+	}
+	files, err := server.scanFilesByContent(
+		"invalid",
+		[]string{missingPath},
+		[]string{missingPath},
+		nil,
+		true,
+		2,
+		1,
+	)
+
+	if !errors.Is(err, upload.ErrInvalidTimeWindow) {
+		t.Fatalf("error = %v, want ErrInvalidTimeWindow", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("files = %v, want none", files)
+	}
+}
+
+func TestFileScanHandlersReturnTimeWindowOutcomes(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
@@ -74,6 +129,7 @@ func TestFileScanHandlersReturnRecognizableTimeWindowStatus(t *testing.T) {
 		handler       func(http.ResponseWriter, *http.Request)
 		startTime     int64
 		endTime       int64
+		wantSuccess   bool
 		wantErrorCode string
 	}{
 		{
@@ -84,11 +140,25 @@ func TestFileScanHandlersReturnRecognizableTimeWindowStatus(t *testing.T) {
 			wantErrorCode: master.TaskErrorCodeInvalidTimeWindow,
 		},
 		{
-			name:          "future window",
+			name:          "invalid window by content time",
 			handler:       (&Server{}).handleFileScanByContent,
-			startTime:     now.Add(10 * time.Minute).Unix(),
-			endTime:       now.Add(20 * time.Minute).Unix(),
-			wantErrorCode: master.TaskErrorCodeTimeWindowNotReady,
+			startTime:     now.Unix(),
+			endTime:       now.Add(-time.Minute).Unix(),
+			wantErrorCode: master.TaskErrorCodeInvalidTimeWindow,
+		},
+		{
+			name:        "future window by modification time",
+			handler:     (&Server{}).handleFileScan,
+			startTime:   now.Add(10 * time.Minute).Unix(),
+			endTime:     now.Add(20 * time.Minute).Unix(),
+			wantSuccess: true,
+		},
+		{
+			name:        "future window by content time",
+			handler:     (&Server{}).handleFileScanByContent,
+			startTime:   now.Add(10 * time.Minute).Unix(),
+			endTime:     now.Add(20 * time.Minute).Unix(),
+			wantSuccess: true,
 		},
 	}
 
@@ -114,13 +184,16 @@ func TestFileScanHandlersReturnRecognizableTimeWindowStatus(t *testing.T) {
 			if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
-			if response.Success {
-				t.Fatalf("response = %+v, want unsuccessful scan", response)
+			if response.Success != tc.wantSuccess {
+				t.Fatalf("success = %v, want %v: %+v", response.Success, tc.wantSuccess, response)
 			}
 			if response.ErrorCode != tc.wantErrorCode {
 				t.Fatalf("error code = %q, want %q", response.ErrorCode, tc.wantErrorCode)
 			}
-			if response.Error == "" {
+			if tc.wantSuccess && (response.Error != "" || len(response.Files) != 0) {
+				t.Fatalf("response = %+v, want successful empty result", response)
+			}
+			if !tc.wantSuccess && response.Error == "" {
 				t.Fatalf("response = %+v, want diagnostic error text", response)
 			}
 		})

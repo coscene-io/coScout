@@ -27,18 +27,32 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestHandlePendingTasksKeepsFutureWindowPending(t *testing.T) {
+func TestHandlePendingTasksCompletesFutureWindowAsEmptySuccess(t *testing.T) {
 	t.Parallel()
 
 	client := &recordingRequestClient{}
-	handler := &CustomTaskHandler{reqClient: client}
+	slaveRequester := &recordingSlaveFileRequester{}
+	handler := &CustomTaskHandler{
+		reqClient:     client,
+		slaveRegistry: master.NewSlaveRegistry(),
+		masterClient:  slaveRequester,
+		masterConfig:  &config.MasterConfig{RequestTimeout: time.Second},
+	}
 	now := time.Now()
 	handler.handlePendingTasks([]*resources.Task{
 		uploadTaskForWindow("future", now.Add(10*time.Minute), now.Add(20*time.Minute)),
 	})
 
-	if len(client.stateUpdates) != 0 {
-		t.Fatalf("state updates = %v, want none so the task remains pending", client.stateUpdates)
+	if len(client.stateUpdates) != 2 ||
+		client.stateUpdates[0] != enums.TaskStateEnum_PROCESSING ||
+		client.stateUpdates[1] != enums.TaskStateEnum_SUCCEEDED {
+		t.Fatalf("state updates = %v, want [PROCESSING SUCCEEDED]", client.stateUpdates)
+	}
+	if client.tagUpdates != 0 {
+		t.Fatalf("tag updates = %d, want 0 because future-start handling must not inspect scan paths", client.tagUpdates)
+	}
+	if slaveRequester.requests != 0 {
+		t.Fatalf("slave requests = %d, want 0 because future-start handling must finish locally", slaveRequester.requests)
 	}
 }
 
@@ -60,30 +74,36 @@ func TestHandlePendingTasksMarksInvalidWindowFailed(t *testing.T) {
 	}
 }
 
-func TestHandlePendingTasksKeepsTaskPendingWhenSlaveIsNotReady(t *testing.T) {
+func TestHandlePendingTasksTreatsLegacySlaveNotReadyAsEmptySuccess(t *testing.T) {
 	t.Parallel()
 
 	client := &recordingRequestClient{}
+	slaveRequester := &recordingSlaveFileRequester{
+		responses: map[string]*master.TaskResponse{
+			"slow-clock": {
+				Success:   false,
+				ErrorCode: master.TaskErrorCodeTimeWindowNotReady,
+			},
+		},
+	}
 	handler := &CustomTaskHandler{
 		reqClient:     client,
 		slaveRegistry: master.NewSlaveRegistry(),
-		masterClient: &recordingSlaveFileRequester{
-			responses: map[string]*master.TaskResponse{
-				"slow-clock": {
-					Success:   false,
-					ErrorCode: master.TaskErrorCodeTimeWindowNotReady,
-				},
-			},
-		},
-		masterConfig: &config.MasterConfig{RequestTimeout: time.Second},
+		masterClient:  slaveRequester,
+		masterConfig:  &config.MasterConfig{RequestTimeout: time.Second},
 	}
 	now := time.Now()
-	handler.handlePendingTasks([]*resources.Task{
-		uploadTaskForWindow("slave-future", now.Add(4*time.Minute), now.Add(10*time.Minute)),
-	})
+	task := uploadTaskForWindow("slave-future", now.Add(-time.Minute), now.Add(time.Minute))
+	task.GetUploadTaskDetail().ScanFolders = nil
+	handler.handlePendingTasks([]*resources.Task{task})
 
-	if len(client.stateUpdates) != 0 {
-		t.Fatalf("state updates = %v, want none so the task remains pending", client.stateUpdates)
+	if len(client.stateUpdates) != 2 ||
+		client.stateUpdates[0] != enums.TaskStateEnum_PROCESSING ||
+		client.stateUpdates[1] != enums.TaskStateEnum_SUCCEEDED {
+		t.Fatalf("state updates = %v, want [PROCESSING SUCCEEDED]", client.stateUpdates)
+	}
+	if slaveRequester.requests != 1 {
+		t.Fatalf("slave requests = %d, want 1 for legacy response compatibility", slaveRequester.requests)
 	}
 }
 
@@ -139,6 +159,7 @@ func TestHandlePendingTasksStillProcessesRunnableWindow(t *testing.T) {
 
 type recordingRequestClient struct {
 	stateUpdates []enums.TaskStateEnum_TaskState
+	tagUpdates   int
 }
 
 func (c *recordingRequestClient) ListDeviceTasks(string, *enums.TaskStateEnum_TaskState, string) ([]*resources.Task, error) {
@@ -151,14 +172,17 @@ func (c *recordingRequestClient) UpdateTaskState(_ string, state *enums.TaskStat
 }
 
 func (c *recordingRequestClient) AddTaskTags(string, map[string]string) (*emptypb.Empty, error) {
+	c.tagUpdates++
 	return &emptypb.Empty{}, nil
 }
 
 type recordingSlaveFileRequester struct {
 	responses map[string]*master.TaskResponse
+	requests  int
 }
 
 func (r *recordingSlaveFileRequester) RequestAllSlaveFiles(context.Context, *master.SlaveRegistry, *master.TaskRequest) map[string]*master.TaskResponse {
+	r.requests++
 	return r.responses
 }
 

@@ -47,7 +47,7 @@ func TestComputeUploadFilesInvalidWindowDoesNotTouchFilesystem(t *testing.T) {
 	}
 }
 
-func TestComputeUploadFilesFutureStartDoesNotTouchFilesystem(t *testing.T) {
+func TestComputeUploadFilesFutureStartReturnsEmptySuccessWithoutFilesystemAccess(t *testing.T) {
 	t.Parallel()
 
 	missingPath := filepath.Join(t.TempDir(), "must-not-be-accessed")
@@ -62,8 +62,8 @@ func TestComputeUploadFilesFutureStartDoesNotTouchFilesystem(t *testing.T) {
 		now.Add(20*time.Minute).Unix(),
 	)
 
-	if !errors.Is(err, ErrTimeWindowNotReady) {
-		t.Fatalf("error = %v, want ErrTimeWindowNotReady", err)
+	if err != nil {
+		t.Fatalf("error = %v, want empty success", err)
 	}
 	if len(files) != 0 {
 		t.Fatalf("files = %v, want none", files)
