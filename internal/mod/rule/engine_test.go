@@ -15,6 +15,7 @@
 package rule
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -22,6 +23,11 @@ import (
 	"buf.build/gen/go/coscene-io/coscene-openapi/protocolbuffers/go/coscene/openapi/dataplatform/v1alpha1/resources"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
 	mapset "github.com/deckarep/golang-set/v2"
+)
+
+var (
+	errTestActionFailed  = errors.New("action failed")
+	errTestPublishFailed = errors.New("publish failed")
 )
 
 func TestUpdateRulesKeepsAllTopicsActiveWhenAnyRuleHasNoTopic(t *testing.T) {
@@ -105,6 +111,9 @@ func TestConsumeNextDebouncesEachScopeSeparately(t *testing.T) {
 	}
 	engine := Engine{
 		ruleDebounceTime: make(map[string]*time.Time),
+		publishCollectInfoFn: func(string) error {
+			return nil
+		},
 		rules: []*rule_engine.Rule{
 			rule_engine.NewRule(
 				[]rule_engine.Condition{*condition},
@@ -125,8 +134,20 @@ func TestConsumeNextDebouncesEachScopeSeparately(t *testing.T) {
 		},
 	}
 
-	engine.ConsumeNext(rule_engine.RuleItem{Msg: map[string]interface{}{"code": "A"}, Topic: "/fault", Ts: 1})
-	engine.ConsumeNext(rule_engine.RuleItem{Msg: map[string]interface{}{"code": "B"}, Topic: "/fault", Ts: 2})
+	if err := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{"code": "A"},
+		Topic: "/fault",
+		Ts:    1,
+	}); err != nil {
+		t.Fatalf("consume scope A: %v", err)
+	}
+	if err := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{"code": "B"},
+		Topic: "/fault",
+		Ts:    2,
+	}); err != nil {
+		t.Fatalf("consume scope B: %v", err)
+	}
 
 	if len(triggered) != 2 {
 		t.Fatalf("triggered scopes = %v, want both scopes to trigger independently", triggered)
@@ -134,6 +155,93 @@ func TestConsumeNextDebouncesEachScopeSeparately(t *testing.T) {
 	if triggered[0] != "A" || triggered[1] != "B" {
 		t.Fatalf("triggered scopes = %v, want [A B]", triggered)
 	}
+}
+
+func TestConsumeNextReturnsActionError(t *testing.T) {
+	t.Parallel()
+
+	action, err := rule_engine.NewAction(
+		"failing-action",
+		map[string]interface{}{},
+		func(map[string]interface{}) error {
+			return errTestActionFailed
+		},
+	)
+	if err != nil {
+		t.Fatalf("new action: %v", err)
+	}
+	publishCalls := 0
+	engine := Engine{
+		rules:            []*rule_engine.Rule{testRuntimeRule(t, action)},
+		ruleDebounceTime: make(map[string]*time.Time),
+		publishCollectInfoFn: func(string) error {
+			publishCalls++
+			return nil
+		},
+	}
+
+	gotErr := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{},
+		Topic: "/fault",
+		Ts:    1,
+	})
+
+	if !errors.Is(gotErr, errTestActionFailed) {
+		t.Fatalf("ConsumeNext error = %v, want action error", gotErr)
+	}
+	if publishCalls != 1 {
+		t.Fatalf("publish calls = %d, want 1", publishCalls)
+	}
+}
+
+func TestConsumeNextReturnsPublishError(t *testing.T) {
+	t.Parallel()
+
+	action, err := rule_engine.NewAction(
+		"successful-action",
+		map[string]interface{}{},
+		rule_engine.EmptyActionImpl,
+	)
+	if err != nil {
+		t.Fatalf("new action: %v", err)
+	}
+	engine := Engine{
+		rules:            []*rule_engine.Rule{testRuntimeRule(t, action)},
+		ruleDebounceTime: make(map[string]*time.Time),
+		publishCollectInfoFn: func(string) error {
+			return errTestPublishFailed
+		},
+	}
+
+	gotErr := engine.ConsumeNext(rule_engine.RuleItem{
+		Msg:   map[string]interface{}{},
+		Topic: "/fault",
+		Ts:    1,
+	})
+
+	if !errors.Is(gotErr, errTestPublishFailed) {
+		t.Fatalf("ConsumeNext error = %v, want publish error", gotErr)
+	}
+}
+
+func testRuntimeRule(t *testing.T, action *rule_engine.Action) *rule_engine.Rule {
+	t.Helper()
+
+	condition, err := rule_engine.NewCondition("true")
+	if err != nil {
+		t.Fatalf("new condition: %v", err)
+	}
+	return rule_engine.NewRule(
+		[]rule_engine.Condition{*condition},
+		[]rule_engine.Action{*action},
+		nil,
+		mapset.NewSet[string]("/fault"),
+		0,
+		map[string]interface{}{
+			"rule_name":         "runtime-rule",
+			"rule_display_name": "runtime rule",
+		},
+	)
 }
 
 func testDiagnosisRule(id string, activeTopic string) *resources.DiagnosisRule {

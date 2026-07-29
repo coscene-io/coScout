@@ -15,6 +15,7 @@
 package file_handlers
 
 import (
+	"context"
 	"os"
 	"strings"
 	"time"
@@ -75,35 +76,44 @@ func (h *logHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time.Tim
 	return startTime, endTime, nil
 }
 
-func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[string], sendRuleItem func(rule_engine.RuleItem) bool) {
+func (h *logHandler) SendRuleItems(
+	ctx context.Context,
+	filePath string,
+	activeTopics mapset.Set[string],
+	sendRuleItem func(rule_engine.RuleItem) bool,
+) error {
 	if activeTopics.Cardinality() > 0 && !activeTopics.Contains("/external_log") {
-		return
+		return nil
 	}
 
 	logFileReader, err := os.Open(filePath)
 	if err != nil {
 		log.Errorf("open log file [%s] failed: %v", filePath, err)
-		return
+		return errors.Errorf("open log file [%s]: %v", filePath, err)
 	}
 	defer logFileReader.Close()
 
 	reader, err := log_reader.NewLogReader(logFileReader, filePath)
 	if err != nil {
 		log.Errorf("failed to create log reader for log file %s: %v", filePath, err)
-		return
+		return errors.Errorf("create log reader for log file %s: %v", filePath, err)
 	}
 
 	iter, err := log_reader.NewLogIterator(reader)
 	if err != nil {
 		log.Errorf("failed to create log iterator for log file %s: %v", filePath, err)
-		return
+		return errors.Errorf("create log iterator for log file %s: %v", filePath, err)
 	}
 
 	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		stampedLog, hasNext := iter.Next()
 		if !hasNext {
 			log.Infof("finished sending rule items for log file %s", filePath)
-			break
+			return nil
 		}
 
 		sec := stampedLog.Timestamp.Unix()
@@ -124,7 +134,10 @@ func (h *logHandler) SendRuleItems(filePath string, activeTopics mapset.Set[stri
 			Ts:     tsFloat,
 			Source: filePath,
 		}) {
-			return
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return nil
 		}
 	}
 }

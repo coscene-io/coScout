@@ -15,6 +15,7 @@
 package file_handlers
 
 import (
+	"context"
 	"os"
 	"strings"
 	"time"
@@ -69,8 +70,14 @@ func (h *defaultHandler) GetStartTimeEndTime(filePath string) (*time.Time, *time
 	return &birthTime, &modTime, nil
 }
 
-func (h *defaultHandler) SendRuleItems(filePath string, activeTopics mapset.Set[string], sendRuleItem func(rule_engine.RuleItem) bool) {
+func (h *defaultHandler) SendRuleItems(
+	_ context.Context,
+	filePath string,
+	_ mapset.Set[string],
+	_ func(rule_engine.RuleItem) bool,
+) error {
 	log.Info("filePath not supported by rule engine: ", filePath, ", skip sending rule items")
+	return nil
 }
 
 func (h *defaultHandler) IsFinished(filePath string) bool {

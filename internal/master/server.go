@@ -22,11 +22,14 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coscene-io/coscout/internal/config"
 	log "github.com/sirupsen/logrus"
 )
+
+var errServerAlreadyStarted = errors.New("master server already started")
 
 // Server master server.
 type Server struct {
@@ -34,6 +37,9 @@ type Server struct {
 	config   *config.MasterConfig
 	server   *http.Server
 	port     int
+	ready    chan struct{}
+	startMu  sync.Mutex
+	started  bool
 }
 
 // NewServer creates a new master server.
@@ -54,6 +60,7 @@ func NewServer(port int, masterConfig *config.MasterConfig) *Server {
 		config:   masterConfig,
 		server:   server,
 		port:     port,
+		ready:    make(chan struct{}),
 	}
 
 	// Register routes
@@ -66,26 +73,64 @@ func NewServer(port int, masterConfig *config.MasterConfig) *Server {
 	return s
 }
 
+// Ready is closed once the server has successfully bound its listening port.
+func (s *Server) Ready() <-chan struct{} {
+	return s.ready
+}
+
 // Start starts the server.
 func (s *Server) Start(ctx context.Context) error {
-	// Start cleanup goroutine
-	go s.cleanupRoutine(ctx)
+	s.startMu.Lock()
+	if s.started {
+		s.startMu.Unlock()
+		return errServerAlreadyStarted
+	}
+	s.started = true
+	s.startMu.Unlock()
 
 	log.Infof("Master server starting on port %d", s.port)
 
-	go func() {
-		if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Errorf("Master server failed: %v", err)
-		}
-	}()
+	listener, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", s.server.Addr, err)
+	}
+	close(s.ready)
 
-	<-ctx.Done()
-	log.Info("Master server shutting down...")
-
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	serverCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	return s.server.Shutdown(shutdownCtx)
+	// Start cleanup only after the listening socket has been acquired.
+	go s.cleanupRoutine(serverCtx)
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- s.server.Serve(listener)
+	}()
+
+	select {
+	case err := <-serveErr:
+		if err == nil || errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return fmt.Errorf("serve master requests: %w", err)
+	case <-ctx.Done():
+		log.Info("Master server shutting down...")
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer shutdownCancel()
+
+		if err := s.server.Shutdown(shutdownCtx); err != nil {
+			_ = s.server.Close()
+			<-serveErr
+			return fmt.Errorf("shutdown master server: %w", err)
+		}
+
+		err := <-serveErr
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve master requests: %w", err)
+		}
+		return nil
+	}
 }
 
 // GetRegistry returns the slave registry.

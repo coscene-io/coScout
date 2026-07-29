@@ -400,26 +400,22 @@ func readField(
 		return readComplexType(nestedDef, msgDefs, reader)
 	}
 
-	var arrayLength int
-	if ftype.ArraySize != nil {
-		// Fixed size array
-		arrayLength = *ftype.ArraySize
-	} else {
-		// Dynamic array - read length prefix
-		length, err := reader.Uint32()
-		if err != nil {
-			return nil, err
-		}
-		arrayLength = int(length)
-
-		// Handle upper bound if specified
-		if ftype.IsUpperBound && ftype.ArraySize != nil && arrayLength > *ftype.ArraySize {
-			arrayLength = *ftype.ArraySize
-		}
+	arrayLength, err := readArrayLength(ftype, reader)
+	if err != nil {
+		return nil, err
+	}
+	length, err := validateArrayLength(
+		arrayLength,
+		reader.RemainingBytes(),
+		1,
+		resultComplexElementBytes,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	array := make([]interface{}, arrayLength)
-	for i := range arrayLength {
+	array := make([]interface{}, length)
+	for i := range length {
 		value, err := readComplexType(nestedDef, msgDefs, reader)
 		if err != nil {
 			return nil, err
@@ -431,51 +427,95 @@ func readField(
 
 // readPrimitiveArray reads an array of primitive values.
 func readPrimitiveArray(ftype Type, reader *CdrReader) (interface{}, error) {
-	var arrayLength int
-	if ftype.ArraySize != nil {
-		// Fixed size array
-		arrayLength = *ftype.ArraySize
-	} else {
-		// Dynamic array - read length prefix
-		length, err := reader.Uint32()
-		if err != nil {
-			return nil, err
-		}
-		arrayLength = int(length)
-
-		// Handle upper bound if specified
-		if ftype.IsUpperBound && ftype.ArraySize != nil && arrayLength > *ftype.ArraySize {
-			arrayLength = *ftype.ArraySize
-		}
+	arrayLength, err := readArrayLength(ftype, reader)
+	if err != nil {
+		return nil, err
+	}
+	minEncodedBytes, resultElementBytes, err := primitiveArrayElementSizes(ftype.Type)
+	if err != nil {
+		return nil, err
+	}
+	length, err := validateArrayLength(
+		arrayLength,
+		reader.RemainingBytes(),
+		minEncodedBytes,
+		resultElementBytes,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	switch ftype.Type {
 	case typeBool:
-		return reader.BooleanArray(arrayLength)
+		return reader.BooleanArray(length)
 	case typeByte, typeUint8:
-		return reader.Uint8Array(arrayLength)
+		return reader.Uint8Array(length)
 	case typeChar, typeInt8:
-		return reader.Int8Array(arrayLength)
+		return reader.Int8Array(length)
 	case typeInt16:
-		return reader.Int16Array(arrayLength)
+		return reader.Int16Array(length)
 	case typeUint16:
-		return reader.Uint16Array(arrayLength)
+		return reader.Uint16Array(length)
 	case typeInt32:
-		return reader.Int32Array(arrayLength)
+		return reader.Int32Array(length)
 	case typeUint32:
-		return reader.Uint32Array(arrayLength)
+		return reader.Uint32Array(length)
 	case typeInt64:
-		return reader.Int64Array(arrayLength)
+		return reader.Int64Array(length)
 	case typeUint64:
-		return reader.Uint64Array(arrayLength)
+		return reader.Uint64Array(length)
 	case typeFloat32:
-		return reader.Float32Array(arrayLength)
+		return reader.Float32Array(length)
 	case typeFloat64:
-		return reader.Float64Array(arrayLength)
+		return reader.Float64Array(length)
 	case typeString:
-		return reader.StringArray(arrayLength)
+		return reader.StringArray(length)
 	default:
 		return nil, errors.Errorf("unsupported array type: %s", ftype.Type)
+	}
+}
+
+func readArrayLength(ftype Type, reader *CdrReader) (uint64, error) {
+	if ftype.ArraySize != nil && !ftype.IsUpperBound {
+		if *ftype.ArraySize < 0 {
+			return 0, errors.Errorf("array declared a negative fixed length %d", *ftype.ArraySize)
+		}
+		return uint64(*ftype.ArraySize), nil
+	}
+
+	length, err := reader.SequenceLength()
+	if err != nil {
+		return 0, err
+	}
+	if ftype.IsUpperBound && ftype.ArraySize != nil {
+		if *ftype.ArraySize < 0 {
+			return 0, errors.Errorf("array declared a negative schema upper bound %d", *ftype.ArraySize)
+		}
+		if uint64(length) > uint64(*ftype.ArraySize) {
+			return 0, errors.Errorf(
+				"array declared length %d exceeds schema upper bound %d",
+				length,
+				*ftype.ArraySize,
+			)
+		}
+	}
+	return uint64(length), nil
+}
+
+func primitiveArrayElementSizes(typeName string) (int, int, error) {
+	switch typeName {
+	case typeBool, typeByte, typeUint8, typeChar, typeInt8:
+		return 1, 1, nil
+	case typeInt16, typeUint16:
+		return 2, 2, nil
+	case typeInt32, typeUint32, typeFloat32:
+		return 4, 4, nil
+	case typeInt64, typeUint64, typeFloat64:
+		return 8, 8, nil
+	case typeString:
+		return 4, resultStringHeaderBytes, nil
+	default:
+		return 0, 0, errors.Errorf("unsupported array type: %s", typeName)
 	}
 }
 

@@ -16,6 +16,7 @@ package config
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/coscene-io/coscout/internal/storage"
 	"github.com/coscene-io/coscout/pkg/constant"
@@ -25,6 +26,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -36,12 +38,19 @@ const (
 type ConfManager struct {
 	cfg     string
 	storage *storage.Storage
+	cache   *configCache
+}
+
+type configCache struct {
+	mu       sync.RWMutex
+	lastGood *AppConfig
 }
 
 func InitConfManager(cfg string, s *storage.Storage) *ConfManager {
 	return &ConfManager{
 		cfg:     cfg,
 		storage: s,
+		cache:   &configCache{},
 	}
 }
 
@@ -84,11 +93,11 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 	}
 }
 
-func (c ConfManager) LoadOnce() AppConfig {
+func (c ConfManager) LoadOnce() (AppConfig, error) {
 	appConf := c.getDefaultConfig()
 
 	if err := utils.ParseYAML(c.cfg, &appConf); err != nil {
-		log.Fatalf("unable to load cos config: %v", err)
+		return AppConfig{}, errors.Wrap(err, "unable to load cos config")
 	}
 	for _, f := range appConf.Import {
 		if strings.HasPrefix(f, RemoteFilePrefix) {
@@ -97,58 +106,99 @@ func (c ConfManager) LoadOnce() AppConfig {
 
 		localPath := strings.TrimPrefix(f, LocalFilePrefix)
 		if !utils.CheckReadPath(localPath) {
-			log.Warnf("local config file %s not exist", localPath)
-			continue
+			return AppConfig{}, errors.Errorf("unable to load local config %s: file does not exist or is not readable", localPath)
 		}
 
 		if err := utils.ParseYAML(localPath, &appConf); err != nil {
-			log.Fatalf("unable to load cos config: %v", err)
+			return AppConfig{}, errors.Wrapf(err, "unable to load local config %s", localPath)
 		}
 	}
-	return appConf
+	return appConf, nil
 }
 
-func (c ConfManager) LoadWithRemote() *AppConfig {
-	appConf := c.LoadOnce()
+// LoadStartup loads the local startup configuration and seeds it as an initial
+// fallback. Remote imports are intentionally not required at this stage; the
+// first successful LoadWithRemote replaces this baseline with the complete
+// merged configuration.
+func (c ConfManager) LoadStartup() (AppConfig, error) {
+	appConf, err := c.LoadOnce()
+	if err != nil {
+		return AppConfig{}, err
+	}
+
+	c.setLastKnownGood(appConf)
+	return appConf, nil
+}
+
+func (c ConfManager) LoadWithRemote() (*AppConfig, error) {
+	appConf, err := c.LoadOnce()
+	if err != nil {
+		return c.lastKnownGood(), err
+	}
 	k := koanf.New(".") // Create a new koanf instance.
 
 	for _, f := range appConf.Import {
 		//nolint: nestif // no need to nest if
 		if strings.HasPrefix(f, RemoteFilePrefix) {
 			name := strings.TrimPrefix(f, RemoteFilePrefix)
+			if c.storage == nil || *c.storage == nil {
+				return c.lastKnownGood(), errors.Errorf("unable to load remote config %s: storage is not configured", name)
+			}
 			remoteCache, err := (*c.storage).Get([]byte(constant.DeviceRemoteConfigBucket), []byte(name))
 
 			if err != nil {
-				log.Errorf("unable to get remote config: %v", err)
-				continue
+				return c.lastKnownGood(), errors.Wrapf(err, "unable to get remote config %s", name)
 			}
 			//nolint: gosimple // no need to simplify
 			if remoteCache == nil || len(remoteCache) == 0 {
-				log.Errorf("remote config is empty")
-				continue
+				return c.lastKnownGood(), errors.Errorf("unable to load remote config %s: config is empty", name)
 			}
 
 			if err := k.Load(rawbytes.Provider(remoteCache), json.Parser()); err != nil {
-				log.Errorf("unable to load remote config: %v", err)
-				continue
+				return c.lastKnownGood(), errors.Wrapf(err, "unable to load remote config %s", name)
 			}
 		} else {
 			localPath := strings.TrimPrefix(f, LocalFilePrefix)
 			if !utils.CheckReadPath(localPath) {
-				log.Warnf("file %s not exist or has no permission", localPath)
-				continue
+				return c.lastKnownGood(), errors.Errorf("unable to load local config %s: file does not exist or is not readable", localPath)
 			}
 
 			if err := k.Load(file.Provider(localPath), yaml.Parser()); err != nil {
-				log.Errorf("unable to load local config: %v", err)
-				continue
+				return c.lastKnownGood(), errors.Wrapf(err, "unable to load local config %s", localPath)
 			}
 		}
 	}
 
-	err := k.Unmarshal("", &appConf)
-	if err != nil {
-		log.Errorf("unable to unmarshal koanf: %v", err)
+	if err := k.Unmarshal("", &appConf); err != nil {
+		return c.lastKnownGood(), errors.Wrap(err, "unable to unmarshal config")
 	}
+
+	c.setLastKnownGood(appConf)
+	return &appConf, nil
+}
+
+func (c ConfManager) setLastKnownGood(appConf AppConfig) {
+	if c.cache == nil {
+		return
+	}
+
+	c.cache.mu.Lock()
+	defer c.cache.mu.Unlock()
+
+	c.cache.lastGood = &appConf
+}
+
+func (c ConfManager) lastKnownGood() *AppConfig {
+	if c.cache == nil {
+		return nil
+	}
+
+	c.cache.mu.RLock()
+	defer c.cache.mu.RUnlock()
+
+	if c.cache.lastGood == nil {
+		return nil
+	}
+	appConf := *c.cache.lastGood
 	return &appConf
 }

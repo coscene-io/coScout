@@ -50,6 +50,8 @@ func (updateCollectDirsErrorHandler) UpdateFilesProcessState() error { return ni
 
 func (updateCollectDirsErrorHandler) MarkProcessedFile(string) error { return nil }
 
+func (updateCollectDirsErrorHandler) MarkFailedFile(string) error { return nil }
+
 func (updateCollectDirsErrorHandler) GetFileHandler(string) file_handlers.Interface { return nil }
 
 type deadlineResponseWriter struct {

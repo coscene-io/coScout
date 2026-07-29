@@ -22,6 +22,25 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// maxDecodedArrayBytes caps the estimated backing storage of any decoded
+	// array. It is deliberately independent of the encoded payload size because
+	// []string and []interface{} amplify small encoded elements into two-word Go
+	// values.
+	maxDecodedArrayBytes = 64 << 20
+
+	// Interfaces and strings both occupy two machine words on the supported
+	// 64-bit targets. Keeping the conservative 16-byte estimate on 32-bit
+	// targets only makes the decoder limit stricter.
+	resultInterfaceSlotBytes = 16
+	resultStringHeaderBytes  = 16
+
+	// A decoded complex element owns both its interface slot and at least one
+	// map produced by readComplexType. Budget conservatively for that object
+	// graph rather than only for the interface backing array.
+	resultComplexElementBytes = 128
+)
+
 // CdrReader parses values from CDR data.
 type CdrReader struct {
 	data         []byte
@@ -52,6 +71,14 @@ func (r *CdrReader) ByteLength() int {
 	return len(r.data)
 }
 
+// RemainingBytes returns the number of unread bytes in the CDR payload.
+func (r *CdrReader) RemainingBytes() int {
+	if r.offset >= len(r.data) {
+		return 0
+	}
+	return len(r.data) - r.offset
+}
+
 // Boolean reads an 8-bit value and interprets it as a boolean.
 func (r *CdrReader) Boolean() (bool, error) {
 	val, err := r.Uint8()
@@ -61,13 +88,19 @@ func (r *CdrReader) Boolean() (bool, error) {
 // Int8 reads a signed 8-bit integer.
 func (r *CdrReader) Int8() (int8, error) {
 	val, err := r.read(1)
-	return int8(val[0]), err
+	if err != nil {
+		return 0, err
+	}
+	return int8(val[0]), nil
 }
 
 // Uint8 reads an unsigned 8-bit integer.
 func (r *CdrReader) Uint8() (uint8, error) {
 	val, err := r.read(1)
-	return val[0], err
+	if err != nil {
+		return 0, err
+	}
+	return val[0], nil
 }
 
 // uint16ToInt16 converts a uint16 to a int16.
@@ -79,13 +112,19 @@ func uint16ToInt16(u uint16) int16 {
 // Int16 reads a signed 16-bit integer.
 func (r *CdrReader) Int16() (int16, error) {
 	val, err := r.read(2)
-	return uint16ToInt16(r.byteOrder().Uint16(val)), err
+	if err != nil {
+		return 0, err
+	}
+	return uint16ToInt16(r.byteOrder().Uint16(val)), nil
 }
 
 // Uint16 reads an unsigned 16-bit integer.
 func (r *CdrReader) Uint16() (uint16, error) {
 	val, err := r.read(2)
-	return r.byteOrder().Uint16(val), err
+	if err != nil {
+		return 0, err
+	}
+	return r.byteOrder().Uint16(val), nil
 }
 
 // uint32ToInt32 converts a uint32 to a int32.
@@ -97,13 +136,19 @@ func uint32ToInt32(u uint32) int32 {
 // Int32 reads a signed 32-bit integer.
 func (r *CdrReader) Int32() (int32, error) {
 	val, err := r.read(4)
-	return uint32ToInt32(r.byteOrder().Uint32(val)), err
+	if err != nil {
+		return 0, err
+	}
+	return uint32ToInt32(r.byteOrder().Uint32(val)), nil
 }
 
 // Uint32 reads an unsigned 32-bit integer.
 func (r *CdrReader) Uint32() (uint32, error) {
 	val, err := r.read(4)
-	return r.byteOrder().Uint32(val), err
+	if err != nil {
+		return 0, err
+	}
+	return r.byteOrder().Uint32(val), nil
 }
 
 // uint64ToInt64 converts a uint64 to a int64.
@@ -115,25 +160,37 @@ func uint64ToInt64(u uint64) int64 {
 // Int64 reads a signed 64-bit integer.
 func (r *CdrReader) Int64() (int64, error) {
 	val, err := r.read(8)
-	return uint64ToInt64(r.byteOrder().Uint64(val)), err
+	if err != nil {
+		return 0, err
+	}
+	return uint64ToInt64(r.byteOrder().Uint64(val)), nil
 }
 
 // Uint64 reads an unsigned 64-bit integer.
 func (r *CdrReader) Uint64() (uint64, error) {
 	val, err := r.read(8)
-	return r.byteOrder().Uint64(val), err
+	if err != nil {
+		return 0, err
+	}
+	return r.byteOrder().Uint64(val), nil
 }
 
 // Float32 reads a 32-bit floating point number.
 func (r *CdrReader) Float32() (JSONFloat32, error) {
 	val, err := r.read(4)
-	return JSONFloat32(math.Float32frombits(r.byteOrder().Uint32(val))), err
+	if err != nil {
+		return 0, err
+	}
+	return JSONFloat32(math.Float32frombits(r.byteOrder().Uint32(val))), nil
 }
 
 // Float64 reads a 64-bit floating point number.
 func (r *CdrReader) Float64() (JSONFloat64, error) {
 	val, err := r.read(8)
-	return JSONFloat64(math.Float64frombits(r.byteOrder().Uint64(val))), err
+	if err != nil {
+		return 0, err
+	}
+	return JSONFloat64(math.Float64frombits(r.byteOrder().Uint64(val))), nil
 }
 
 // String reads a string prefixed with its 32-bit length.
@@ -143,17 +200,21 @@ func (r *CdrReader) String() (string, error) {
 		return "", err
 	}
 
-	if length <= 1 {
-		r.offset += int(length)
-		return "", nil
+	if uint64(length) > uint64(math.MaxInt) {
+		return "", errors.Errorf("string declared length %d cannot fit in int", length)
 	}
 
-	str, err := r.StringRaw(int(length - 1))
+	// The conversion is safe because the platform int bound is checked above.
+	// #nosec G115
+	data, err := r.Uint8Array(int(length))
 	if err != nil {
 		return "", err
 	}
-	r.offset++ // Skip null terminator
-	return str, nil
+	if length <= 1 {
+		return "", nil
+	}
+
+	return string(data[:len(data)-1]), nil
 }
 
 // StringRaw reads a string of the given length.
@@ -188,8 +249,8 @@ func (r *CdrReader) align(size int) {
 
 // read reads bytes from the current offset and advances the offset.
 func (r *CdrReader) read(size int) ([]byte, error) {
-	if r.offset+size > len(r.data) {
-		return nil, errors.Errorf("attempt to read past end of data (offset: %d, size: %d, data length: %d)", r.offset, size, len(r.data))
+	if size < 0 {
+		return nil, errors.Errorf("attempt to read a negative size %d", size)
 	}
 
 	// Align before reading if size > 1
@@ -197,13 +258,83 @@ func (r *CdrReader) read(size int) ([]byte, error) {
 		r.align(size)
 	}
 
+	if r.offset > len(r.data) || size > len(r.data)-r.offset {
+		return nil, errors.Errorf("attempt to read past end of data (offset: %d, size: %d, data length: %d)", r.offset, size, len(r.data))
+	}
+
 	data := r.data[r.offset : r.offset+size]
 	r.offset += size
 	return data, nil
 }
 
+// validateArrayLength validates a declared array length before it is converted
+// to int or used by make/slicing.
+func validateArrayLength(
+	length uint64,
+	remainingBytes, minEncodedBytes, resultElementBytes int,
+) (int, error) {
+	if length > uint64(math.MaxInt) {
+		return 0, errors.Errorf("array declared length %d cannot fit in int", length)
+	}
+
+	// The conversion is safe because the platform int bound is checked above.
+	// #nosec G115
+	intLength := int(length)
+	return intLength, validateIntArrayLength(
+		intLength,
+		remainingBytes,
+		minEncodedBytes,
+		resultElementBytes,
+	)
+}
+
+func validateIntArrayLength(length, remainingBytes, minEncodedBytes, resultElementBytes int) error {
+	if length < 0 {
+		return errors.Errorf("array declared a negative length %d", length)
+	}
+	if remainingBytes < 0 || minEncodedBytes <= 0 || resultElementBytes <= 0 {
+		return errors.Errorf(
+			"invalid array validation parameters (remaining=%d, minimum encoded element=%d, result element=%d)",
+			remainingBytes,
+			minEncodedBytes,
+			resultElementBytes,
+		)
+	}
+
+	remainingLimit := remainingBytes / minEncodedBytes
+	if length > remainingLimit {
+		return errors.Errorf(
+			"array declared length %d exceeds remaining-data limit %d (remaining=%d bytes, minimum encoded element=%d bytes)",
+			length,
+			remainingLimit,
+			remainingBytes,
+			minEncodedBytes,
+		)
+	}
+
+	allocationLimit := maxDecodedArrayBytes / resultElementBytes
+	if length > allocationLimit {
+		return errors.Errorf(
+			"array declared length %d exceeds decoder allocation limit %d elements (%d bytes, result element=%d bytes)",
+			length,
+			allocationLimit,
+			maxDecodedArrayBytes,
+			resultElementBytes,
+		)
+	}
+
+	return nil
+}
+
+func (r *CdrReader) validateArrayLength(length, minEncodedBytes, resultElementBytes int) error {
+	return validateIntArrayLength(length, r.RemainingBytes(), minEncodedBytes, resultElementBytes)
+}
+
 // BooleanArray reads an array of booleans.
 func (r *CdrReader) BooleanArray(length int) ([]bool, error) {
+	if err := r.validateArrayLength(length, 1, 1); err != nil {
+		return nil, err
+	}
 	result := make([]bool, length)
 	for i := range length {
 		val, err := r.Boolean()
@@ -217,6 +348,9 @@ func (r *CdrReader) BooleanArray(length int) ([]bool, error) {
 
 // Uint8Array reads an array of uint8 values.
 func (r *CdrReader) Uint8Array(length int) ([]uint8, error) {
+	if err := r.validateArrayLength(length, 1, 1); err != nil {
+		return nil, err
+	}
 	data := r.data[r.offset : r.offset+length]
 	r.offset += length
 	return data, nil
@@ -224,6 +358,9 @@ func (r *CdrReader) Uint8Array(length int) ([]uint8, error) {
 
 // Int8Array reads an array of int8 values.
 func (r *CdrReader) Int8Array(length int) ([]int8, error) {
+	if err := r.validateArrayLength(length, 1, 1); err != nil {
+		return nil, err
+	}
 	result := make([]int8, length)
 	for i := range length {
 		val, err := r.Int8()
@@ -237,6 +374,9 @@ func (r *CdrReader) Int8Array(length int) ([]int8, error) {
 
 // Int16Array reads an array of int16 values.
 func (r *CdrReader) Int16Array(length int) ([]int16, error) {
+	if err := r.validateArrayLength(length, 2, 2); err != nil {
+		return nil, err
+	}
 	result := make([]int16, length)
 	for i := range length {
 		val, err := r.Int16()
@@ -250,6 +390,9 @@ func (r *CdrReader) Int16Array(length int) ([]int16, error) {
 
 // Uint16Array reads an array of uint16 values.
 func (r *CdrReader) Uint16Array(length int) ([]uint16, error) {
+	if err := r.validateArrayLength(length, 2, 2); err != nil {
+		return nil, err
+	}
 	result := make([]uint16, length)
 	for i := range length {
 		val, err := r.Uint16()
@@ -263,6 +406,9 @@ func (r *CdrReader) Uint16Array(length int) ([]uint16, error) {
 
 // Int32Array reads an array of int32 values.
 func (r *CdrReader) Int32Array(length int) ([]int32, error) {
+	if err := r.validateArrayLength(length, 4, 4); err != nil {
+		return nil, err
+	}
 	result := make([]int32, length)
 	for i := range length {
 		val, err := r.Int32()
@@ -276,6 +422,9 @@ func (r *CdrReader) Int32Array(length int) ([]int32, error) {
 
 // Uint32Array reads an array of uint32 values.
 func (r *CdrReader) Uint32Array(length int) ([]uint32, error) {
+	if err := r.validateArrayLength(length, 4, 4); err != nil {
+		return nil, err
+	}
 	result := make([]uint32, length)
 	for i := range length {
 		val, err := r.Uint32()
@@ -289,6 +438,9 @@ func (r *CdrReader) Uint32Array(length int) ([]uint32, error) {
 
 // Int64Array reads an array of int64 values.
 func (r *CdrReader) Int64Array(length int) ([]int64, error) {
+	if err := r.validateArrayLength(length, 8, 8); err != nil {
+		return nil, err
+	}
 	result := make([]int64, length)
 	for i := range length {
 		val, err := r.Int64()
@@ -302,6 +454,9 @@ func (r *CdrReader) Int64Array(length int) ([]int64, error) {
 
 // Uint64Array reads an array of uint64 values.
 func (r *CdrReader) Uint64Array(length int) ([]uint64, error) {
+	if err := r.validateArrayLength(length, 8, 8); err != nil {
+		return nil, err
+	}
 	result := make([]uint64, length)
 	for i := range length {
 		val, err := r.Uint64()
@@ -315,6 +470,9 @@ func (r *CdrReader) Uint64Array(length int) ([]uint64, error) {
 
 // Float32Array reads an array of float32 values.
 func (r *CdrReader) Float32Array(length int) ([]JSONFloat32, error) {
+	if err := r.validateArrayLength(length, 4, 4); err != nil {
+		return nil, err
+	}
 	result := make([]JSONFloat32, length)
 	for i := range length {
 		val, err := r.Float32()
@@ -328,6 +486,9 @@ func (r *CdrReader) Float32Array(length int) ([]JSONFloat32, error) {
 
 // Float64Array reads an array of float64 values.
 func (r *CdrReader) Float64Array(length int) ([]JSONFloat64, error) {
+	if err := r.validateArrayLength(length, 8, 8); err != nil {
+		return nil, err
+	}
 	result := make([]JSONFloat64, length)
 	for i := range length {
 		val, err := r.Float64()
@@ -341,6 +502,9 @@ func (r *CdrReader) Float64Array(length int) ([]JSONFloat64, error) {
 
 // StringArray reads an array of strings.
 func (r *CdrReader) StringArray(length int) ([]string, error) {
+	if err := r.validateArrayLength(length, 4, resultStringHeaderBytes); err != nil {
+		return nil, err
+	}
 	result := make([]string, length)
 	for i := range length {
 		val, err := r.String()

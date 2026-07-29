@@ -15,6 +15,7 @@
 package file_handlers
 
 import (
+	"context"
 	"os"
 	"time"
 
@@ -36,8 +37,14 @@ type Interface interface {
 	// IsFinished checks if the file is completely written and no more updates are expected.
 	IsFinished(filePath string) bool
 
-	// SendRuleItems sends rule items until the file ends or sendRuleItem returns false.
-	SendRuleItems(filePath string, activeTopics mapset.Set[string], sendRuleItem func(rule_engine.RuleItem) bool)
+	// SendRuleItems sends rule items until the file ends, the context is
+	// cancelled, or sendRuleItem returns false.
+	SendRuleItems(
+		ctx context.Context,
+		filePath string,
+		activeTopics mapset.Set[string],
+		sendRuleItem func(rule_engine.RuleItem) bool,
+	) error
 }
 
 // defaultGetFileSize provides default implementations for some methods.

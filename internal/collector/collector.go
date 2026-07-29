@@ -117,7 +117,14 @@ func Collect(ctx context.Context, reqClient *api.RequestClient, confManager *con
 						}
 					}()
 
-					appConfig := confManager.LoadWithRemote()
+					appConfig, configErr := confManager.LoadWithRemote()
+					if configErr != nil {
+						if appConfig == nil {
+							log.Errorf("Unable to load collector config: %v", configErr)
+							return
+						}
+						log.Warnf("Unable to reload collector config, using last-known-good config: %v", configErr)
+					}
 					getStorage := confManager.GetStorage()
 
 					err := handleRecordCaches(uploadChan, reqClient, appConfig, getStorage, recordSet)

@@ -67,7 +67,15 @@ func LogConfigHandler() func(w http.ResponseWriter, r *http.Request) {
 
 func CurrentConfigHandler(confManager config.ConfManager) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		appConfig := confManager.LoadWithRemote()
+		appConfig, loadErr := confManager.LoadWithRemote()
+		if loadErr != nil {
+			if appConfig == nil {
+				log.Errorf("Failed to load current config: %v", loadErr)
+				http.Error(w, loadErr.Error(), http.StatusInternalServerError)
+				return
+			}
+			log.Warnf("Failed to reload current config, serving last-known-good config: %v", loadErr)
+		}
 
 		bytes, err := json.Marshal(appConfig)
 		if err != nil {

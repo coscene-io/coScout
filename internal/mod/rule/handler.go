@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,7 @@ type queuedRuleMessage struct {
 	item          rule_engine.RuleItem
 	payload       []byte
 	reservedBytes int64
+	result        chan error
 }
 
 type CustomRuleHandler struct {
@@ -74,6 +76,8 @@ type CustomRuleHandler struct {
 	ruleMessageChan         chan queuedRuleMessage
 	engine                  Engine
 	queuedBytes             *queuedbytes.Budget
+	inFlightMu              sync.Mutex
+	inFlightFiles           map[string]struct{}
 
 	// Master-slave components (optional)
 	slaveRegistry *master.SlaveRegistry
@@ -110,6 +114,7 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		listenChan:              make(chan string, 1000),
 		ruleMessageChan:         make(chan queuedRuleMessage, 1000),
 		engine:                  Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
+		inFlightFiles:           make(map[string]struct{}),
 		pubSub:                  pubSub,
 		queuedBytes:             queuedBytes,
 		cleanCollectInfo: func(info model.CollectInfo) string {
@@ -140,7 +145,14 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				configTicker.Reset(config.ReloadRulesInterval)
 
-				appConfig := c.confManager.LoadWithRemote()
+				appConfig, err := c.confManager.LoadWithRemote()
+				if err != nil {
+					if appConfig == nil {
+						log.Errorf("load rule config: %v", err)
+						continue
+					}
+					log.Warnf("Unable to reload rule config, using last-known-good config: %v", err)
+				}
 				confConfig, ok := appConfig.Mod.Config.(config.DefaultModConfConfig)
 				if ok {
 					*modConfig = confConfig
@@ -157,7 +169,11 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 				apiRules, err := c.reqClient.ListDeviceDiagnosisRules(device.GetName())
 				if err != nil {
 					log.Errorf("list device diagnosis rules: %v", err)
-					c.errChan <- errors.Errorf("list device diagnosis rules: %v", err)
+					select {
+					case c.errChan <- errors.Errorf("list device diagnosis rules: %v", err):
+					case <-ctx.Done():
+						return
+					}
 					continue
 				}
 				log.Infof("received rules: %d", len(apiRules))
@@ -200,7 +216,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				listenTicker.Reset(config.RuleCheckListenFilesInterval)
 
-				c.sendFilesToBeProcessed(modConfig)
+				c.sendFilesToBeProcessed(ctx, modConfig)
 			case <-ctx.Done():
 				return
 			}
@@ -229,8 +245,7 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				t.Reset(config.RuleScanCollectInfosInterval)
 
-				//nolint: contextcheck// context is checked in the parent goroutine
-				c.scanCollectInfosAndHandle(modConfig)
+				c.scanCollectInfosAndHandle(ctx, modConfig)
 			case <-ctx.Done():
 				log.Infof("collect info handler stopped")
 				return
@@ -262,7 +277,10 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 	messages, err := c.pubSub.Subscribe(ctx, constant.TopicRuleMsg)
 	if err != nil {
 		log.Errorf("subscribe to rule message: %v", err)
-		c.errChan <- errors.Wrap(err, "subscribe to rule message")
+		select {
+		case c.errChan <- errors.Wrap(err, "subscribe to rule message"):
+		case <-ctx.Done():
+		}
 		return
 	}
 
@@ -320,13 +338,20 @@ func (c *CustomRuleHandler) handleRuleMessage(ctx context.Context, msg *gcmessag
 func (c *CustomRuleHandler) consumeRuleMessage(message queuedRuleMessage) {
 	if message.payload != nil {
 		defer c.queuedBytes.Release(message.reservedBytes)
-		if err := consumeHTTPRuleBatch(message.payload, c.engine.ConsumeNext); err != nil {
+		if err := consumeHTTPRuleBatch(message.payload, func(item rule_engine.RuleItem) {
+			if consumeErr := c.engine.ConsumeNext(item); consumeErr != nil {
+				log.Errorf("consume HTTP rule item: %v", consumeErr)
+			}
+		}); err != nil {
 			log.Errorf("consume HTTP rule message batch: %v", err)
 		}
 		return
 	}
 
-	c.engine.ConsumeNext(message.item)
+	consumeErr := c.engine.ConsumeNext(message.item)
+	if message.result != nil {
+		message.result <- consumeErr
+	}
 }
 
 func (c *CustomRuleHandler) releaseQueuedRuleMessages() {
@@ -335,6 +360,8 @@ func (c *CustomRuleHandler) releaseQueuedRuleMessages() {
 		case message := <-c.ruleMessageChan:
 			if message.payload != nil {
 				c.queuedBytes.Release(message.reservedBytes)
+			} else if message.result != nil {
+				message.result <- context.Canceled
 			}
 		default:
 			return
@@ -365,7 +392,10 @@ func consumeHTTPRuleBatch(payload []byte, consume func(rule_engine.RuleItem)) er
 	return err
 }
 
-func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) sendFilesToBeProcessed(
+	ctx context.Context,
+	modConfig *config.DefaultModConfConfig,
+) {
 	if len(modConfig.ListenDirs) == 0 {
 		return
 	}
@@ -384,12 +414,44 @@ func (c *CustomRuleHandler) sendFilesToBeProcessed(modConfig *config.DefaultModC
 		file_state_handler.FilterIsListening(),
 		file_state_handler.FilterReadyToProcess(),
 	) {
-		err := c.listenFileStateHandler.MarkProcessedFile(fileState.Pathname)
-		if err != nil {
-			log.Errorf("mark processed file: %v", err)
+		if !c.addFileInFlight(fileState.Pathname) {
+			continue
 		}
-		c.listenChan <- fileState.Pathname
+
+		select {
+		case c.listenChan <- fileState.Pathname:
+		case <-ctx.Done():
+			c.releaseFileInFlight(fileState.Pathname)
+			return
+		}
 	}
+}
+
+func (c *CustomRuleHandler) addFileInFlight(filename string) bool {
+	c.inFlightMu.Lock()
+	defer c.inFlightMu.Unlock()
+
+	if c.inFlightFiles == nil {
+		c.inFlightFiles = make(map[string]struct{})
+	}
+	if _, exists := c.inFlightFiles[filename]; exists {
+		return false
+	}
+	c.inFlightFiles[filename] = struct{}{}
+	return true
+}
+
+func (c *CustomRuleHandler) releaseFileInFlight(filename string) {
+	c.inFlightMu.Lock()
+	defer c.inFlightMu.Unlock()
+	delete(c.inFlightFiles, filename)
+}
+
+func (c *CustomRuleHandler) isFileInFlight(filename string) bool {
+	c.inFlightMu.Lock()
+	defer c.inFlightMu.Unlock()
+	_, exists := c.inFlightFiles[filename]
+	return exists
 }
 
 func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
@@ -411,6 +473,7 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 			select {
 			case semaphore <- struct{}{}:
 			case <-ctx.Done():
+				c.releaseFileInFlight(fileToProcess)
 				wg.Wait()
 				return
 			}
@@ -419,8 +482,23 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 			go func(filename string) {
 				defer wg.Done()
 				defer func() { <-semaphore }() // release the semaphore
+				defer c.releaseFileInFlight(filename)
 
-				c.processFileWithRule(ctx, filename)
+				if err := c.processFileWithRule(ctx, filename); err != nil {
+					if !shouldMarkFileFailed(ctx, err) {
+						return
+					}
+					log.Errorf("process file %s with rule: %v", filename, err)
+					if markErr := c.listenFileStateHandler.MarkFailedFile(filename); markErr != nil {
+						log.Errorf("mark failed file %s: %v", filename, markErr)
+					}
+					return
+				}
+
+				if err := c.listenFileStateHandler.MarkProcessedFile(filename); err != nil {
+					log.Errorf("mark processed file: %v", err)
+					return
+				}
 				log.Infof("Finished processing file: %v", filename)
 			}(fileToProcess)
 		case <-ctx.Done():
@@ -430,24 +508,62 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 	}
 }
 
+func shouldMarkFileFailed(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) &&
+		!errors.Is(err, context.DeadlineExceeded)
+}
+
 func (c *CustomRuleHandler) processFileWithRule(
 	ctx context.Context,
 	filename string,
-) {
+) error {
 	log.Infof("RuleEngine exec file: %v", filename)
 	handler := c.listenFileStateHandler.GetFileHandler(filename)
 	if handler == nil {
 		// this should not happen
-		log.Errorf("get file handler failed for file: %v", filename)
-		return
+		return errors.Errorf("get file handler failed for file: %v", filename)
 	}
 
-	handler.SendRuleItems(filename, c.engine.activeTopicSet(), func(item rule_engine.RuleItem) bool {
-		return c.enqueueFileRuleItem(ctx, item)
-	})
+	var consumeErr error
+	handlerErr := handler.SendRuleItems(
+		ctx,
+		filename,
+		c.engine.activeTopicSet(),
+		func(item rule_engine.RuleItem) bool {
+			result := make(chan error, 1)
+			select {
+			case c.ruleMessageChan <- queuedRuleMessage{
+				item:   item,
+				result: result,
+			}:
+			case <-ctx.Done():
+				return false
+			}
+
+			select {
+			case itemConsumeErr := <-result:
+				if itemConsumeErr != nil {
+					consumeErr = stderrors.Join(
+						consumeErr,
+						errors.Wrap(itemConsumeErr, "consume rule item"),
+					)
+				}
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		},
+	)
+	return stderrors.Join(handlerErr, consumeErr)
 }
 
-func (c *CustomRuleHandler) enqueueFileRuleItem(ctx context.Context, item rule_engine.RuleItem) bool {
+func (c *CustomRuleHandler) enqueueFileRuleItem(
+	ctx context.Context,
+	item rule_engine.RuleItem,
+) bool {
 	select {
 	case c.ruleMessageChan <- queuedRuleMessage{item: item}:
 		return true
@@ -457,7 +573,10 @@ func (c *CustomRuleHandler) enqueueFileRuleItem(ctx context.Context, item rule_e
 }
 
 // scanCollectInfosAndHandle handles all collect info files within the collect info dir.
-func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) scanCollectInfosAndHandle(
+	ctx context.Context,
+	modConfig *config.DefaultModConfConfig,
+) {
 	log.Infof("Starts to scan collect info dir")
 
 	// Search for files under the collect info dir and handles them
@@ -465,7 +584,10 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 	entries, err := os.ReadDir(collectInfoDir)
 	if err != nil {
 		log.Errorf("read collect info dir: %v", err)
-		c.errChan <- errors.Wrap(err, "read collect info dir")
+		select {
+		case c.errChan <- errors.Wrap(err, "read collect info dir"):
+		case <-ctx.Done():
+		}
 		return
 	}
 
@@ -486,10 +608,18 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 
 	log.Infof("Found %d collect info files", len(collectInfoIds))
 	for _, collectInfoId := range collectInfoIds {
+		if ctx.Err() != nil {
+			return
+		}
+
 		collectInfo := &model.CollectInfo{}
 		if err := collectInfo.Load(collectInfoId); err != nil {
 			log.Errorf("load collect info: %v", err)
-			c.errChan <- errors.Wrap(err, "load collect info")
+			select {
+			case c.errChan <- errors.Wrap(err, "load collect info"):
+			case <-ctx.Done():
+				return
+			}
 			continue
 		}
 
@@ -507,13 +637,17 @@ func (c *CustomRuleHandler) scanCollectInfosAndHandle(modConfig *config.DefaultM
 		}
 
 		log.WithField("collectID", collectInfo.Id).Infof("Found collect info to handle")
-		c.handleCollectInfo(*collectInfo, *modConfig)
+		c.handleCollectInfo(ctx, *collectInfo, *modConfig)
 	}
 	log.Infof("Finished scanning collect info dir, found %d collect info files", len(collectInfoIds))
 }
 
 // handleCollectInfo handles a single the collect info.
-func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig config.DefaultModConfConfig) {
+func (c *CustomRuleHandler) handleCollectInfo(
+	ctx context.Context,
+	info model.CollectInfo,
+	modConfig config.DefaultModConfConfig,
+) {
 	ruleName, _ := info.DiagnosisTask["rule_name"].(string)
 	ruleDisplayName, _ := info.DiagnosisTask["rule_display_name"].(string)
 	collectLog := log.WithFields(log.Fields{
@@ -614,7 +748,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 	// Get slave files if master-slave is enabled
 	var slaveFiles []master.SlaveFileInfo
 	if c.slaveRegistry != nil && c.masterClient != nil && c.masterConfig != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), c.masterConfig.RequestTimeout)
+		requestCtx, cancel := context.WithTimeout(ctx, c.masterConfig.RequestTimeout)
 		defer cancel()
 
 		taskReq := &master.TaskRequest{
@@ -627,7 +761,7 @@ func (c *CustomRuleHandler) handleCollectInfo(info model.CollectInfo, modConfig 
 			RecursivelyWalkDirs: modConfig.RecursivelyWalkDirs,
 		}
 
-		responses := c.masterClient.RequestAllSlaveFilesByContent(ctx, c.slaveRegistry, taskReq)
+		responses := c.masterClient.RequestAllSlaveFilesByContent(requestCtx, c.slaveRegistry, taskReq)
 		switch master.TaskResponsesTimeWindowErrorCode(responses) {
 		case master.TaskErrorCodeInvalidTimeWindow:
 			collectLog.Errorf("a slave rejected the collect info time window as permanently invalid, cleaning")

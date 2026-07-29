@@ -49,8 +49,21 @@ func NewHttpHandler(reqClient api.RequestClient, confManager config.ConfManager,
 }
 
 func (c *CustomHttpHandler) Run(ctx context.Context) {
-	httpConfig := c.confManager.LoadWithRemote().HttpServer
-	serverPort := httpConfig.Port
+	appConfig, err := c.confManager.LoadWithRemote()
+	if err != nil {
+		if appConfig == nil {
+			log.Errorf("Unable to load HTTP server config: %v", err)
+			select {
+			case c.errChan <- err:
+			case <-ctx.Done():
+			default:
+				log.Warnf("Error channel is unavailable, dropping error: %v", err)
+			}
+			return
+		}
+		log.Warnf("Unable to reload HTTP server config, using last-known-good config: %v", err)
+	}
+	serverPort := appConfig.HttpServer.Port
 
 	router := mux.NewRouter()
 	router.HandleFunc("/ruleEngine/messages", server.RulesHandler(c.pubSub, c.queuedBytes)).Methods("POST")
