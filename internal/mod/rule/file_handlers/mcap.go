@@ -223,12 +223,8 @@ func (h *mcapHandler) SendRuleItems(
 	ros2Decoders := make(map[string]mcap_ros2.DecoderFunction)
 	descriptors := make(map[uint16]protoreflect.MessageDescriptor)
 	errTopics := map[string]struct{}{}
-	var processingErr error
-	recordProcessingError := func(err error) {
+	logMessageError := func(err error) {
 		log.Error(err)
-		if processingErr == nil {
-			processingErr = err
-		}
 	}
 
 	for {
@@ -240,7 +236,7 @@ func (h *mcapHandler) SendRuleItems(
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				log.Infof("finished sending rule items for MCAP file %s", filepath)
-				return processingErr
+				return nil
 			} else {
 				log.Errorf("error reading message: %v", err)
 				return errors.Errorf("read MCAP message: %v", err)
@@ -259,11 +255,11 @@ func (h *mcapHandler) SendRuleItems(
 			switch channel.MessageEncoding {
 			case "json":
 				if err := json.Unmarshal(message.Data, &decoded); err != nil {
-					recordProcessingError(errors.Errorf("unmarshal JSON: %v", err))
+					logMessageError(errors.Errorf("unmarshal JSON: %v", err))
 					continue
 				}
 			default:
-				recordProcessingError(errors.Errorf(
+				logMessageError(errors.Errorf(
 					"unsupported message encoding for schema-less channel: %s",
 					channel.MessageEncoding,
 				))
@@ -277,7 +273,7 @@ func (h *mcapHandler) SendRuleItems(
 					packageName := strings.Split(schema.Name, "/")[0]
 					transcoder, err = ros1msg.NewJSONTranscoder(packageName, schema.Data)
 					if err != nil {
-						recordProcessingError(errors.Errorf("create JSON transcoder: %v", err))
+						logMessageError(errors.Errorf("create JSON transcoder: %v", err))
 						continue
 					}
 					transcoders[channel.SchemaID] = transcoder
@@ -286,11 +282,11 @@ func (h *mcapHandler) SendRuleItems(
 				buf := &bytes.Buffer{}
 				msgReader.Reset(message.Data)
 				if err := transcoder.Transcode(buf, msgReader); err != nil {
-					recordProcessingError(errors.Errorf("transcode ros1 message: %v", err))
+					logMessageError(errors.Errorf("transcode ros1 message: %v", err))
 					continue
 				}
 				if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
-					recordProcessingError(errors.Errorf("unmarshal transcoded data: %v", err))
+					logMessageError(errors.Errorf("unmarshal transcoded data: %v", err))
 					continue
 				}
 
@@ -299,7 +295,7 @@ func (h *mcapHandler) SendRuleItems(
 				if !ok {
 					dynamicDecoders, err := mcap_ros2.GenerateDynamic(schema.Name, string(schema.Data))
 					if err != nil {
-						recordProcessingError(errors.Errorf("generate dynamic schema decoder: %v", err))
+						logMessageError(errors.Errorf("generate dynamic schema decoder: %v", err))
 						continue
 					}
 
@@ -310,7 +306,7 @@ func (h *mcapHandler) SendRuleItems(
 					var decoderOk bool
 					decoder, decoderOk = dynamicDecoders[schema.Name]
 					if !decoderOk {
-						recordProcessingError(errors.Errorf("find decoder for schema: %s", schema.Name))
+						logMessageError(errors.Errorf("find decoder for schema: %s", schema.Name))
 						continue
 					}
 				}
@@ -326,11 +322,11 @@ func (h *mcapHandler) SendRuleItems(
 					decoded, err = decoder(message.Data)
 				}()
 				if panicErr != nil {
-					recordProcessingError(errors.Errorf("decode message: %v", panicErr))
+					logMessageError(errors.Errorf("decode message: %v", panicErr))
 					continue
 				}
 				if err != nil {
-					recordProcessingError(errors.Errorf("decode message: %v", err))
+					logMessageError(errors.Errorf("decode message: %v", err))
 					continue
 				}
 
@@ -339,23 +335,23 @@ func (h *mcapHandler) SendRuleItems(
 				if !ok {
 					fileDescriptorSet := &descriptorpb.FileDescriptorSet{}
 					if err := proto.Unmarshal(schema.Data, fileDescriptorSet); err != nil {
-						recordProcessingError(errors.Errorf("build file descriptor set: %v", err))
+						logMessageError(errors.Errorf("build file descriptor set: %v", err))
 						continue
 					}
 					files, err := protodesc.FileOptions{}.NewFiles(fileDescriptorSet)
 					if err != nil {
-						recordProcessingError(errors.Errorf("create file descriptor: %v", err))
+						logMessageError(errors.Errorf("create file descriptor: %v", err))
 						continue
 					}
 					descriptor, err := files.FindDescriptorByName(protoreflect.FullName(schema.Name))
 					if err != nil {
-						recordProcessingError(errors.Errorf("find descriptor: %v", err))
+						logMessageError(errors.Errorf("find descriptor: %v", err))
 						continue
 					}
 					var descriptorOk bool
 					messageDescriptor, descriptorOk = descriptor.(protoreflect.MessageDescriptor)
 					if !descriptorOk {
-						recordProcessingError(errors.Errorf(
+						logMessageError(errors.Errorf(
 							"descriptor %s is not a message descriptor",
 							schema.Name,
 						))
@@ -365,27 +361,27 @@ func (h *mcapHandler) SendRuleItems(
 				}
 				protoMsg := dynamicpb.NewMessage(messageDescriptor)
 				if err := proto.Unmarshal(message.Data, protoMsg); err != nil {
-					recordProcessingError(errors.Errorf("parse protobuf message: %v", err))
+					logMessageError(errors.Errorf("parse protobuf message: %v", err))
 					continue
 				}
 				marshalledBytes, err := protojson.Marshal(protoMsg)
 				if err != nil {
-					recordProcessingError(errors.Errorf("marshal protobuf to JSON: %v", err))
+					logMessageError(errors.Errorf("marshal protobuf to JSON: %v", err))
 					continue
 				}
 				if err := json.Unmarshal(marshalledBytes, &decoded); err != nil {
-					recordProcessingError(errors.Errorf("unmarshal protobuf JSON: %v", err))
+					logMessageError(errors.Errorf("unmarshal protobuf JSON: %v", err))
 					continue
 				}
 
 			case "jsonschema":
 				if err := json.Unmarshal(message.Data, &decoded); err != nil {
-					recordProcessingError(errors.Errorf("unmarshal JSON schema message: %v", err))
+					logMessageError(errors.Errorf("unmarshal JSON schema message: %v", err))
 					continue
 				}
 
 			default:
-				recordProcessingError(errors.Errorf("unsupported schema encoding: %s", schema.Encoding))
+				logMessageError(errors.Errorf("unsupported schema encoding: %s", schema.Encoding))
 				continue
 			}
 		}

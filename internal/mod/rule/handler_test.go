@@ -298,6 +298,43 @@ func (h *resultFileHandler) SendRuleItems(
 	return h.err
 }
 
+type itemProducingFileHandler struct {
+	produced chan struct{}
+}
+
+func (h *itemProducingFileHandler) CheckFilePath(string) bool {
+	return true
+}
+
+func (h *itemProducingFileHandler) GetStartTimeEndTime(string) (*time.Time, *time.Time, error) {
+	return nil, nil, nil
+}
+
+func (h *itemProducingFileHandler) GetFileSize(string) (int64, error) {
+	return 0, nil
+}
+
+func (h *itemProducingFileHandler) IsFinished(string) bool {
+	return true
+}
+
+func (h *itemProducingFileHandler) SendRuleItems(
+	ctx context.Context,
+	filename string,
+	_ mapset.Set[string],
+	ruleItems chan<- rule_engine.RuleItem,
+) error {
+	select {
+	case ruleItems <- rule_engine.RuleItem{Source: filename}:
+		if h.produced != nil {
+			close(h.produced)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T) {
 	stateHandler := &fakeFileStateHandler{
 		files: []file_state_handler.FileState{{Pathname: "pending.log"}},
@@ -347,7 +384,7 @@ func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 2),
-		ruleItemChan:           make(chan rule_engine.RuleItem),
+		ruleItemChan:           make(chan ruleItemEnvelope),
 	}
 	handler.listenChan <- "first.log"
 	handler.listenChan <- "second.log"
@@ -382,7 +419,7 @@ func TestCancelledFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan rule_engine.RuleItem),
+		ruleItemChan:           make(chan ruleItemEnvelope),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -427,7 +464,7 @@ func TestCompletedFileProcessingMarksFileProcessed(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan rule_engine.RuleItem),
+		ruleItemChan:           make(chan ruleItemEnvelope),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -467,7 +504,7 @@ func TestFailedFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan rule_engine.RuleItem),
+		ruleItemChan:           make(chan ruleItemEnvelope),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -516,4 +553,105 @@ func TestSendFilesToBeProcessedDoesNotEnqueueInFlightFileTwice(t *testing.T) {
 	require.Len(t, handler.listenChan, 1)
 	require.Zero(t, stateHandler.processedCount())
 	require.True(t, handler.isFileInFlight("pending.log"))
+}
+
+func TestProducedRuleItemWithoutConsumerAckIsNotMarkedProcessedOnCancel(t *testing.T) {
+	produced := make(chan struct{})
+	stateHandler := &fakeFileStateHandler{
+		files: []file_state_handler.FileState{{Pathname: "pending-ack.log"}},
+		fileHandler: &itemProducingFileHandler{
+			produced: produced,
+		},
+	}
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             make(chan string, 1),
+		ruleItemChan:           make(chan ruleItemEnvelope, 1),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
+		ListenDirs: []string{t.TempDir()},
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.processListenedFilesAndSendMessages(ctx, 1)
+	}()
+	require.Eventually(t, func() bool {
+		select {
+		case <-produced:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	var envelope ruleItemEnvelope
+	select {
+	case envelope = <-handler.ruleItemChan:
+	case <-time.After(time.Second):
+		t.Fatal("rule item was not forwarded to the consumer channel")
+	}
+	require.NotNil(t, envelope.consumed)
+	require.Zero(t, stateHandler.processedCount())
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.Zero(t, stateHandler.processedCount())
+}
+
+func TestProducedRuleItemIsMarkedProcessedOnlyAfterConsumerAck(t *testing.T) {
+	stateHandler := &fakeFileStateHandler{
+		files:       []file_state_handler.FileState{{Pathname: "acked.log"}},
+		fileHandler: &itemProducingFileHandler{},
+	}
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             make(chan string, 1),
+		ruleItemChan:           make(chan ruleItemEnvelope, 1),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
+		ListenDirs: []string{t.TempDir()},
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.processListenedFilesAndSendMessages(ctx, 1)
+	}()
+
+	var envelope ruleItemEnvelope
+	select {
+	case envelope = <-handler.ruleItemChan:
+	case <-time.After(time.Second):
+		t.Fatal("rule item was not forwarded to the consumer channel")
+	}
+	require.NotNil(t, envelope.consumed)
+	require.Zero(t, stateHandler.processedCount())
+
+	close(envelope.consumed)
+	require.Eventually(t, func() bool {
+		return stateHandler.processedCount() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 }

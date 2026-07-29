@@ -139,12 +139,8 @@ func (h *ros1Handler) SendRuleItems(
 
 	// Set to store conn failed to transcode
 	failedConnToTranscode := mapset.NewSet[uint32]()
-	var processingErr error
-	recordProcessingError := func(err error) {
+	logMessageError := func(err error) {
 		log.Error(err)
-		if processingErr == nil {
-			processingErr = err
-		}
 	}
 
 	// Read messages
@@ -176,7 +172,7 @@ func (h *ros1Handler) SendRuleItems(
 			}
 			transcoder, err = ros1msg.NewJSONTranscoder(parentPackage, conn.Data.MessageDefinition)
 			if err != nil {
-				recordProcessingError(errors.Errorf("create JSON transcoder: %v", err))
+				logMessageError(errors.Errorf("create JSON transcoder: %v", err))
 				failedConnToTranscode.Add(conn.Conn)
 				continue
 			}
@@ -187,14 +183,14 @@ func (h *ros1Handler) SendRuleItems(
 		var buf bytes.Buffer
 		err = transcoder.Transcode(&buf, bytes.NewReader(msg.Data))
 		if err != nil {
-			recordProcessingError(errors.Errorf("transcode ros1 message: %v", err))
+			logMessageError(errors.Errorf("transcode ros1 message: %v", err))
 			continue
 		}
 
 		// Parse JSON into structured data
 		var structuredData map[string]interface{}
 		if err := json.Unmarshal(buf.Bytes(), &structuredData); err != nil {
-			recordProcessingError(errors.Errorf("parse ros1 message JSON: %v", err))
+			logMessageError(errors.Errorf("parse ros1 message JSON: %v", err))
 			continue
 		}
 
@@ -210,5 +206,5 @@ func (h *ros1Handler) SendRuleItems(
 		}
 	}
 	log.Infof("finished sending rule items for ros1 file %s", filePath)
-	return processingErr
+	return nil
 }

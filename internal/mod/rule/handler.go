@@ -54,6 +54,11 @@ const (
 	collectFileStatePath = "collectFile.state.json"
 )
 
+type ruleItemEnvelope struct {
+	item     rule_engine.RuleItem
+	consumed chan struct{}
+}
+
 type CustomRuleHandler struct {
 	reqClient   api.RequestClient
 	confManager config.ConfManager
@@ -63,7 +68,7 @@ type CustomRuleHandler struct {
 	listenFileStateHandler  file_state_handler.FileStateHandler
 	collectFileStateHandler file_state_handler.FileStateHandler
 	listenChan              chan string
-	ruleItemChan            chan rule_engine.RuleItem
+	ruleItemChan            chan ruleItemEnvelope
 	engine                  Engine
 	inFlightMu              sync.Mutex
 	inFlightFiles           map[string]struct{}
@@ -101,7 +106,7 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		listenFileStateHandler:  listenFileStateHandler,
 		collectFileStateHandler: collectFileStateHandler,
 		listenChan:              make(chan string, 1000),
-		ruleItemChan:            make(chan rule_engine.RuleItem, 1000),
+		ruleItemChan:            make(chan ruleItemEnvelope, 1000),
 		engine:                  Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
 		inFlightFiles:           make(map[string]struct{}),
 		pubSub:                  pubSub,
@@ -218,8 +223,11 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 	go func() {
 		for {
 			select {
-			case ruleItem := <-c.ruleItemChan:
-				c.engine.ConsumeNext(ruleItem)
+			case envelope := <-c.ruleItemChan:
+				c.engine.ConsumeNext(envelope.item)
+				if envelope.consumed != nil {
+					close(envelope.consumed)
+				}
 			case <-ctx.Done():
 				log.Infof("rule item channel closed")
 				return
@@ -279,7 +287,7 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 			}
 
 			select {
-			case c.ruleItemChan <- item:
+			case c.ruleItemChan <- ruleItemEnvelope{item: item}:
 				msg.Ack()
 			case <-ctx.Done():
 				return
@@ -413,7 +421,41 @@ func (c *CustomRuleHandler) processFileWithRule(
 		return errors.Errorf("get file handler failed for file: %v", filename)
 	}
 
-	return handler.SendRuleItems(ctx, filename, c.engine.activeTopicSet(), c.ruleItemChan)
+	localRuleItems := make(chan rule_engine.RuleItem)
+	handlerDone := make(chan error, 1)
+	go func() {
+		handlerDone <- handler.SendRuleItems(
+			ctx,
+			filename,
+			c.engine.activeTopicSet(),
+			localRuleItems,
+		)
+	}()
+
+	for {
+		select {
+		case item := <-localRuleItems:
+			consumed := make(chan struct{})
+			select {
+			case c.ruleItemChan <- ruleItemEnvelope{
+				item:     item,
+				consumed: consumed,
+			}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+
+			select {
+			case <-consumed:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		case err := <-handlerDone:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // scanCollectInfosAndHandle handles all collect info files within the collect info dir.
