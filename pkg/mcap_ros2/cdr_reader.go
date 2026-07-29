@@ -34,6 +34,11 @@ const (
 	// targets only makes the decoder limit stricter.
 	resultInterfaceSlotBytes = 16
 	resultStringHeaderBytes  = 16
+
+	// A decoded complex element owns both its interface slot and at least one
+	// map produced by readComplexType. Budget conservatively for that object
+	// graph rather than only for the interface backing array.
+	resultComplexElementBytes = 128
 )
 
 // CdrReader parses values from CDR data.
@@ -83,13 +88,19 @@ func (r *CdrReader) Boolean() (bool, error) {
 // Int8 reads a signed 8-bit integer.
 func (r *CdrReader) Int8() (int8, error) {
 	val, err := r.read(1)
-	return int8(val[0]), err
+	if err != nil {
+		return 0, err
+	}
+	return int8(val[0]), nil
 }
 
 // Uint8 reads an unsigned 8-bit integer.
 func (r *CdrReader) Uint8() (uint8, error) {
 	val, err := r.read(1)
-	return val[0], err
+	if err != nil {
+		return 0, err
+	}
+	return val[0], nil
 }
 
 // uint16ToInt16 converts a uint16 to a int16.
@@ -101,13 +112,19 @@ func uint16ToInt16(u uint16) int16 {
 // Int16 reads a signed 16-bit integer.
 func (r *CdrReader) Int16() (int16, error) {
 	val, err := r.read(2)
-	return uint16ToInt16(r.byteOrder().Uint16(val)), err
+	if err != nil {
+		return 0, err
+	}
+	return uint16ToInt16(r.byteOrder().Uint16(val)), nil
 }
 
 // Uint16 reads an unsigned 16-bit integer.
 func (r *CdrReader) Uint16() (uint16, error) {
 	val, err := r.read(2)
-	return r.byteOrder().Uint16(val), err
+	if err != nil {
+		return 0, err
+	}
+	return r.byteOrder().Uint16(val), nil
 }
 
 // uint32ToInt32 converts a uint32 to a int32.
@@ -119,13 +136,19 @@ func uint32ToInt32(u uint32) int32 {
 // Int32 reads a signed 32-bit integer.
 func (r *CdrReader) Int32() (int32, error) {
 	val, err := r.read(4)
-	return uint32ToInt32(r.byteOrder().Uint32(val)), err
+	if err != nil {
+		return 0, err
+	}
+	return uint32ToInt32(r.byteOrder().Uint32(val)), nil
 }
 
 // Uint32 reads an unsigned 32-bit integer.
 func (r *CdrReader) Uint32() (uint32, error) {
 	val, err := r.read(4)
-	return r.byteOrder().Uint32(val), err
+	if err != nil {
+		return 0, err
+	}
+	return r.byteOrder().Uint32(val), nil
 }
 
 // uint64ToInt64 converts a uint64 to a int64.
@@ -137,25 +160,37 @@ func uint64ToInt64(u uint64) int64 {
 // Int64 reads a signed 64-bit integer.
 func (r *CdrReader) Int64() (int64, error) {
 	val, err := r.read(8)
-	return uint64ToInt64(r.byteOrder().Uint64(val)), err
+	if err != nil {
+		return 0, err
+	}
+	return uint64ToInt64(r.byteOrder().Uint64(val)), nil
 }
 
 // Uint64 reads an unsigned 64-bit integer.
 func (r *CdrReader) Uint64() (uint64, error) {
 	val, err := r.read(8)
-	return r.byteOrder().Uint64(val), err
+	if err != nil {
+		return 0, err
+	}
+	return r.byteOrder().Uint64(val), nil
 }
 
 // Float32 reads a 32-bit floating point number.
 func (r *CdrReader) Float32() (JSONFloat32, error) {
 	val, err := r.read(4)
-	return JSONFloat32(math.Float32frombits(r.byteOrder().Uint32(val))), err
+	if err != nil {
+		return 0, err
+	}
+	return JSONFloat32(math.Float32frombits(r.byteOrder().Uint32(val))), nil
 }
 
 // Float64 reads a 64-bit floating point number.
 func (r *CdrReader) Float64() (JSONFloat64, error) {
 	val, err := r.read(8)
-	return JSONFloat64(math.Float64frombits(r.byteOrder().Uint64(val))), err
+	if err != nil {
+		return 0, err
+	}
+	return JSONFloat64(math.Float64frombits(r.byteOrder().Uint64(val))), nil
 }
 
 // String reads a string prefixed with its 32-bit length.

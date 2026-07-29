@@ -65,6 +65,28 @@ func TestReadComplexArrayRejectsLengthExceedingRemainingData(t *testing.T) {
 	assert.Contains(t, err.Error(), "remaining")
 }
 
+func TestReadComplexArrayRejectsHardAllocationLimit(t *testing.T) {
+	length := maxDecodedArrayBytes/resultComplexElementBytes + 1
+	reader, err := NewCdrReader(dynamicArrayData(uint32(length), make([]byte, length)...))
+	require.NoError(t, err)
+	field := Field{
+		Type: Type{
+			PkgName: "test",
+			Type:    "Empty",
+			IsArray: true,
+		},
+		Name: "items",
+	}
+	msgDefs := map[string]MessageSpecification{
+		"test/Empty": {PkgName: "test", MsgName: "Empty"},
+	}
+
+	_, err = readField(field, msgDefs, reader)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decoder allocation limit")
+}
+
 func TestValidateArrayLengthRejectsHardAllocationLimit(t *testing.T) {
 	length := uint64(maxDecodedArrayBytes/resultInterfaceSlotBytes + 1)
 
@@ -153,4 +175,99 @@ func TestReadPrimitiveFixedArrayRejectsTruncatedDataWithoutPanic(t *testing.T) {
 		}, reader)
 	})
 	require.Error(t, err)
+}
+
+func TestReadMessageRejectsTruncatedSequenceLengthWithoutPanic(t *testing.T) {
+	msgDefs := map[string]MessageSpecification{
+		"test/Message": {
+			PkgName: "test",
+			MsgName: "Message",
+			Fields: []Field{{
+				Type: Type{Type: typeUint8, IsArray: true},
+				Name: "values",
+			}},
+		},
+	}
+	data := []byte{0, 1, 0, 0, 2, 0}
+
+	var err error
+	require.NotPanics(t, func() {
+		_, err = ReadMessage("test/Message", msgDefs, data)
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "past end of data")
+}
+
+func TestScalarReadersReturnErrorsForTruncatedData(t *testing.T) {
+	tests := map[string]func(*CdrReader) error{
+		"boolean": func(reader *CdrReader) error {
+			_, err := reader.Boolean()
+			return err
+		},
+		"int8": func(reader *CdrReader) error {
+			_, err := reader.Int8()
+			return err
+		},
+		"uint8": func(reader *CdrReader) error {
+			_, err := reader.Uint8()
+			return err
+		},
+		"int16": func(reader *CdrReader) error {
+			_, err := reader.Int16()
+			return err
+		},
+		"uint16": func(reader *CdrReader) error {
+			_, err := reader.Uint16()
+			return err
+		},
+		"int32": func(reader *CdrReader) error {
+			_, err := reader.Int32()
+			return err
+		},
+		"uint32": func(reader *CdrReader) error {
+			_, err := reader.Uint32()
+			return err
+		},
+		"int64": func(reader *CdrReader) error {
+			_, err := reader.Int64()
+			return err
+		},
+		"uint64": func(reader *CdrReader) error {
+			_, err := reader.Uint64()
+			return err
+		},
+		"float32": func(reader *CdrReader) error {
+			_, err := reader.Float32()
+			return err
+		},
+		"float64": func(reader *CdrReader) error {
+			_, err := reader.Float64()
+			return err
+		},
+	}
+
+	for name, read := range tests {
+		t.Run(name, func(t *testing.T) {
+			reader, err := NewCdrReader([]byte{0, 1, 0, 0})
+			require.NoError(t, err)
+
+			require.NotPanics(t, func() {
+				err = read(reader)
+			})
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestAlignedScalarReadReturnsErrorWithoutPanic(t *testing.T) {
+	reader, err := NewCdrReader([]byte{0, 1, 0, 0, 1, 2})
+	require.NoError(t, err)
+	_, err = reader.Uint8()
+	require.NoError(t, err)
+
+	require.NotPanics(t, func() {
+		_, err = reader.Uint32()
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "offset: 8")
 }

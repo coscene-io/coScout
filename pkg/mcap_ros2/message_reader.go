@@ -408,7 +408,7 @@ func readField(
 		arrayLength,
 		reader.RemainingBytes(),
 		1,
-		resultInterfaceSlotBytes,
+		resultComplexElementBytes,
 	); err != nil {
 		return nil, err
 	}
