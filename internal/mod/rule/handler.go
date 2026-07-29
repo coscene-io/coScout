@@ -130,7 +130,14 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 			case <-t.C:
 				configTicker.Reset(config.ReloadRulesInterval)
 
-				appConfig := c.confManager.LoadWithRemote()
+				appConfig, err := c.confManager.LoadWithRemote()
+				if err != nil {
+					if appConfig == nil {
+						log.Errorf("load rule config: %v", err)
+						continue
+					}
+					log.Warnf("Unable to reload rule config, using last-known-good config: %v", err)
+				}
 				confConfig, ok := appConfig.Mod.Config.(config.DefaultModConfConfig)
 				if ok {
 					*modConfig = confConfig

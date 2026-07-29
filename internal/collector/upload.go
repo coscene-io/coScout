@@ -142,7 +142,14 @@ func Upload(ctx context.Context, reqClient *api.RequestClient, confManager *conf
 						return
 					}
 
-					appConfig := confManager.LoadWithRemote()
+					appConfig, configErr := confManager.LoadWithRemote()
+					if configErr != nil {
+						if appConfig == nil {
+							log.Errorf("Unable to load upload config: %v", configErr)
+							return
+						}
+						log.Warnf("Unable to reload upload config, using last-known-good config: %v", configErr)
+					}
 					if appConfig != nil {
 						enabled := appConfig.Upload.NetworkRule.Enabled
 						blackInterfaces := appConfig.Upload.NetworkRule.BlackInterfaces
@@ -219,7 +226,13 @@ func uploadFiles(ctx context.Context, reqClient *api.RequestClient, confManager 
 	}
 
 	allCompleted := true
-	appConfig := confManager.LoadWithRemote()
+	appConfig, configErr := confManager.LoadWithRemote()
+	if configErr != nil {
+		if appConfig == nil {
+			return errors.Wrap(configErr, "load upload config")
+		}
+		log.Warnf("Unable to reload upload config, using last-known-good config: %v", configErr)
+	}
 	getStorage := confManager.GetStorage()
 
 	recordCache, err := recordCache.Reload()

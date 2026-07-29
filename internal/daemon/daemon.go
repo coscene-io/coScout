@@ -38,7 +38,18 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	appConfig := confManager.LoadWithRemote()
+	appConfig, err := confManager.LoadWithRemote()
+	if err != nil {
+		if appConfig == nil {
+			select {
+			case errorChan <- err:
+			default:
+				log.Warnf("Error channel is full, dropping error: %v", err)
+			}
+			return
+		}
+		log.Warnf("Unable to reload config, continuing with last-known-good config: %v", err)
+	}
 
 	// Determine mode based on configuration
 	if appConfig.MasterSlave.Enabled {
@@ -151,7 +162,11 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 }
 
 func refreshRemoteConfig(confManager *config.ConfManager, reqClient *api.RequestClient) {
-	appConfig := confManager.LoadOnce()
+	appConfig, err := confManager.LoadOnce()
+	if err != nil {
+		log.Errorf("Unable to load local config while refreshing remote config: %v", err)
+		return
+	}
 	if len(appConfig.Import) == 0 {
 		return
 	}
