@@ -15,14 +15,29 @@
 package file_state_handler
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/coscene-io/coscout/internal/config"
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/stretchr/testify/require"
 )
+
+func newTestFileStateHandler(t *testing.T) *fileStateHandler {
+	t.Helper()
+
+	return &fileStateHandler{
+		state:        make(map[string]FileState),
+		listenDirs:   mapset.NewSet[string](),
+		collectDirs:  mapset.NewSet[string](),
+		activeTopics: mapset.NewSet[string](),
+		statePath:    filepath.Join(t.TempDir(), "file-state.json"),
+	}
+}
 
 func TestRecursiveDirectoryUpdatesRollBackAfterLaterTraversalError(t *testing.T) {
 	t.Parallel()
@@ -79,5 +94,87 @@ func TestRecursiveDirectoryUpdatesRollBackAfterLaterTraversalError(t *testing.T)
 				t.Fatalf("state = %#v, want original state restored after later traversal error", handler.state)
 			}
 		})
+	}
+}
+
+func TestConcurrentStateAccessAndPersistence(t *testing.T) {
+	handler := newTestFileStateHandler(t)
+	baseDir := t.TempDir()
+	const iterations = 500
+
+	var wg sync.WaitGroup
+	errs := make(chan error, iterations)
+
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			filename := filepath.Join(baseDir, fmt.Sprintf("%d.log", i))
+			handler.setFileState(filename, FileState{Size: int64(i), IsListening: true})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			_ = handler.Files()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if err := handler.saveState(); err != nil {
+				errs <- err
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			_, _ = handler.getFileState(filepath.Join(baseDir, fmt.Sprintf("%d.log", i)))
+		}
+	}()
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+}
+
+func TestConcurrentDirectoryUpdates(t *testing.T) {
+	handler := newTestFileStateHandler(t)
+	listenDir := t.TempDir()
+	collectDir := t.TempDir()
+	const iterations = 25
+
+	var wg sync.WaitGroup
+	errs := make(chan error, iterations*2)
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if err := handler.UpdateListenDirs(config.DefaultModConfConfig{
+				ListenDirs: []string{listenDir},
+			}); err != nil {
+				errs <- err
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if err := handler.UpdateCollectDirs(nil, config.DefaultModConfConfig{
+				CollectDirs: []string{collectDir},
+			}); err != nil {
+				errs <- err
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
 	}
 }

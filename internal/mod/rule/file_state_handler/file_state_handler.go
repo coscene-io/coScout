@@ -31,7 +31,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/djherbis/times"
 	"github.com/pkg/errors"
-	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -94,7 +93,8 @@ type SavedState struct {
 // fileStateHandler is used to keep track of the state of files in directories.
 type fileStateHandler struct {
 	state        map[string]FileState
-	updateLock   sync.Mutex
+	stateLock    sync.RWMutex
+	saveLock     sync.Mutex
 	listenDirs   mapset.Set[string]
 	collectDirs  mapset.Set[string]
 	activeTopics mapset.Set[string]
@@ -187,27 +187,77 @@ func (f *fileStateHandler) loadState() error {
 		log.Warnf("Invalid file state file: %v, reset to init", err)
 	}
 
-	f.state = savedState.State
-	f.listenDirs = mapset.NewSet[string]()
-	f.collectDirs = mapset.NewSet[string]()
+	if savedState.State == nil {
+		savedState.State = make(map[string]FileState)
+	}
+	listenDirs := mapset.NewSet(savedState.ListenDirs...)
+	collectDirs := mapset.NewSet(savedState.CollectDirs...)
 
-	for _, dir := range savedState.ListenDirs {
-		f.listenDirs.Add(dir)
-	}
-	for _, dir := range savedState.CollectDirs {
-		f.collectDirs.Add(dir)
-	}
+	f.stateLock.Lock()
+	f.state = savedState.State
+	f.listenDirs = listenDirs
+	f.collectDirs = collectDirs
+	f.stateLock.Unlock()
 
 	return nil
 }
 
-// SaveState saves the current state to disk.
-func (f *fileStateHandler) saveState() error {
-	savedState := SavedState{
-		State:       f.state,
+func (f *fileStateHandler) savedStateSnapshot() SavedState {
+	f.stateLock.RLock()
+	defer f.stateLock.RUnlock()
+
+	state := make(map[string]FileState, len(f.state))
+	for filename, fileState := range f.state {
+		state[filename] = fileState
+	}
+
+	return SavedState{
+		State:       state,
 		ListenDirs:  f.listenDirs.ToSlice(),
 		CollectDirs: f.collectDirs.ToSlice(),
 	}
+}
+
+func (f *fileStateHandler) stateKeysSnapshot() []string {
+	f.stateLock.RLock()
+	defer f.stateLock.RUnlock()
+
+	filenames := make([]string, 0, len(f.state))
+	for filename := range f.state {
+		filenames = append(filenames, filename)
+	}
+	return filenames
+}
+
+func (f *fileStateHandler) stateSnapshot() map[string]FileState {
+	f.stateLock.RLock()
+	defer f.stateLock.RUnlock()
+
+	state := make(map[string]FileState, len(f.state))
+	for filename, fileState := range f.state {
+		state[filename] = fileState
+	}
+	return state
+}
+
+func (f *fileStateHandler) listenDirsSnapshot() mapset.Set[string] {
+	f.stateLock.RLock()
+	defer f.stateLock.RUnlock()
+	return mapset.NewSet(f.listenDirs.ToSlice()...)
+}
+
+func (f *fileStateHandler) collectDirsSnapshot() mapset.Set[string] {
+	f.stateLock.RLock()
+	defer f.stateLock.RUnlock()
+	return mapset.NewSet(f.collectDirs.ToSlice()...)
+}
+
+// SaveState saves the current state to disk.
+func (f *fileStateHandler) saveState() error {
+	f.saveLock.Lock()
+	defer f.saveLock.Unlock()
+
+	savedState := f.savedStateSnapshot()
 
 	data, err := json.MarshalIndent(savedState, "", "  ")
 	if err != nil {
@@ -233,8 +283,8 @@ func (f *fileStateHandler) setFileState(filePath string, state FileState) {
 		return
 	}
 
-	f.updateLock.Lock()
-	defer f.updateLock.Unlock()
+	f.stateLock.Lock()
+	defer f.stateLock.Unlock()
 	f.state[absPath] = state
 }
 
@@ -245,8 +295,8 @@ func (f *fileStateHandler) delFileState(filePath string) error {
 		return errors.Errorf("failed to get absolute path for %s: %v", filePath, err)
 	}
 
-	f.updateLock.Lock()
-	defer f.updateLock.Unlock()
+	f.stateLock.Lock()
+	defer f.stateLock.Unlock()
 	delete(f.state, absPath)
 	return nil
 }
@@ -259,6 +309,8 @@ func (f *fileStateHandler) getFileState(filePath string) (FileState, bool) {
 		return FileState{}, false
 	}
 
+	f.stateLock.RLock()
+	defer f.stateLock.RUnlock()
 	state, exists := f.state[absPath]
 	return state, exists
 }
@@ -290,7 +342,7 @@ func (f *fileStateHandler) restoreFileStates(checkpoints map[string]fileStateChe
 
 // updateDeletedFileState removes state entries for files that no longer exist.
 func (f *fileStateHandler) updateDeletedFileState() error {
-	for _, filename := range lo.Keys(f.state) {
+	for _, filename := range f.stateKeysSnapshot() {
 		if _, err := os.Stat(filename); os.IsNotExist(err) {
 			if err = f.delFileState(filename); err != nil {
 				return errors.Errorf("failed to delete file state for %s: %v", filename, err)
@@ -313,10 +365,10 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 	log.Infof("Start updating directories, listen_dirs: %v", newListenDirs)
 
 	// Find directories that are no longer being monitored
-	deleteDirs := f.listenDirs.Difference(newListenDirs)
+	deleteDirs := f.listenDirsSnapshot().Difference(newListenDirs)
 
 	// Delete state of files in directories that are no longer scanned
-	for filename := range f.state {
+	for _, filename := range f.stateKeysSnapshot() {
 		for dir := range deleteDirs.Iter() {
 			if strings.HasPrefix(filename, dir) {
 				if err := f.delFileState(filename); err != nil {
@@ -400,7 +452,9 @@ func (f *fileStateHandler) UpdateListenDirs(conf config.DefaultModConfConfig) er
 	}
 
 	// Update directory sets
+	f.stateLock.Lock()
 	f.listenDirs = newListenDirs
+	f.stateLock.Unlock()
 
 	// Clean up deleted files
 	if err := f.updateDeletedFileState(); err != nil {
@@ -427,10 +481,10 @@ func (f *fileStateHandler) UpdateCollectDirs(whitelist []string, conf config.Def
 	log.Infof("Start updating directories, collector_dirs: %v", newCollectDirs)
 
 	// Find directories that are no longer being monitored
-	deleteDirs := f.collectDirs.Difference(newCollectDirs)
+	deleteDirs := f.collectDirsSnapshot().Difference(newCollectDirs)
 
 	// Delete state of files in directories that are no longer collected
-	for filename := range f.state {
+	for _, filename := range f.stateKeysSnapshot() {
 		for dir := range deleteDirs.Iter() {
 			if strings.HasPrefix(filename, dir) {
 				if err := f.delFileState(filename); err != nil {
@@ -547,7 +601,9 @@ func (f *fileStateHandler) UpdateCollectDirs(whitelist []string, conf config.Def
 	}
 
 	// Update directory sets
+	f.stateLock.Lock()
 	f.collectDirs = newCollectDirs
+	f.stateLock.Unlock()
 
 	// Clean up deleted files
 	if err := f.updateDeletedFileState(); err != nil {
@@ -680,7 +736,7 @@ func (f *fileStateHandler) processCollectFile(absPath string, info os.FileInfo) 
 }
 
 func (f *fileStateHandler) UpdateFilesProcessState() error {
-	for filename, state := range f.state {
+	for filename, state := range f.stateSnapshot() {
 		if !state.IsListening {
 			continue
 		}
@@ -725,11 +781,8 @@ type FileFilter func(string, FileState) bool
 
 // Files returns files matching the given filters.
 func (f *fileStateHandler) Files(filters ...FileFilter) []FileState {
-	f.updateLock.Lock()
-	defer f.updateLock.Unlock()
-
 	var result []FileState
-	for filename, state := range f.state {
+	for filename, state := range f.stateSnapshot() {
 		if state.Unsupported {
 			continue
 		}
