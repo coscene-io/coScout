@@ -42,7 +42,7 @@ func NewDaemonCommand(cfgPath *string) *cobra.Command {
 			storageDB := storage.NewBoltDB(config.GetDBPath())
 			confManager := config.InitConfManager(*cfgPath, &storageDB)
 
-			appConf, err := confManager.LoadOnce()
+			appConf, err := confManager.LoadStartup()
 			if err != nil {
 				log.Fatalf("Unable to load config file from %s: %v", *cfgPath, err)
 			}
