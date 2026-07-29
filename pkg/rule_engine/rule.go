@@ -81,7 +81,7 @@ func (r *Rule) EvalConditions(activation map[string]interface{}, prevActivationT
 	case ts.Before(*prevActivationTime):
 		source, ok := activation["source"].(string)
 		// http means from HTTP source(such as ros listener), we need time sequence check, should increase time sequence.
-		if ok && source == "http" {
+		if ok && source == RuleSourceHTTP {
 			log.Warnf("Rule %s: activation time is before previous activation timem, ignoring", r.Metadata["rule_display_name"])
 			return false, prevActivationTime
 		}

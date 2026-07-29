@@ -32,6 +32,9 @@ const (
 	ActionSection
 )
 
+// RuleSourceHTTP identifies live messages received through the HTTP endpoint.
+const RuleSourceHTTP = "http"
+
 // ValidationErrorLocation represents where the validation error occurred.
 type ValidationErrorLocation struct {
 	Section   ErrorSection `json:"section"`

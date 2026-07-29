@@ -36,8 +36,8 @@ type Interface interface {
 	// IsFinished checks if the file is completely written and no more updates are expected.
 	IsFinished(filePath string) bool
 
-	// SendRuleItems sends rule items to the rule engine.
-	SendRuleItems(filePath string, activeTopics mapset.Set[string], ruleItemChan chan rule_engine.RuleItem)
+	// SendRuleItems sends rule items until the file ends or sendRuleItem returns false.
+	SendRuleItems(filePath string, activeTopics mapset.Set[string], sendRuleItem func(rule_engine.RuleItem) bool)
 }
 
 // defaultGetFileSize provides default implementations for some methods.
