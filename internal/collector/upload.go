@@ -1014,7 +1014,7 @@ func getSlaveFileCachePath(cacheFolder, recordName, slaveFilePath string) string
 
 // downloadSlaveFileToLocal downloads slave file to local cache.
 func downloadSlaveFileToLocal(parentCtx context.Context, fileManager *master.FileManager, fileInfo *model.FileInfo, localPath string, maxSize int64) error {
-	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, config.DefaultFileTransferTimeout)
 	defer cancel()
 
 	// Get file reader from FileManager (with optional size limit)

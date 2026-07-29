@@ -171,7 +171,7 @@ func (h *mcapHandler) SendRuleItems(
 	ctx context.Context,
 	filepath string,
 	activeTopics mapset.Set[string],
-	ruleItemChan chan<- rule_engine.RuleItem,
+	sendRuleItem func(rule_engine.RuleItem) bool,
 ) error {
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -386,13 +386,16 @@ func (h *mcapHandler) SendRuleItems(
 			}
 		}
 
-		if err := sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
+		if !sendRuleItem(rule_engine.RuleItem{
 			Msg:    decoded,
 			Ts:     utils.FloatSecFromTime(utils.TimeFromFloat(float64(msg.PublishTime))),
 			Topic:  channel.Topic,
 			Source: filepath,
-		}); err != nil {
-			return err
+		}) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return nil
 		}
 	}
 }

@@ -47,7 +47,7 @@ func TestLogHandlerCancellationUnblocksFullRuleItemChannel(t *testing.T) {
 			ctx,
 			logPath,
 			mapset.NewSet[string](),
-			ruleItems,
+			sendRuleItemToChannel(ctx, ruleItems),
 		)
 	}()
 
@@ -93,7 +93,7 @@ func TestHandlersReturnErrorsForUnreadableFiles(t *testing.T) {
 				t.Context(),
 				missingPath,
 				activeTopics,
-				ruleItems,
+				sendRuleItemToChannel(t.Context(), ruleItems),
 			)
 			require.Error(t, err)
 		})
@@ -109,13 +109,13 @@ func TestIntentionalSkipsReturnSuccess(t *testing.T) {
 		t.Context(),
 		"unsupported.file",
 		mapset.NewSet[string](),
-		ruleItems,
+		sendRuleItemToChannel(t.Context(), ruleItems),
 	))
 	require.NoError(t, NewLogHandler().SendRuleItems(
 		t.Context(),
 		"missing.log",
 		mapset.NewSet[string]("/some_other_topic"),
-		ruleItems,
+		sendRuleItemToChannel(t.Context(), ruleItems),
 	))
 }
 
@@ -134,7 +134,21 @@ func TestLogHandlerEOFReturnsSuccess(t *testing.T) {
 		t.Context(),
 		logPath,
 		mapset.NewSet[string](),
-		ruleItems,
+		sendRuleItemToChannel(t.Context(), ruleItems),
 	))
 	require.Len(t, ruleItems, 1)
+}
+
+func sendRuleItemToChannel(
+	ctx context.Context,
+	ruleItems chan<- rule_engine.RuleItem,
+) func(rule_engine.RuleItem) bool {
+	return func(item rule_engine.RuleItem) bool {
+		select {
+		case ruleItems <- item:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
 }

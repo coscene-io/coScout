@@ -37,15 +37,28 @@ var (
 
 // Client master to slave client.
 type Client struct {
-	httpClient *http.Client
-	config     *config.MasterConfig
+	httpClient     *http.Client
+	downloadClient *http.Client
+	config         *config.MasterConfig
 }
 
 // NewClient creates a new master client.
 func NewClient(masterConfig *config.MasterConfig) *Client {
+	downloadTransport := &http.Transport{Proxy: http.ProxyFromEnvironment}
+	if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
+		downloadTransport = defaultTransport.Clone()
+	}
+	downloadTransport.ResponseHeaderTimeout = masterConfig.RequestTimeout
+
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: masterConfig.RequestTimeout,
+		},
+		// File downloads are bounded by their request context. Keeping the
+		// response-header timeout catches an unresponsive slave without applying
+		// RequestTimeout to the potentially long response-body transfer.
+		downloadClient: &http.Client{
+			Transport: downloadTransport,
 		},
 		config: masterConfig,
 	}
@@ -157,7 +170,7 @@ func (c *Client) DownloadSlaveFileWithSize(ctx context.Context, slave *SlaveInfo
 
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.downloadClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send download request to slave %s: %w", slave.ID, err)
 	}
@@ -246,7 +259,7 @@ func (c *Client) RequestAllSlaveFiles(ctx context.Context, registry *SlaveRegist
 				}
 			} else {
 				results[res.slaveID] = res.resp
-				log.Infof("Successfully got %d files from slave %s", len(res.resp.Files), res.slaveID)
+				logSlaveTaskResponse(res.slaveID, req.TaskID, res.resp)
 			}
 		case <-ctx.Done():
 			log.Warn("Context cancelled while waiting for slave responses")
@@ -302,7 +315,7 @@ func (c *Client) RequestAllSlaveFilesByContent(ctx context.Context, registry *Sl
 				}
 			} else {
 				results[res.slaveID] = res.resp
-				log.Infof("Successfully got %d files from slave %s", len(res.resp.Files), res.slaveID)
+				logSlaveTaskResponse(res.slaveID, req.TaskID, res.resp)
 			}
 		case <-ctx.Done():
 			log.Warn("Context cancelled while waiting for slave responses")
@@ -311,4 +324,23 @@ func (c *Client) RequestAllSlaveFilesByContent(ctx context.Context, registry *Sl
 	}
 
 	return results
+}
+
+func logSlaveTaskResponse(slaveID, taskID string, response *TaskResponse) {
+	logger := log.WithFields(log.Fields{
+		"slaveID":  slaveID,
+		"taskName": taskID,
+	})
+	if response == nil {
+		logger.Error("Slave returned an empty scan response")
+		return
+	}
+	if !response.Success {
+		logger.WithFields(log.Fields{
+			"errorCode": response.ErrorCode,
+			"error":     response.Error,
+		}).Warn("Slave file scan failed; continuing with available results")
+		return
+	}
+	logger.WithField("files", len(response.Files)).Info("Successfully got files from slave")
 }

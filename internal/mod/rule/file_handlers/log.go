@@ -80,7 +80,7 @@ func (h *logHandler) SendRuleItems(
 	ctx context.Context,
 	filePath string,
 	activeTopics mapset.Set[string],
-	ruleItemChan chan<- rule_engine.RuleItem,
+	sendRuleItem func(rule_engine.RuleItem) bool,
 ) error {
 	if activeTopics.Cardinality() > 0 && !activeTopics.Contains("/external_log") {
 		return nil
@@ -120,7 +120,7 @@ func (h *logHandler) SendRuleItems(
 		nsec := stampedLog.Timestamp.Nanosecond()
 		tsFloat := float64(sec) + float64(nsec)/1e9
 
-		if err := sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
+		if !sendRuleItem(rule_engine.RuleItem{
 			Msg: map[string]interface{}{
 				"timestamp": map[string]interface{}{
 					"sec":  sec,
@@ -133,8 +133,11 @@ func (h *logHandler) SendRuleItems(
 			Topic:  "/external_log",
 			Ts:     tsFloat,
 			Source: filePath,
-		}); err != nil {
-			return err
+		}) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return nil
 		}
 	}
 }

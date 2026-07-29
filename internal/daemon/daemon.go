@@ -27,6 +27,7 @@ import (
 	"github.com/coscene-io/coscout/internal/core"
 	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/mod"
+	"github.com/coscene-io/coscout/internal/queuedbytes"
 	"github.com/coscene-io/coscout/pkg/constant"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -52,6 +53,16 @@ func Run(
 		}
 		log.Warnf("Unable to reload config, continuing with last-known-good config: %v", err)
 	}
+	queuedBytesLimit := appConfig.HttpServer.QueuedBytesLimit
+	if queuedBytesLimit <= 0 {
+		log.Warnf(
+			"Invalid HTTP queued bytes limit %d, falling back to %d",
+			queuedBytesLimit,
+			config.DefaultHTTPQueuedBytesLimit,
+		)
+		queuedBytesLimit = config.DefaultHTTPQueuedBytesLimit
+	}
+	ruleQueuedBytes := queuedbytes.NewBudget(queuedBytesLimit)
 
 	// Determine mode based on configuration
 	if appConfig.MasterSlave.Enabled {
@@ -148,7 +159,7 @@ func Run(
 	go core.SendHeartbeat(runCtx, reqClient, confManager.GetStorage(), errorChan)
 
 	// Start task handler with optional master-slave enhancement
-	taskHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.TaskModType)
+	taskHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.TaskModType, ruleQueuedBytes)
 	if appConfig.MasterSlave.Enabled && masterServer != nil {
 		if customTaskHandler, ok := taskHandler.(interface {
 			EnhanceTaskHandlerWithMasterSlave(*master.SlaveRegistry, *config.MasterConfig)
@@ -160,7 +171,7 @@ func Run(
 	go taskHandler.Run(runCtx)
 
 	// Start rule handler with optional master-slave enhancement
-	ruleHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.RuleModType)
+	ruleHandler := mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.RuleModType, ruleQueuedBytes)
 	if appConfig.MasterSlave.Enabled && masterServer != nil {
 		if customRuleHandler, ok := ruleHandler.(interface {
 			EnhanceRuleHandlerWithMasterSlave(*master.SlaveRegistry, *config.MasterConfig)
@@ -172,7 +183,7 @@ func Run(
 	go ruleHandler.Run(runCtx)
 
 	// Start HTTP handler
-	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.HttpModType).Run(runCtx)
+	go mod.NewModHandler(*reqClient, *confManager, pubSub, errorChan, constant.HttpModType, ruleQueuedBytes).Run(runCtx)
 
 	log.Info("Daemon started successfully")
 	if masterResult != nil {

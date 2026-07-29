@@ -87,7 +87,8 @@ func (c ConfManager) getDefaultConfig() AppConfig {
 			},
 		},
 		HttpServer: HttpServerConfig{
-			Port: 22524,
+			Port:             22524,
+			QueuedBytesLimit: DefaultHTTPQueuedBytesLimit,
 		},
 	}
 }

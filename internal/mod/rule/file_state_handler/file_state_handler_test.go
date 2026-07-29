@@ -72,7 +72,7 @@ func (h *blockingFinishedHandler) SendRuleItems(
 	context.Context,
 	string,
 	mapset.Set[string],
-	chan<- rule_engine.RuleItem,
+	func(rule_engine.RuleItem) bool,
 ) error {
 	return nil
 }

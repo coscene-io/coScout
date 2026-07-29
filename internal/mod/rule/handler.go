@@ -15,6 +15,7 @@
 package rule
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	stderrors "errors"
@@ -34,6 +35,7 @@ import (
 	"github.com/coscene-io/coscout/internal/master"
 	"github.com/coscene-io/coscout/internal/mod/rule/file_state_handler"
 	"github.com/coscene-io/coscout/internal/model"
+	"github.com/coscene-io/coscout/internal/queuedbytes"
 	"github.com/coscene-io/coscout/pkg/constant"
 	"github.com/coscene-io/coscout/pkg/rule_engine"
 	"github.com/coscene-io/coscout/pkg/upload"
@@ -55,9 +57,11 @@ const (
 	collectFileStatePath = "collectFile.state.json"
 )
 
-type ruleItemEnvelope struct {
-	item   rule_engine.RuleItem
-	result chan error
+type queuedRuleMessage struct {
+	item          rule_engine.RuleItem
+	payload       []byte
+	reservedBytes int64
+	result        chan error
 }
 
 type CustomRuleHandler struct {
@@ -69,8 +73,9 @@ type CustomRuleHandler struct {
 	listenFileStateHandler  file_state_handler.FileStateHandler
 	collectFileStateHandler file_state_handler.FileStateHandler
 	listenChan              chan string
-	ruleItemChan            chan ruleItemEnvelope
+	ruleMessageChan         chan queuedRuleMessage
 	engine                  Engine
+	queuedBytes             *queuedbytes.Budget
 	inFlightMu              sync.Mutex
 	inFlightFiles           map[string]struct{}
 
@@ -86,7 +91,7 @@ type ruleSlaveFileRequester interface {
 	RequestAllSlaveFilesByContent(context.Context, *master.SlaveRegistry, *master.TaskRequest) map[string]*master.TaskResponse
 }
 
-func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomRuleHandler {
+func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error, queuedBytes *queuedbytes.Budget) *CustomRuleHandler {
 	listenFileStateHandler, err := file_state_handler.New(listenFileStatePath)
 	if err != nil {
 		log.Errorf("create file state handler: %v", err)
@@ -107,10 +112,11 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		listenFileStateHandler:  listenFileStateHandler,
 		collectFileStateHandler: collectFileStateHandler,
 		listenChan:              make(chan string, 1000),
-		ruleItemChan:            make(chan ruleItemEnvelope, 1000),
+		ruleMessageChan:         make(chan queuedRuleMessage, 1000),
 		engine:                  Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
 		inFlightFiles:           make(map[string]struct{}),
 		pubSub:                  pubSub,
+		queuedBytes:             queuedBytes,
 		cleanCollectInfo: func(info model.CollectInfo) string {
 			return info.Clean()
 		},
@@ -220,21 +226,15 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 	// start goroutine process to concurrently process listened files and send messages
 	go c.processListenedFilesAndSendMessages(ctx, numThreadToProcessFile)
 
-	// start goroutine process to consume messages using rule engine
+	subscriberDone := make(chan struct{})
 	go func() {
-		for {
-			select {
-			case envelope := <-c.ruleItemChan:
-				consumeErr := c.engine.ConsumeNext(envelope.item)
-				if envelope.result != nil {
-					envelope.result <- consumeErr
-				}
-			case <-ctx.Done():
-				log.Infof("rule item channel closed")
-				return
-			}
-		}
+		defer close(subscriberDone)
+		c.handleSubMsg(ctx)
 	}()
+
+	// Use one FIFO queue for HTTP and file messages so delaying HTTP decoding
+	// does not change their relative processing order.
+	go c.consumeRuleMessages(ctx, subscriberDone)
 
 	// Now start the collect info handler periodic goroutine
 	collectTicker := time.NewTicker(1 * time.Second)
@@ -253,10 +253,24 @@ func (c *CustomRuleHandler) Run(ctx context.Context) {
 		}
 	}(collectTicker)
 
-	go c.handleSubMsg(ctx)
-
 	<-ctx.Done()
 	log.Infof("Rule handler stopped")
+}
+
+func (c *CustomRuleHandler) consumeRuleMessages(ctx context.Context, subscriberDone <-chan struct{}) {
+	for {
+		select {
+		case message := <-c.ruleMessageChan:
+			c.consumeRuleMessage(message)
+		case <-ctx.Done():
+			// No new HTTP reservations can enter the queue after the subscriber
+			// exits. Release any reservations still buffered during shutdown.
+			<-subscriberDone
+			c.releaseQueuedRuleMessages()
+			log.Infof("rule message channel closed")
+			return
+		}
+	}
 }
 
 func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
@@ -277,26 +291,105 @@ func (c *CustomRuleHandler) handleSubMsg(ctx context.Context) {
 				log.Warn("received nil message")
 				continue
 			}
-
-			item := rule_engine.RuleItem{}
-			err := json.Unmarshal(msg.Payload, &item)
-			if err != nil {
-				log.Errorf("unmarshal rule item: %v", err)
-
-				msg.Ack()
-				continue
-			}
-
-			select {
-			case c.ruleItemChan <- ruleItemEnvelope{item: item}:
-				msg.Ack()
-			case <-ctx.Done():
+			if !c.handleRuleMessage(ctx, msg) {
 				return
 			}
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+func (c *CustomRuleHandler) handleRuleMessage(ctx context.Context, msg *gcmessage.Message) bool {
+	reservedBytes, claimed := c.queuedBytes.ClaimMessage(msg.UUID)
+	if !claimed {
+		log.Warnf("Dropping unclaimed rule message %s", msg.UUID)
+		msg.Ack()
+		return true
+	}
+
+	releaseReservation := true
+	defer func() {
+		if releaseReservation {
+			c.queuedBytes.Release(reservedBytes)
+		}
+	}()
+
+	select {
+	case c.ruleMessageChan <- queuedRuleMessage{
+		payload:       msg.Payload,
+		reservedBytes: reservedBytes,
+	}:
+		releaseReservation = false
+		if !c.queuedBytes.AdmitMessage(msg.UUID) {
+			log.Warnf("Failed to record admission for rule message batch %s", msg.UUID)
+		}
+		msg.Ack()
+		return true
+	case <-ctx.Done():
+		if !c.queuedBytes.AbortMessage(msg.UUID) {
+			log.Warnf("Failed to record abort for rule message batch %s", msg.UUID)
+		}
+		msg.Ack()
+		return false
+	}
+}
+
+func (c *CustomRuleHandler) consumeRuleMessage(message queuedRuleMessage) {
+	if message.payload != nil {
+		defer c.queuedBytes.Release(message.reservedBytes)
+		if err := consumeHTTPRuleBatch(message.payload, func(item rule_engine.RuleItem) {
+			if consumeErr := c.engine.ConsumeNext(item); consumeErr != nil {
+				log.Errorf("consume HTTP rule item: %v", consumeErr)
+			}
+		}); err != nil {
+			log.Errorf("consume HTTP rule message batch: %v", err)
+		}
+		return
+	}
+
+	consumeErr := c.engine.ConsumeNext(message.item)
+	if message.result != nil {
+		message.result <- consumeErr
+	}
+}
+
+func (c *CustomRuleHandler) releaseQueuedRuleMessages() {
+	for {
+		select {
+		case message := <-c.ruleMessageChan:
+			if message.payload != nil {
+				c.queuedBytes.Release(message.reservedBytes)
+			} else if message.result != nil {
+				message.result <- context.Canceled
+			}
+		default:
+			return
+		}
+	}
+}
+
+func consumeHTTPRuleBatch(payload []byte, consume func(rule_engine.RuleItem)) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
+		return errors.New("HTTP rule message batch must be a JSON array")
+	}
+
+	for decoder.More() {
+		item := rule_engine.RuleItem{}
+		if err := decoder.Decode(&item); err != nil {
+			return err
+		}
+		item.Source = rule_engine.RuleSourceHTTP
+		consume(item)
+	}
+
+	_, err = decoder.Token()
+	return err
 }
 
 func (c *CustomRuleHandler) sendFilesToBeProcessed(
@@ -434,29 +527,20 @@ func (c *CustomRuleHandler) processFileWithRule(
 		return errors.Errorf("get file handler failed for file: %v", filename)
 	}
 
-	localRuleItems := make(chan rule_engine.RuleItem)
-	handlerDone := make(chan error, 1)
-	go func() {
-		handlerDone <- handler.SendRuleItems(
-			ctx,
-			filename,
-			c.engine.activeTopicSet(),
-			localRuleItems,
-		)
-	}()
-
 	var consumeErr error
-	for {
-		select {
-		case item := <-localRuleItems:
+	handlerErr := handler.SendRuleItems(
+		ctx,
+		filename,
+		c.engine.activeTopicSet(),
+		func(item rule_engine.RuleItem) bool {
 			result := make(chan error, 1)
 			select {
-			case c.ruleItemChan <- ruleItemEnvelope{
+			case c.ruleMessageChan <- queuedRuleMessage{
 				item:   item,
 				result: result,
 			}:
 			case <-ctx.Done():
-				return ctx.Err()
+				return false
 			}
 
 			select {
@@ -467,14 +551,24 @@ func (c *CustomRuleHandler) processFileWithRule(
 						errors.Wrap(itemConsumeErr, "consume rule item"),
 					)
 				}
+				return true
 			case <-ctx.Done():
-				return ctx.Err()
+				return false
 			}
-		case handlerErr := <-handlerDone:
-			return stderrors.Join(handlerErr, consumeErr)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		},
+	)
+	return stderrors.Join(handlerErr, consumeErr)
+}
+
+func (c *CustomRuleHandler) enqueueFileRuleItem(
+	ctx context.Context,
+	item rule_engine.RuleItem,
+) bool {
+	select {
+	case c.ruleMessageChan <- queuedRuleMessage{item: item}:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

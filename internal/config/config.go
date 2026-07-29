@@ -14,6 +14,8 @@
 
 package config
 
+const DefaultHTTPQueuedBytesLimit int64 = 1 << 30
+
 type AppConfig struct {
 	Api ApiConfig `koanf:"api" yaml:"api" json:"api"`
 
@@ -91,7 +93,8 @@ type DefaultModConfConfig struct {
 }
 
 type HttpServerConfig struct {
-	Port int `koanf:"port" yaml:"port" json:"port"`
+	Port             int   `koanf:"port" yaml:"port" json:"port"`
+	QueuedBytesLimit int64 `koanf:"queued_bytes_limit" yaml:"queued_bytes_limit" json:"queued_bytes_limit"`
 }
 
 type UploadConfig struct {

@@ -37,27 +37,14 @@ type Interface interface {
 	// IsFinished checks if the file is completely written and no more updates are expected.
 	IsFinished(filePath string) bool
 
-	// SendRuleItems sends rule items to the rule engine. It returns nil only
-	// after the file is fully handled or intentionally skipped.
+	// SendRuleItems sends rule items until the file ends, the context is
+	// cancelled, or sendRuleItem returns false.
 	SendRuleItems(
 		ctx context.Context,
 		filePath string,
 		activeTopics mapset.Set[string],
-		ruleItemChan chan<- rule_engine.RuleItem,
+		sendRuleItem func(rule_engine.RuleItem) bool,
 	) error
-}
-
-func sendRuleItem(
-	ctx context.Context,
-	ruleItemChan chan<- rule_engine.RuleItem,
-	item rule_engine.RuleItem,
-) error {
-	select {
-	case ruleItemChan <- item:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // defaultGetFileSize provides default implementations for some methods.

@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/coscene-io/coscout/internal/storage"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -301,4 +302,12 @@ func TestLoadStartupSeedsFallbackBeforeRemoteConfigIsAvailable(t *testing.T) {
 	require.Error(t, err)
 	require.NotNil(t, reloaded)
 	require.Equal(t, 45678, reloaded.HttpServer.Port)
+}
+
+func TestDefaultHTTPQueuedBytesLimit(t *testing.T) {
+	t.Parallel()
+
+	appConfig := (ConfManager{}).getDefaultConfig()
+
+	assert.Equal(t, int64(1<<30), appConfig.HttpServer.QueuedBytesLimit)
 }

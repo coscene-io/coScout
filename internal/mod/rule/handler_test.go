@@ -278,7 +278,7 @@ func (h *cancellationBlockingHandler) SendRuleItems(
 	ctx context.Context,
 	_ string,
 	_ mapset.Set[string],
-	_ chan<- rule_engine.RuleItem,
+	_ func(rule_engine.RuleItem) bool,
 ) error {
 	if h.started != nil {
 		select {
@@ -317,7 +317,7 @@ func (h *resultFileHandler) SendRuleItems(
 	context.Context,
 	string,
 	mapset.Set[string],
-	chan<- rule_engine.RuleItem,
+	func(rule_engine.RuleItem) bool,
 ) error {
 	return h.err
 }
@@ -346,20 +346,21 @@ func (h *itemProducingFileHandler) SendRuleItems(
 	ctx context.Context,
 	filename string,
 	_ mapset.Set[string],
-	ruleItems chan<- rule_engine.RuleItem,
+	sendRuleItem func(rule_engine.RuleItem) bool,
 ) error {
-	select {
-	case ruleItems <- rule_engine.RuleItem{
+	if h.produced != nil {
+		close(h.produced)
+	}
+	if sendRuleItem(rule_engine.RuleItem{
 		Source: filename,
 		Topic:  "/fault",
-	}:
-		if h.produced != nil {
-			close(h.produced)
-		}
+	}) {
 		return nil
-	case <-ctx.Done():
+	}
+	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	return nil
 }
 
 type multiItemFileHandler struct {
@@ -371,18 +372,19 @@ func (h *multiItemFileHandler) SendRuleItems(
 	ctx context.Context,
 	filename string,
 	_ mapset.Set[string],
-	ruleItems chan<- rule_engine.RuleItem,
+	sendRuleItem func(rule_engine.RuleItem) bool,
 ) error {
 	defer close(h.done)
 	for index := 1; index <= 2; index++ {
-		select {
-		case ruleItems <- rule_engine.RuleItem{
+		if !sendRuleItem(rule_engine.RuleItem{
 			Msg:    map[string]interface{}{"index": index},
 			Source: filename,
 			Topic:  "/fault",
-		}:
-		case <-ctx.Done():
-			return ctx.Err()
+		}) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return nil
 		}
 	}
 	return nil
@@ -442,7 +444,7 @@ func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 2),
-		ruleItemChan:           make(chan ruleItemEnvelope),
+		ruleMessageChan:        make(chan queuedRuleMessage),
 	}
 	handler.listenChan <- "first.log"
 	handler.listenChan <- "second.log"
@@ -479,7 +481,7 @@ func TestCancelledFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope),
+		ruleMessageChan:        make(chan queuedRuleMessage),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -532,7 +534,7 @@ func TestCancellationDoesNotMarkFailedWhenHandlerReturnsSentinelError(t *testing
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope),
+		ruleMessageChan:        make(chan queuedRuleMessage),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -579,7 +581,7 @@ func TestCompletedFileProcessingMarksFileProcessed(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope),
+		ruleMessageChan:        make(chan queuedRuleMessage),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -622,7 +624,7 @@ func TestFailedFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope),
+		ruleMessageChan:        make(chan queuedRuleMessage),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -689,7 +691,7 @@ func TestProducedRuleItemWithoutConsumerAckIsNotMarkedProcessedOnCancel(t *testi
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope, 1),
+		ruleMessageChan:        make(chan queuedRuleMessage, 1),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -711,9 +713,9 @@ func TestProducedRuleItemWithoutConsumerAckIsNotMarkedProcessedOnCancel(t *testi
 		}
 	}, time.Second, 10*time.Millisecond)
 
-	var envelope ruleItemEnvelope
+	var envelope queuedRuleMessage
 	select {
-	case envelope = <-handler.ruleItemChan:
+	case envelope = <-handler.ruleMessageChan:
 	case <-time.After(time.Second):
 		t.Fatal("rule item was not forwarded to the consumer channel")
 	}
@@ -748,7 +750,7 @@ func TestProducedRuleItemIsMarkedProcessedOnlyAfterConsumerAck(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope, 1),
+		ruleMessageChan:        make(chan queuedRuleMessage, 1),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -762,9 +764,9 @@ func TestProducedRuleItemIsMarkedProcessedOnlyAfterConsumerAck(t *testing.T) {
 		handler.processListenedFilesAndSendMessages(ctx, 1)
 	}()
 
-	var envelope ruleItemEnvelope
+	var envelope queuedRuleMessage
 	select {
-	case envelope = <-handler.ruleItemChan:
+	case envelope = <-handler.ruleMessageChan:
 	case <-time.After(time.Second):
 		t.Fatal("rule item was not forwarded to the consumer channel")
 	}
@@ -807,7 +809,7 @@ func TestRuleItemConsumptionErrorMarksFileFailed(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope, 1),
+		ruleMessageChan:        make(chan queuedRuleMessage, 1),
 		engine: Engine{
 			rules:            []*rule_engine.Rule{testRuntimeRule(t, action)},
 			ruleDebounceTime: make(map[string]*time.Time),
@@ -831,7 +833,7 @@ func TestRuleItemConsumptionErrorMarksFileFailed(t *testing.T) {
 	go func() {
 		defer close(consumerDone)
 		select {
-		case envelope := <-handler.ruleItemChan:
+		case envelope := <-handler.ruleMessageChan:
 			envelope.result <- handler.engine.ConsumeNext(envelope.item)
 		case <-ctx.Done():
 		}
@@ -874,7 +876,7 @@ func TestRuleItemConsumptionErrorDrainsRemainingHandlerItems(t *testing.T) {
 	handler := &CustomRuleHandler{
 		listenFileStateHandler: stateHandler,
 		listenChan:             make(chan string, 1),
-		ruleItemChan:           make(chan ruleItemEnvelope, 1),
+		ruleMessageChan:        make(chan queuedRuleMessage, 1),
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -895,7 +897,7 @@ func TestRuleItemConsumptionErrorDrainsRemainingHandlerItems(t *testing.T) {
 		defer close(consumerDone)
 		for index := 0; index < 2; index++ {
 			select {
-			case envelope := <-handler.ruleItemChan:
+			case envelope := <-handler.ruleMessageChan:
 				itemIndex, _ := envelope.item.Msg["index"].(int)
 				consumedIndexes = append(consumedIndexes, itemIndex)
 				if index == 0 {

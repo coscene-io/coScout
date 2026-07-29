@@ -25,6 +25,7 @@ import (
 	"github.com/coscene-io/coscout/internal/api"
 	"github.com/coscene-io/coscout/internal/config"
 	"github.com/coscene-io/coscout/internal/mod/http/server"
+	"github.com/coscene-io/coscout/internal/queuedbytes"
 	"github.com/gorilla/mux"
 	log "github.com/sirupsen/logrus"
 )
@@ -34,14 +35,16 @@ type CustomHttpHandler struct {
 	confManager config.ConfManager
 	errChan     chan error
 	pubSub      *gochannel.GoChannel
+	queuedBytes *queuedbytes.Budget
 }
 
-func NewHttpHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error) *CustomHttpHandler {
+func NewHttpHandler(reqClient api.RequestClient, confManager config.ConfManager, pubSub *gochannel.GoChannel, errChan chan error, queuedBytes *queuedbytes.Budget) *CustomHttpHandler {
 	return &CustomHttpHandler{
 		reqClient:   reqClient,
 		confManager: confManager,
 		errChan:     errChan,
 		pubSub:      pubSub,
+		queuedBytes: queuedBytes,
 	}
 }
 
@@ -63,7 +66,7 @@ func (c *CustomHttpHandler) Run(ctx context.Context) {
 	serverPort := appConfig.HttpServer.Port
 
 	router := mux.NewRouter()
-	router.HandleFunc("/ruleEngine/messages", server.RulesHandler(c.pubSub)).Methods("POST")
+	router.HandleFunc("/ruleEngine/messages", server.RulesHandler(c.pubSub, c.queuedBytes)).Methods("POST")
 	router.HandleFunc("/ruleEngine/activeTopics", server.ActiveTopicsHandler(ctx, c.pubSub)).Methods("GET")
 	router.HandleFunc("/config/current", server.CurrentConfigHandler(c.confManager)).Methods("GET")
 	router.HandleFunc("/config/setLogLevel", server.LogConfigHandler()).Methods("POST")
@@ -91,7 +94,7 @@ func (c *CustomHttpHandler) Run(ctx context.Context) {
 		}
 	}()
 
-	log.Infof("HTTP server started at port %d", serverPort)
+	log.Infof("HTTP server started at port %d with rule message queued bytes limit %d", serverPort, c.queuedBytes.Limit())
 	<-ctx.Done()
 
 	ct, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

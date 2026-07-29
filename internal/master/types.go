@@ -212,6 +212,7 @@ type TaskResponse struct {
 const (
 	TaskErrorCodeInvalidTimeWindow  = "INVALID_TIME_WINDOW"
 	TaskErrorCodeTimeWindowNotReady = "TIME_WINDOW_NOT_READY"
+	TaskErrorCodeInternal           = "INTERNAL_ERROR"
 )
 
 // TaskResponsesTimeWindowErrorCode returns the strongest time-window status

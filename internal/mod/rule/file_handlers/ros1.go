@@ -87,7 +87,7 @@ func (h *ros1Handler) SendRuleItems(
 	ctx context.Context,
 	filePath string,
 	activeTopics mapset.Set[string],
-	ruleItemChan chan<- rule_engine.RuleItem,
+	sendRuleItem func(rule_engine.RuleItem) bool,
 ) error {
 	reader, err := os.Open(filePath)
 	if err != nil {
@@ -196,13 +196,16 @@ func (h *ros1Handler) SendRuleItems(
 
 		sec, nsec := utils.NormalizeFloatTimestamp(float64(msg.Time))
 		// Send JSON message through channel
-		if err := sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
+		if !sendRuleItem(rule_engine.RuleItem{
 			Msg:    structuredData,
 			Ts:     float64(sec) + float64(nsec)/1e9,
 			Topic:  conn.Topic,
 			Source: filePath,
-		}); err != nil {
-			return err
+		}) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return nil
 		}
 	}
 	log.Infof("finished sending rule items for ros1 file %s", filePath)
