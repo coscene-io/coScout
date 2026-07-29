@@ -153,7 +153,11 @@ func TestDownloadSlaveFileBodyReadStopsWhenCallerContextIsCancelled(t *testing.T
 		if _, err := w.Write([]byte(firstChunk)); err != nil {
 			return
 		}
-		w.(http.Flusher).Flush()
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			return
+		}
+		flusher.Flush()
 		close(headersFlushed)
 		<-r.Context().Done()
 		close(requestCancelled)

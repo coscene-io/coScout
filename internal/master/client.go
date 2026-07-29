@@ -44,7 +44,10 @@ type Client struct {
 
 // NewClient creates a new master client.
 func NewClient(masterConfig *config.MasterConfig) *Client {
-	downloadTransport := http.DefaultTransport.(*http.Transport).Clone()
+	downloadTransport := &http.Transport{Proxy: http.ProxyFromEnvironment}
+	if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
+		downloadTransport = defaultTransport.Clone()
+	}
 	downloadTransport.ResponseHeaderTimeout = masterConfig.RequestTimeout
 
 	return &Client{

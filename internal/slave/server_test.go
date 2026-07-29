@@ -34,10 +34,12 @@ import (
 
 type updateCollectDirsErrorHandler struct{}
 
+var errUpdateCollectDirs = errors.New("update collect directories failed")
+
 func (updateCollectDirsErrorHandler) UpdateListenDirs(config.DefaultModConfConfig) error { return nil }
 
 func (updateCollectDirsErrorHandler) UpdateCollectDirs([]string, config.DefaultModConfConfig) error {
-	return errors.New("update collect directories failed")
+	return errUpdateCollectDirs
 }
 
 func (updateCollectDirsErrorHandler) Files(...file_state_handler.FileFilter) []file_state_handler.FileState {
