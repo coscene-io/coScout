@@ -172,25 +172,25 @@ func (h *mcapHandler) SendRuleItems(
 	filepath string,
 	activeTopics mapset.Set[string],
 	ruleItemChan chan<- rule_engine.RuleItem,
-) {
+) error {
 	file, err := os.Open(filepath)
 	if err != nil {
 		log.Errorf("failed to open MCAP file [%s]: %v", filepath, err)
-		return
+		return errors.Errorf("open MCAP file [%s]: %v", filepath, err)
 	}
 	defer file.Close()
 
 	reader, err := mcap.NewReader(file)
 	if err != nil {
 		log.Errorf("failed to create MCAP reader: %v", err)
-		return
+		return errors.Errorf("create MCAP reader: %v", err)
 	}
 	defer reader.Close()
 
 	info, err := reader.Info()
 	if err != nil {
 		log.Errorf("failed to get info for MCAP file [%s]: %v", filepath, err)
-		return
+		return errors.Errorf("get info for MCAP file [%s]: %v", filepath, err)
 	}
 
 	// targetTopics will be empty if no active topics are provided
@@ -205,7 +205,7 @@ func (h *mcapHandler) SendRuleItems(
 
 		if targetTopics.Cardinality() == 0 {
 			log.Infof("no active topics found in MCAP file %s", filepath)
-			return
+			return nil
 		}
 	}
 	log.Infof("sending rule items for MCAP file %s with topics: %v", filepath, targetTopics)
@@ -213,7 +213,7 @@ func (h *mcapHandler) SendRuleItems(
 	iter, err := reader.Messages(mcap.WithTopics(targetTopics.ToSlice()))
 	if err != nil {
 		log.Errorf("failed to create message iterator: %v", err)
-		return
+		return errors.Errorf("create MCAP message iterator: %v", err)
 	}
 
 	// Remove msgBuf since we'll decode directly to map where possible
@@ -223,20 +223,28 @@ func (h *mcapHandler) SendRuleItems(
 	ros2Decoders := make(map[string]mcap_ros2.DecoderFunction)
 	descriptors := make(map[uint16]protoreflect.MessageDescriptor)
 	errTopics := map[string]struct{}{}
+	var processingErr error
+	recordProcessingError := func(err error) {
+		log.Error(err)
+		if processingErr == nil {
+			processingErr = err
+		}
+	}
 
 	for {
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 
 		schema, channel, message, err := iter.NextInto(msg)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				log.Infof("finished sending rule items for MCAP file %s", filepath)
+				return processingErr
 			} else {
 				log.Errorf("error reading message: %v", err)
+				return errors.Errorf("read MCAP message: %v", err)
 			}
-			return
 		}
 
 		if _, ok := errTopics[channel.Topic]; ok {
@@ -251,11 +259,14 @@ func (h *mcapHandler) SendRuleItems(
 			switch channel.MessageEncoding {
 			case "json":
 				if err := json.Unmarshal(message.Data, &decoded); err != nil {
-					log.Errorf("failed to unmarshal JSON: %v", err)
+					recordProcessingError(errors.Errorf("unmarshal JSON: %v", err))
 					continue
 				}
 			default:
-				log.Errorf("unsupported message encoding for schema-less channel: %s", channel.MessageEncoding)
+				recordProcessingError(errors.Errorf(
+					"unsupported message encoding for schema-less channel: %s",
+					channel.MessageEncoding,
+				))
 				continue
 			}
 		} else {
@@ -266,7 +277,7 @@ func (h *mcapHandler) SendRuleItems(
 					packageName := strings.Split(schema.Name, "/")[0]
 					transcoder, err = ros1msg.NewJSONTranscoder(packageName, schema.Data)
 					if err != nil {
-						log.Errorf("failed to create JSON transcoder: %v", err)
+						recordProcessingError(errors.Errorf("create JSON transcoder: %v", err))
 						continue
 					}
 					transcoders[channel.SchemaID] = transcoder
@@ -275,11 +286,11 @@ func (h *mcapHandler) SendRuleItems(
 				buf := &bytes.Buffer{}
 				msgReader.Reset(message.Data)
 				if err := transcoder.Transcode(buf, msgReader); err != nil {
-					log.Errorf("failed to transcode: %v", err)
+					recordProcessingError(errors.Errorf("transcode ros1 message: %v", err))
 					continue
 				}
 				if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
-					log.Errorf("failed to unmarshal transcoded data: %v", err)
+					recordProcessingError(errors.Errorf("unmarshal transcoded data: %v", err))
 					continue
 				}
 
@@ -288,7 +299,7 @@ func (h *mcapHandler) SendRuleItems(
 				if !ok {
 					dynamicDecoders, err := mcap_ros2.GenerateDynamic(schema.Name, string(schema.Data))
 					if err != nil {
-						log.Errorf("failed to generate dynamic schema decoder: %v", err)
+						recordProcessingError(errors.Errorf("generate dynamic schema decoder: %v", err))
 						continue
 					}
 
@@ -299,7 +310,7 @@ func (h *mcapHandler) SendRuleItems(
 					var decoderOk bool
 					decoder, decoderOk = dynamicDecoders[schema.Name]
 					if !decoderOk {
-						log.Errorf("failed to find decoder for schema: %s", schema.Name)
+						recordProcessingError(errors.Errorf("find decoder for schema: %s", schema.Name))
 						continue
 					}
 				}
@@ -315,7 +326,11 @@ func (h *mcapHandler) SendRuleItems(
 					decoded, err = decoder(message.Data)
 				}()
 				if panicErr != nil {
-					log.Errorf("failed to decode message: %v", panicErr)
+					recordProcessingError(errors.Errorf("decode message: %v", panicErr))
+					continue
+				}
+				if err != nil {
+					recordProcessingError(errors.Errorf("decode message: %v", err))
 					continue
 				}
 
@@ -324,56 +339,64 @@ func (h *mcapHandler) SendRuleItems(
 				if !ok {
 					fileDescriptorSet := &descriptorpb.FileDescriptorSet{}
 					if err := proto.Unmarshal(schema.Data, fileDescriptorSet); err != nil {
-						log.Errorf("failed to build file descriptor set: %v", err)
+						recordProcessingError(errors.Errorf("build file descriptor set: %v", err))
 						continue
 					}
 					files, err := protodesc.FileOptions{}.NewFiles(fileDescriptorSet)
 					if err != nil {
-						log.Errorf("failed to create file descriptor: %v", err)
+						recordProcessingError(errors.Errorf("create file descriptor: %v", err))
 						continue
 					}
 					descriptor, err := files.FindDescriptorByName(protoreflect.FullName(schema.Name))
 					if err != nil {
-						log.Errorf("failed to find descriptor: %v", err)
+						recordProcessingError(errors.Errorf("find descriptor: %v", err))
 						continue
 					}
-					messageDescriptor, _ = descriptor.(protoreflect.MessageDescriptor)
+					var descriptorOk bool
+					messageDescriptor, descriptorOk = descriptor.(protoreflect.MessageDescriptor)
+					if !descriptorOk {
+						recordProcessingError(errors.Errorf(
+							"descriptor %s is not a message descriptor",
+							schema.Name,
+						))
+						continue
+					}
 					descriptors[channel.SchemaID] = messageDescriptor
 				}
 				protoMsg := dynamicpb.NewMessage(messageDescriptor)
 				if err := proto.Unmarshal(message.Data, protoMsg); err != nil {
-					log.Errorf("failed to parse protobuf message: %v", err)
+					recordProcessingError(errors.Errorf("parse protobuf message: %v", err))
 					continue
 				}
 				marshalledBytes, err := protojson.Marshal(protoMsg)
 				if err != nil {
-					log.Errorf("failed to marshal protobuf to JSON: %v", err)
+					recordProcessingError(errors.Errorf("marshal protobuf to JSON: %v", err))
 					continue
 				}
 				if err := json.Unmarshal(marshalledBytes, &decoded); err != nil {
-					log.Errorf("failed to unmarshal protobuf JSON: %v", err)
+					recordProcessingError(errors.Errorf("unmarshal protobuf JSON: %v", err))
 					continue
 				}
 
 			case "jsonschema":
 				if err := json.Unmarshal(message.Data, &decoded); err != nil {
-					log.Errorf("failed to unmarshal JSON: %v", err)
+					recordProcessingError(errors.Errorf("unmarshal JSON schema message: %v", err))
 					continue
 				}
 
 			default:
-				log.Errorf("unsupported schema encoding: %s", schema.Encoding)
+				recordProcessingError(errors.Errorf("unsupported schema encoding: %s", schema.Encoding))
 				continue
 			}
 		}
 
-		if !sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
+		if err := sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
 			Msg:    decoded,
 			Ts:     utils.FloatSecFromTime(utils.TimeFromFloat(float64(msg.PublishTime))),
 			Topic:  channel.Topic,
 			Source: filepath,
-		}) {
-			return
+		}); err != nil {
+			return err
 		}
 	}
 }

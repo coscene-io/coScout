@@ -36,10 +36,17 @@ func TestLogHandlerCancellationUnblocksFullRuleItemChannel(t *testing.T) {
 
 	ruleItems := make(chan rule_engine.RuleItem)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
+	result := make(chan error, 1)
 	go func() {
 		defer close(done)
-		NewLogHandler().SendRuleItems(ctx, logPath, mapset.NewSet[string](), ruleItems)
+		result <- NewLogHandler().SendRuleItems(
+			ctx,
+			logPath,
+			mapset.NewSet[string](),
+			ruleItems,
+		)
 	}()
 
 	select {
@@ -49,6 +56,12 @@ func TestLogHandlerCancellationUnblocksFullRuleItemChannel(t *testing.T) {
 	}
 
 	cancel()
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("log handler did not return after cancellation")
+	}
 	require.Eventually(t, func() bool {
 		select {
 		case <-done:
@@ -57,4 +70,61 @@ func TestLogHandlerCancellationUnblocksFullRuleItemChannel(t *testing.T) {
 			return false
 		}
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestHandlersReturnErrorsForUnreadableFiles(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing")
+	ruleItems := make(chan rule_engine.RuleItem, 1)
+	activeTopics := mapset.NewSet[string]()
+
+	for name, handler := range map[string]Interface{
+		"log":  NewLogHandler(),
+		"mcap": NewMcapHandler(),
+		"ros1": NewRos1Handler(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := handler.SendRuleItems(
+				context.Background(),
+				missingPath,
+				activeTopics,
+				ruleItems,
+			)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestIntentionalSkipsReturnSuccess(t *testing.T) {
+	ruleItems := make(chan rule_engine.RuleItem, 1)
+
+	require.NoError(t, NewDefaultHandler().SendRuleItems(
+		context.Background(),
+		"unsupported.file",
+		mapset.NewSet[string](),
+		ruleItems,
+	))
+	require.NoError(t, NewLogHandler().SendRuleItems(
+		context.Background(),
+		"missing.log",
+		mapset.NewSet[string]("/some_other_topic"),
+		ruleItems,
+	))
+}
+
+func TestLogHandlerEOFReturnsSuccess(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "application.log")
+	require.NoError(t, os.WriteFile(
+		logPath,
+		[]byte("2025-01-01 00:00:00.000 INFO complete\n"),
+		0o600,
+	))
+	ruleItems := make(chan rule_engine.RuleItem, 1)
+
+	require.NoError(t, NewLogHandler().SendRuleItems(
+		context.Background(),
+		logPath,
+		mapset.NewSet[string](),
+		ruleItems,
+	))
+	require.Len(t, ruleItems, 1)
 }

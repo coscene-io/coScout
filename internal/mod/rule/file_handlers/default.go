@@ -75,8 +75,9 @@ func (h *defaultHandler) SendRuleItems(
 	filePath string,
 	_ mapset.Set[string],
 	_ chan<- rule_engine.RuleItem,
-) {
+) error {
 	log.Info("filePath not supported by rule engine: ", filePath, ", skip sending rule items")
+	return nil
 }
 
 func (h *defaultHandler) IsFinished(filePath string) bool {

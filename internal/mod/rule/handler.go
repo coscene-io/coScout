@@ -65,6 +65,8 @@ type CustomRuleHandler struct {
 	listenChan              chan string
 	ruleItemChan            chan rule_engine.RuleItem
 	engine                  Engine
+	inFlightMu              sync.Mutex
+	inFlightFiles           map[string]struct{}
 
 	// Master-slave components (optional)
 	slaveRegistry *master.SlaveRegistry
@@ -101,6 +103,7 @@ func NewRuleHandler(reqClient api.RequestClient, confManager config.ConfManager,
 		listenChan:              make(chan string, 1000),
 		ruleItemChan:            make(chan rule_engine.RuleItem, 1000),
 		engine:                  Engine{reqClient: reqClient, ruleDebounceTime: make(map[string]*time.Time)},
+		inFlightFiles:           make(map[string]struct{}),
 		pubSub:                  pubSub,
 		cleanCollectInfo: func(info model.CollectInfo) string {
 			return info.Clean()
@@ -309,17 +312,44 @@ func (c *CustomRuleHandler) sendFilesToBeProcessed(
 		file_state_handler.FilterIsListening(),
 		file_state_handler.FilterReadyToProcess(),
 	) {
+		if !c.addFileInFlight(fileState.Pathname) {
+			continue
+		}
+
 		select {
 		case c.listenChan <- fileState.Pathname:
 		case <-ctx.Done():
+			c.releaseFileInFlight(fileState.Pathname)
 			return
 		}
-
-		err := c.listenFileStateHandler.MarkProcessedFile(fileState.Pathname)
-		if err != nil {
-			log.Errorf("mark processed file: %v", err)
-		}
 	}
+}
+
+func (c *CustomRuleHandler) addFileInFlight(filename string) bool {
+	c.inFlightMu.Lock()
+	defer c.inFlightMu.Unlock()
+
+	if c.inFlightFiles == nil {
+		c.inFlightFiles = make(map[string]struct{})
+	}
+	if _, exists := c.inFlightFiles[filename]; exists {
+		return false
+	}
+	c.inFlightFiles[filename] = struct{}{}
+	return true
+}
+
+func (c *CustomRuleHandler) releaseFileInFlight(filename string) {
+	c.inFlightMu.Lock()
+	defer c.inFlightMu.Unlock()
+	delete(c.inFlightFiles, filename)
+}
+
+func (c *CustomRuleHandler) isFileInFlight(filename string) bool {
+	c.inFlightMu.Lock()
+	defer c.inFlightMu.Unlock()
+	_, exists := c.inFlightFiles[filename]
+	return exists
 }
 
 func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
@@ -341,6 +371,7 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 			select {
 			case semaphore <- struct{}{}:
 			case <-ctx.Done():
+				c.releaseFileInFlight(fileToProcess)
 				wg.Wait()
 				return
 			}
@@ -349,8 +380,19 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 			go func(filename string) {
 				defer wg.Done()
 				defer func() { <-semaphore }() // release the semaphore
+				defer c.releaseFileInFlight(filename)
 
-				c.processFileWithRule(ctx, filename)
+				if err := c.processFileWithRule(ctx, filename); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						log.Errorf("process file %s with rule: %v", filename, err)
+					}
+					return
+				}
+
+				if err := c.listenFileStateHandler.MarkProcessedFile(filename); err != nil {
+					log.Errorf("mark processed file: %v", err)
+					return
+				}
 				log.Infof("Finished processing file: %v", filename)
 			}(fileToProcess)
 		case <-ctx.Done():
@@ -363,16 +405,15 @@ func (c *CustomRuleHandler) processListenedFilesAndSendMessages(
 func (c *CustomRuleHandler) processFileWithRule(
 	ctx context.Context,
 	filename string,
-) {
+) error {
 	log.Infof("RuleEngine exec file: %v", filename)
 	handler := c.listenFileStateHandler.GetFileHandler(filename)
 	if handler == nil {
 		// this should not happen
-		log.Errorf("get file handler failed for file: %v", filename)
-		return
+		return errors.Errorf("get file handler failed for file: %v", filename)
 	}
 
-	handler.SendRuleItems(ctx, filename, c.engine.activeTopicSet(), c.ruleItemChan)
+	return handler.SendRuleItems(ctx, filename, c.engine.activeTopicSet(), c.ruleItemChan)
 }
 
 // scanCollectInfosAndHandle handles all collect info files within the collect info dir.

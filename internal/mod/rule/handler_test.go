@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -233,6 +234,7 @@ func (f *fakeFileStateHandler) processedCount() int {
 }
 
 type cancellationBlockingHandler struct {
+	started chan struct{}
 }
 
 func (h *cancellationBlockingHandler) CheckFilePath(string) bool {
@@ -256,8 +258,44 @@ func (h *cancellationBlockingHandler) SendRuleItems(
 	_ string,
 	_ mapset.Set[string],
 	_ chan<- rule_engine.RuleItem,
-) {
+) error {
+	if h.started != nil {
+		select {
+		case h.started <- struct{}{}:
+		default:
+		}
+	}
 	<-ctx.Done()
+	return ctx.Err()
+}
+
+type resultFileHandler struct {
+	err error
+}
+
+func (h *resultFileHandler) CheckFilePath(string) bool {
+	return true
+}
+
+func (h *resultFileHandler) GetStartTimeEndTime(string) (*time.Time, *time.Time, error) {
+	return nil, nil, nil
+}
+
+func (h *resultFileHandler) GetFileSize(string) (int64, error) {
+	return 0, nil
+}
+
+func (h *resultFileHandler) IsFinished(string) bool {
+	return true
+}
+
+func (h *resultFileHandler) SendRuleItems(
+	context.Context,
+	string,
+	mapset.Set[string],
+	chan<- rule_engine.RuleItem,
+) error {
+	return h.err
 }
 
 func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T) {
@@ -271,6 +309,7 @@ func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T)
 		listenChan:             listenChan,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
 	listenDir := t.TempDir()
 
@@ -298,6 +337,7 @@ func TestSendFilesToBeProcessedCancellationDoesNotMarkUnqueuedFile(t *testing.T)
 		}
 	}, time.Second, 10*time.Millisecond)
 	require.Zero(t, stateHandler.processedCount())
+	require.False(t, handler.isFileInFlight("pending.log"))
 }
 
 func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
@@ -313,6 +353,7 @@ func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
 	handler.listenChan <- "second.log"
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -330,4 +371,149 @@ func TestProcessListenedFilesCancellationInterruptsSemaphoreWait(t *testing.T) {
 			return false
 		}
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestCancelledFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
+	started := make(chan struct{}, 1)
+	stateHandler := &fakeFileStateHandler{
+		files:       []file_state_handler.FileState{{Pathname: "pending.log"}},
+		fileHandler: &cancellationBlockingHandler{started: started},
+	}
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             make(chan string, 1),
+		ruleItemChan:           make(chan rule_engine.RuleItem),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
+		ListenDirs: []string{t.TempDir()},
+	})
+	require.Zero(t, stateHandler.processedCount())
+	require.True(t, handler.isFileInFlight("pending.log"))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.processListenedFilesAndSendMessages(ctx, 1)
+	}()
+	require.Eventually(t, func() bool {
+		select {
+		case <-started:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.Zero(t, stateHandler.processedCount())
+	require.False(t, handler.isFileInFlight("pending.log"))
+}
+
+func TestCompletedFileProcessingMarksFileProcessed(t *testing.T) {
+	stateHandler := &fakeFileStateHandler{
+		files:       []file_state_handler.FileState{{Pathname: "completed.log"}},
+		fileHandler: &resultFileHandler{},
+	}
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             make(chan string, 1),
+		ruleItemChan:           make(chan rule_engine.RuleItem),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
+		ListenDirs: []string{t.TempDir()},
+	})
+	require.Zero(t, stateHandler.processedCount())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.processListenedFilesAndSendMessages(ctx, 1)
+	}()
+	require.Eventually(t, func() bool {
+		return stateHandler.processedCount() == 1
+	}, time.Second, 10*time.Millisecond)
+	require.False(t, handler.isFileInFlight("completed.log"))
+
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestFailedFileProcessingDoesNotMarkFileProcessed(t *testing.T) {
+	stateHandler := &fakeFileStateHandler{
+		files: []file_state_handler.FileState{{Pathname: "failed.log"}},
+		fileHandler: &resultFileHandler{
+			err: errors.New("read failed"),
+		},
+	}
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             make(chan string, 1),
+		ruleItemChan:           make(chan rule_engine.RuleItem),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler.sendFilesToBeProcessed(ctx, &config.DefaultModConfConfig{
+		ListenDirs: []string{t.TempDir()},
+	})
+	require.True(t, handler.isFileInFlight("failed.log"))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.processListenedFilesAndSendMessages(ctx, 1)
+	}()
+	require.Eventually(t, func() bool {
+		return !handler.isFileInFlight("failed.log")
+	}, time.Second, 10*time.Millisecond)
+
+	require.Zero(t, stateHandler.processedCount())
+	cancel()
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestSendFilesToBeProcessedDoesNotEnqueueInFlightFileTwice(t *testing.T) {
+	stateHandler := &fakeFileStateHandler{
+		files: []file_state_handler.FileState{{Pathname: "pending.log"}},
+	}
+	handler := &CustomRuleHandler{
+		listenFileStateHandler: stateHandler,
+		listenChan:             make(chan string, 2),
+	}
+	ctx := context.Background()
+	modConfig := &config.DefaultModConfConfig{
+		ListenDirs: []string{t.TempDir()},
+	}
+
+	handler.sendFilesToBeProcessed(ctx, modConfig)
+	handler.sendFilesToBeProcessed(ctx, modConfig)
+
+	require.Len(t, handler.listenChan, 1)
+	require.Zero(t, stateHandler.processedCount())
+	require.True(t, handler.isFileInFlight("pending.log"))
 }

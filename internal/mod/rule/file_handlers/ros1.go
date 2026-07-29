@@ -88,24 +88,25 @@ func (h *ros1Handler) SendRuleItems(
 	filePath string,
 	activeTopics mapset.Set[string],
 	ruleItemChan chan<- rule_engine.RuleItem,
-) {
+) error {
 	reader, err := os.Open(filePath)
 	if err != nil {
 		log.Errorf("failed to open ros1 file [%s]: %v", filePath, err)
-		return
+		return errors.Errorf("open ros1 file [%s]: %v", filePath, err)
 	}
+	defer reader.Close()
 
 	// Create bag reader
 	bagReader, err := rosbag.NewReader(reader)
 	if err != nil {
 		log.Errorf("failed to create bag reader: %v", err)
-		return
+		return errors.Errorf("create ros1 bag reader: %v", err)
 	}
 
 	info, err := bagReader.Info()
 	if err != nil {
 		log.Errorf("failed to get info for ros1 file %s: %v", filePath, err)
-		return
+		return errors.Errorf("get info for ros1 file %s: %v", filePath, err)
 	}
 
 	// targetTopics will be empty if there is no active topic
@@ -121,7 +122,7 @@ func (h *ros1Handler) SendRuleItems(
 
 		if targetTopics.Cardinality() == 0 {
 			log.Infof("no active topics matched in ros1 file %s, skipping", filePath)
-			return
+			return nil
 		}
 	}
 	log.Infof("sending rule items for ros1 file %s with topics: %v", filePath, targetTopics)
@@ -130,7 +131,7 @@ func (h *ros1Handler) SendRuleItems(
 	it, err := bagReader.Messages()
 	if err != nil {
 		log.Errorf("failed to create message iterator: %v", err)
-		return
+		return errors.Errorf("create ros1 message iterator: %v", err)
 	}
 
 	// Map to store JSON transcoders for each connection
@@ -138,17 +139,24 @@ func (h *ros1Handler) SendRuleItems(
 
 	// Set to store conn failed to transcode
 	failedConnToTranscode := mapset.NewSet[uint32]()
+	var processingErr error
+	recordProcessingError := func(err error) {
+		log.Error(err)
+		if processingErr == nil {
+			processingErr = err
+		}
+	}
 
 	// Read messages
 	for it.More() {
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 
 		conn, msg, err := it.Next()
 		if err != nil {
 			log.Errorf("failed to read message: %v", err)
-			continue
+			return errors.Errorf("read ros1 message: %v", err)
 		}
 		if targetTopics.Cardinality() > 0 && !targetTopics.Contains(conn.Topic) {
 			continue
@@ -168,7 +176,7 @@ func (h *ros1Handler) SendRuleItems(
 			}
 			transcoder, err = ros1msg.NewJSONTranscoder(parentPackage, conn.Data.MessageDefinition)
 			if err != nil {
-				log.Errorf("failed to create JSON transcoder: %v", err)
+				recordProcessingError(errors.Errorf("create JSON transcoder: %v", err))
 				failedConnToTranscode.Add(conn.Conn)
 				continue
 			}
@@ -179,27 +187,28 @@ func (h *ros1Handler) SendRuleItems(
 		var buf bytes.Buffer
 		err = transcoder.Transcode(&buf, bytes.NewReader(msg.Data))
 		if err != nil {
-			log.Errorf("failed to transcode message: %v", err)
+			recordProcessingError(errors.Errorf("transcode ros1 message: %v", err))
 			continue
 		}
 
 		// Parse JSON into structured data
 		var structuredData map[string]interface{}
 		if err := json.Unmarshal(buf.Bytes(), &structuredData); err != nil {
-			log.Errorf("failed to parse JSON: %v", err)
+			recordProcessingError(errors.Errorf("parse ros1 message JSON: %v", err))
 			continue
 		}
 
 		sec, nsec := utils.NormalizeFloatTimestamp(float64(msg.Time))
 		// Send JSON message through channel
-		if !sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
+		if err := sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
 			Msg:    structuredData,
 			Ts:     float64(sec) + float64(nsec)/1e9,
 			Topic:  conn.Topic,
 			Source: filePath,
-		}) {
-			return
+		}); err != nil {
+			return err
 		}
 	}
 	log.Infof("finished sending rule items for ros1 file %s", filePath)
+	return processingErr
 }

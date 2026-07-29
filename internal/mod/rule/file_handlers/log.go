@@ -81,46 +81,46 @@ func (h *logHandler) SendRuleItems(
 	filePath string,
 	activeTopics mapset.Set[string],
 	ruleItemChan chan<- rule_engine.RuleItem,
-) {
+) error {
 	if activeTopics.Cardinality() > 0 && !activeTopics.Contains("/external_log") {
-		return
+		return nil
 	}
 
 	logFileReader, err := os.Open(filePath)
 	if err != nil {
 		log.Errorf("open log file [%s] failed: %v", filePath, err)
-		return
+		return errors.Errorf("open log file [%s]: %v", filePath, err)
 	}
 	defer logFileReader.Close()
 
 	reader, err := log_reader.NewLogReader(logFileReader, filePath)
 	if err != nil {
 		log.Errorf("failed to create log reader for log file %s: %v", filePath, err)
-		return
+		return errors.Errorf("create log reader for log file %s: %v", filePath, err)
 	}
 
 	iter, err := log_reader.NewLogIterator(reader)
 	if err != nil {
 		log.Errorf("failed to create log iterator for log file %s: %v", filePath, err)
-		return
+		return errors.Errorf("create log iterator for log file %s: %v", filePath, err)
 	}
 
 	for {
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 
 		stampedLog, hasNext := iter.Next()
 		if !hasNext {
 			log.Infof("finished sending rule items for log file %s", filePath)
-			break
+			return nil
 		}
 
 		sec := stampedLog.Timestamp.Unix()
 		nsec := stampedLog.Timestamp.Nanosecond()
 		tsFloat := float64(sec) + float64(nsec)/1e9
 
-		if !sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
+		if err := sendRuleItem(ctx, ruleItemChan, rule_engine.RuleItem{
 			Msg: map[string]interface{}{
 				"timestamp": map[string]interface{}{
 					"sec":  sec,
@@ -133,8 +133,8 @@ func (h *logHandler) SendRuleItems(
 			Topic:  "/external_log",
 			Ts:     tsFloat,
 			Source: filePath,
-		}) {
-			return
+		}); err != nil {
+			return err
 		}
 	}
 }
