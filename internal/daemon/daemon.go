@@ -32,7 +32,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startChan chan bool, finishChan chan bool, errorChan chan error) {
+func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startChan chan bool, finishChan chan bool, errorChan chan error) error {
 	<-startChan
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -41,12 +41,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 	appConfig, err := confManager.LoadWithRemote()
 	if err != nil {
 		if appConfig == nil {
-			select {
-			case errorChan <- err:
-			default:
-				log.Warnf("Error channel is full, dropping error: %v", err)
-			}
-			return
+			return err
 		}
 		log.Warnf("Unable to reload config, continuing with last-known-good config: %v", err)
 	}
@@ -90,14 +85,9 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 			log.Infof("Master server started on port %d", masterConfig.Port)
 		case err := <-masterStartErr:
 			log.Errorf("Master server failed: %v", err)
-			select {
-			case errorChan <- err:
-			default:
-				log.Warnf("Error channel is full, dropping error: %v", err)
-			}
-			return
+			return err
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		}
 
 		// Continue watching for runtime server failures after startup.
@@ -179,6 +169,7 @@ func Run(confManager *config.ConfManager, reqClient *api.RequestClient, startCha
 
 	log.Info("Daemon started successfully")
 	<-finishChan
+	return nil
 }
 
 func refreshRemoteConfig(confManager *config.ConfManager, reqClient *api.RequestClient) {

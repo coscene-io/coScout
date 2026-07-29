@@ -31,7 +31,25 @@ import (
 )
 
 type authState struct {
-	isAuthed atomic.Bool
+	lifecycle atomic.Int32
+}
+
+const (
+	daemonIdle int32 = iota
+	daemonRunning
+	daemonStopping
+)
+
+func (s *authState) tryStart() bool {
+	return s.lifecycle.CompareAndSwap(daemonIdle, daemonRunning)
+}
+
+func (s *authState) requestStop() bool {
+	return s.lifecycle.CompareAndSwap(daemonRunning, daemonStopping)
+}
+
+func (s *authState) daemonStopped() {
+	s.lifecycle.Store(daemonIdle)
 }
 
 func NewDaemonCommand(cfgPath *string) *cobra.Command {
@@ -74,23 +92,25 @@ func run(confManager *config.ConfManager, reqClient *api.RequestClient, register
 	errorChan := make(chan error, 100)
 
 	state := &authState{}
-	state.isAuthed.Store(false)
 	for deviceStatus := range registerChan {
 		if deviceStatus.Authorized {
 			log.Info("Device is authorized. Performing actions...")
 
-			if !state.isAuthed.Load() {
-				go daemon.Run(confManager, reqClient, startChan, exitChan, errorChan)
+			if state.tryStart() {
 				startChan <- true
+				go func() {
+					defer state.daemonStopped()
+					if err := daemon.Run(confManager, reqClient, startChan, exitChan, errorChan); err != nil {
+						log.Errorf("Daemon stopped: %v", err)
+					}
+				}()
 			}
-			state.isAuthed.Store(true)
 		} else {
 			log.Warn("Device is not authorized, waiting...")
 
-			if state.isAuthed.Load() {
+			if state.requestStop() {
 				exitChan <- true
 			}
-			state.isAuthed.Store(false)
 		}
 	}
 }
